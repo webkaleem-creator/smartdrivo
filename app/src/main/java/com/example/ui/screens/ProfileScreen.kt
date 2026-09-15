@@ -410,11 +410,27 @@ fun ProfileScreen(
                         color = TextDarkPrimary
                     )
                     Text(
-                        text = "Email/Phone: ${userProfile.phone.ifEmpty { userProfile.email.ifEmpty { "N/A" } }}",
+                        text = "Mobile: ${userProfile.effectiveMobile.ifEmpty { "N/A" }}",
                         fontSize = 14.sp,
                         fontFamily = FontFamily.Default,
                         color = TextDarkSecondary
                     )
+                    if (userProfile.email.isNotEmpty()) {
+                        Text(
+                            text = "Email: ${userProfile.email}",
+                            fontSize = 14.sp,
+                            fontFamily = FontFamily.Default,
+                            color = TextDarkSecondary
+                        )
+                    }
+                    if (userProfile.city.isNotEmpty() || userProfile.state.isNotEmpty()) {
+                        Text(
+                            text = "Location: ${listOf(userProfile.city, userProfile.state).filter { it.isNotEmpty() }.joinToString(", ")}",
+                            fontSize = 14.sp,
+                            fontFamily = FontFamily.Default,
+                            color = TextDarkSecondary
+                        )
+                    }
                     Text(
                         text = "Vehicle: ${userProfile.vehicleType.name}",
                         fontSize = 14.sp,

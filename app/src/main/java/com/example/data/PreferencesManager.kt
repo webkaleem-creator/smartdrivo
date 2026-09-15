@@ -232,6 +232,9 @@ class PreferencesManager(private val context: Context) {
             putString(KEY_NAME, profile.name)
             putString(KEY_EMAIL, profile.email)
             putString(KEY_PHONE, profile.phone)
+            putString(KEY_MOBILE, if (profile.mobile.isNotEmpty()) profile.mobile else profile.phone)
+            putString(KEY_CITY, profile.city)
+            putString(KEY_STATE, profile.state)
             putString(KEY_VEHICLE, profile.vehicleType.name)
             putString(KEY_PLAN, profile.plan)
             putInt(KEY_PLAN_PRICE, profile.planPrice)
@@ -251,6 +254,9 @@ class PreferencesManager(private val context: Context) {
         val name = prefs.getString(KEY_NAME, "") ?: ""
         val email = prefs.getString(KEY_EMAIL, "") ?: ""
         val phone = prefs.getString(KEY_PHONE, "") ?: ""
+        val mobile = prefs.getString(KEY_MOBILE, "") ?: phone
+        val city = prefs.getString(KEY_CITY, "") ?: ""
+        val state = prefs.getString(KEY_STATE, "") ?: ""
         val vehicleStr = prefs.getString(KEY_VEHICLE, "AUTO")
         val plan = prefs.getString(KEY_PLAN, "7DAYS") ?: "7DAYS"
         val price = prefs.getInt(KEY_PLAN_PRICE, 129)
@@ -272,7 +278,10 @@ class PreferencesManager(private val context: Context) {
             isApproved = isApproved,
             isAdmin = isAdmin,
             isActive = isActive,
-            referralCode = referral
+            referralCode = referral,
+            mobile = mobile,
+            city = city,
+            state = state
         )
     }
 
@@ -1061,6 +1070,9 @@ class PreferencesManager(private val context: Context) {
         private const val KEY_NAME = "user_name"
         private const val KEY_EMAIL = "user_email"
         private const val KEY_PHONE = "user_phone"
+        private const val KEY_MOBILE = "user_mobile"
+        private const val KEY_CITY = "user_city"
+        private const val KEY_STATE = "user_state"
         private const val KEY_VEHICLE = "user_vehicle"
         private const val KEY_PLAN = "user_plan"
         private const val KEY_PLAN_PRICE = "user_plan_price"

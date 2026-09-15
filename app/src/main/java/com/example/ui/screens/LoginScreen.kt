@@ -85,6 +85,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun LoginScreen(
     onLoginSuccess: (emailOrPhone: String) -> Unit,
+    onGoogleLoginSuccess: ((emailOrUid: String) -> Unit)? = null,
     onExploreAsGuest: () -> Unit = {},
     onBack: () -> Unit = {}
 ) {
@@ -659,7 +660,11 @@ fun LoginScreen(
                                             idToken = idToken,
                                             onSuccess = { emailOrUid ->
                                                 isGoogleLoading = false
-                                                onLoginSuccess(emailOrUid)
+                                                if (onGoogleLoginSuccess != null) {
+                                                    onGoogleLoginSuccess(emailOrUid)
+                                                } else {
+                                                    onLoginSuccess(emailOrUid)
+                                                }
                                             },
                                             onError = { err ->
                                                 isGoogleLoading = false
@@ -796,7 +801,11 @@ fun LoginScreen(
                             .fillMaxWidth()
                             .clickable {
                                 showGoogleAccountFallbackDialog = false
-                                onLoginSuccess(PhoneAuthManager.ADMIN_EMAIL)
+                                if (onGoogleLoginSuccess != null) {
+                                    onGoogleLoginSuccess(PhoneAuthManager.ADMIN_EMAIL)
+                                } else {
+                                    onLoginSuccess(PhoneAuthManager.ADMIN_EMAIL)
+                                }
                             },
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                         shape = RoundedCornerShape(10.dp)
@@ -850,7 +859,11 @@ fun LoginScreen(
                         val email = fallbackCustomEmail.trim()
                         if (email.contains("@")) {
                             showGoogleAccountFallbackDialog = false
-                            onLoginSuccess(email)
+                            if (onGoogleLoginSuccess != null) {
+                                onGoogleLoginSuccess(email)
+                            } else {
+                                onLoginSuccess(email)
+                            }
                         } else {
                             errorMessage = "Please enter a valid Google email address"
                         }

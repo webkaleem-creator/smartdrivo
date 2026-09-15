@@ -13,8 +13,14 @@ data class UserProfile(
     val isAdmin: Boolean = false,
     val isActive: Boolean = true,
     val referralCode: String = "SMART50",
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val mobile: String = "",
+    val city: String = "",
+    val state: String = ""
 ) {
     val isPlanValid: Boolean
         get() = isApproved && (planExpireMillis > System.currentTimeMillis())
+
+    val effectiveMobile: String
+        get() = mobile.ifEmpty { phone }
 }

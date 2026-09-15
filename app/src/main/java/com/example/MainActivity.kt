@@ -13,9 +13,13 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -27,6 +31,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -42,12 +47,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.util.UUID
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -339,56 +346,141 @@ fun SmartDrivoApp(
 
         // 3. Login Screen
         composable(Routes.LOGIN) {
-            LoginScreen(
-                onLoginSuccess = { phoneOrEmail ->
-                    prefs.isLoggedIn = true
-                    prefs.hasOpenedBefore = true
-                    val isAdmin = PhoneAuthManager.isAdminAccount(phoneOrEmail)
-                    if (isAdmin) {
-                        val currentUid = repository.getCurrentUid().ifEmpty {
-                            userProfile.uid.ifEmpty { "admin_9949957404" }
-                        }
-                        val adminProfile = userProfile.copy(
-                            uid = currentUid,
-                            name = if (userProfile.name.isNotEmpty()) userProfile.name else "Admin Driver",
-                            phone = if (phoneOrEmail.contains("@")) userProfile.phone.ifEmpty { "+919949957404" } else phoneOrEmail,
-                            email = if (phoneOrEmail.contains("@")) phoneOrEmail else userProfile.email.ifEmpty { PhoneAuthManager.ADMIN_EMAIL },
-                            plan = "LIFETIME_ADMIN",
-                            planPrice = 0,
-                            planExpireMillis = System.currentTimeMillis() + (3650L * 24 * 60 * 60 * 1000L),
-                            isApproved = true,
-                            isAdmin = true,
-                            isActive = true
+            var isCheckingProfile by remember { mutableStateOf(false) }
+
+            if (isCheckingProfile) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.White),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(
+                            color = BluePrimary,
+                            modifier = Modifier.size(48.dp),
+                            strokeWidth = 4.dp
                         )
-                        prefs.saveUserProfile(adminProfile)
-                        repository.saveUserProfile(adminProfile)
-                        navController.navigate(Routes.WELCOME) {
-                            popUpTo(Routes.LOGIN) { inclusive = true }
-                        }
-                    } else {
-                        val updated = if (phoneOrEmail.contains("@")) {
-                            userProfile.copy(email = phoneOrEmail)
-                        } else {
-                            userProfile.copy(phone = phoneOrEmail)
-                        }
-                        prefs.saveUserProfile(updated)
-                        navController.navigate(Routes.WELCOME) {
-                            popUpTo(Routes.LOGIN) { inclusive = true }
-                        }
-                    }
-                },
-                onExploreAsGuest = {
-                    prefs.hasOpenedBefore = true
-                    navController.navigate(Routes.WELCOME) {
-                        popUpTo(Routes.LOGIN) { inclusive = true }
-                    }
-                },
-                onBack = {
-                    if (!navController.popBackStack()) {
-                        navController.navigate(Routes.HOME)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Checking profile details...",
+                            color = TextDarkSecondary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
                 }
-            )
+            } else {
+                val handleGooglePostLogin: (String) -> Unit = { emailOrUid ->
+                    isCheckingProfile = true
+                    prefs.isLoggedIn = true
+                    prefs.hasOpenedBefore = true
+
+                    val firebaseUser = PhoneAuthManager.getAuthInstance()?.currentUser
+                    val uid = firebaseUser?.uid ?: if (!emailOrUid.contains("@")) emailOrUid else repository.getCurrentUid()
+                    val email = firebaseUser?.email ?: if (emailOrUid.contains("@")) emailOrUid else userProfile.email
+                    val displayName = firebaseUser?.displayName ?: userProfile.name
+
+                    val isAdmin = PhoneAuthManager.isAdminAccount(email) || PhoneAuthManager.isAdminAccount(userProfile.effectiveMobile)
+
+                    val baseProfile = userProfile.copy(
+                        uid = uid,
+                        email = email,
+                        name = if (userProfile.name.isNotEmpty()) userProfile.name else displayName,
+                        isAdmin = isAdmin || userProfile.isAdmin,
+                        isApproved = if (isAdmin) true else userProfile.isApproved
+                    )
+                    prefs.saveUserProfile(baseProfile)
+
+                    // Check Firestore users/{uid}
+                    repository.checkUserFirestoreProfile(uid) { firestoreProfile, isIncomplete, isMembershipActive ->
+                        isCheckingProfile = false
+                        if (isIncomplete) {
+                            // If mobile/city/state empty → ProfileSetupScreen
+                            navController.navigate(Routes.PROFILE_SETUP) {
+                                popUpTo(Routes.LOGIN) { inclusive = true }
+                            }
+                        } else {
+                            // If filled → membership check → HomeScreen
+                            navController.navigate(Routes.HOME) {
+                                popUpTo(Routes.LOGIN) { inclusive = true }
+                            }
+                        }
+                    }
+                }
+
+                LoginScreen(
+                    onLoginSuccess = { phoneOrEmail ->
+                        if (phoneOrEmail.contains("@")) {
+                            handleGooglePostLogin(phoneOrEmail)
+                        } else {
+                            prefs.isLoggedIn = true
+                            prefs.hasOpenedBefore = true
+                            val isAdmin = PhoneAuthManager.isAdminAccount(phoneOrEmail)
+                            val currentUid = repository.getCurrentUid().ifEmpty {
+                                userProfile.uid.ifEmpty { if (isAdmin) "admin_9949957404" else UUID.randomUUID().toString() }
+                            }
+                            if (isAdmin) {
+                                val adminProfile = userProfile.copy(
+                                    uid = currentUid,
+                                    name = if (userProfile.name.isNotEmpty()) userProfile.name else "Admin Driver",
+                                    phone = phoneOrEmail,
+                                    mobile = phoneOrEmail,
+                                    email = userProfile.email.ifEmpty { PhoneAuthManager.ADMIN_EMAIL },
+                                    plan = "LIFETIME_ADMIN",
+                                    planPrice = 0,
+                                    planExpireMillis = System.currentTimeMillis() + (3650L * 24 * 60 * 60 * 1000L),
+                                    isApproved = true,
+                                    isAdmin = true,
+                                    isActive = true
+                                )
+                                prefs.saveUserProfile(adminProfile)
+                                repository.saveUserProfile(adminProfile)
+                                navController.navigate(Routes.HOME) {
+                                    popUpTo(Routes.LOGIN) { inclusive = true }
+                                }
+                            } else {
+                                val updated = userProfile.copy(
+                                    uid = currentUid,
+                                    phone = phoneOrEmail,
+                                    mobile = phoneOrEmail
+                                )
+                                prefs.saveUserProfile(updated)
+                                isCheckingProfile = true
+                                repository.checkUserFirestoreProfile(currentUid) { _, isIncomplete, _ ->
+                                    isCheckingProfile = false
+                                    if (isIncomplete) {
+                                        navController.navigate(Routes.PROFILE_SETUP) {
+                                            popUpTo(Routes.LOGIN) { inclusive = true }
+                                        }
+                                    } else {
+                                        navController.navigate(Routes.HOME) {
+                                            popUpTo(Routes.LOGIN) { inclusive = true }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    onGoogleLoginSuccess = { emailOrUid ->
+                        handleGooglePostLogin(emailOrUid)
+                    },
+                    onExploreAsGuest = {
+                        prefs.hasOpenedBefore = true
+                        navController.navigate(Routes.WELCOME) {
+                            popUpTo(Routes.LOGIN) { inclusive = true }
+                        }
+                    },
+                    onBack = {
+                        if (!navController.popBackStack()) {
+                            navController.navigate(Routes.HOME)
+                        }
+                    }
+                )
+            }
         }
 
         // 3b. Welcome Screen (Features list, Membership plans, UPI/QR payment, Bottom Navigation Bar)
@@ -416,27 +508,35 @@ fun SmartDrivoApp(
         // 4. Profile Setup Screen
         composable(Routes.PROFILE_SETUP) {
             ProfileSetupScreen(
-                initialName = userProfile.name,
-                onSaveProfile = { name, vehicleType ->
-                    val updated = userProfile.copy(name = name, vehicleType = vehicleType)
-                    if (PhoneAuthManager.isAdminAccount(userProfile.phone) ||
-                        PhoneAuthManager.isAdminAccount(userProfile.email) ||
-                        userProfile.isAdmin || userProfile.isApproved
-                    ) {
-                        val adminProfile = updated.copy(
-                            isApproved = true,
-                            isAdmin = true,
-                            isActive = true,
-                            planExpireMillis = System.currentTimeMillis() + (3650L * 24 * 60 * 60 * 1000L)
-                        )
-                        prefs.saveUserProfile(adminProfile)
-                        repository.saveUserProfile(adminProfile)
-                        navController.navigate(Routes.HOME) {
-                            popUpTo(Routes.PROFILE_SETUP) { inclusive = true }
+                initialName = userProfile.name.ifEmpty { PhoneAuthManager.getAuthInstance()?.currentUser?.displayName ?: "" },
+                initialMobile = userProfile.effectiveMobile.ifEmpty { PhoneAuthManager.getAuthInstance()?.currentUser?.phoneNumber ?: "" },
+                initialCity = userProfile.city,
+                initialState = userProfile.state,
+                initialVehicleType = userProfile.vehicleType,
+                onSaveProfile = { name, mobile, city, state, vehicleType ->
+                    val isAdmin = PhoneAuthManager.isAdminAccount(mobile) ||
+                            PhoneAuthManager.isAdminAccount(userProfile.email) ||
+                            userProfile.isAdmin
+                    val updated = userProfile.copy(
+                        name = name,
+                        phone = mobile,
+                        mobile = mobile,
+                        city = city,
+                        state = state,
+                        vehicleType = vehicleType,
+                        isAdmin = isAdmin,
+                        isApproved = if (isAdmin) true else userProfile.isApproved,
+                        isActive = true,
+                        planExpireMillis = if (isAdmin) {
+                            System.currentTimeMillis() + (3650L * 24 * 60 * 60 * 1000L)
+                        } else {
+                            userProfile.planExpireMillis
                         }
-                    } else {
-                        repository.saveUserProfile(updated)
-                        navController.navigate(Routes.PLAN_SELECTION)
+                    )
+                    prefs.saveUserProfile(updated)
+                    repository.saveUserProfile(updated)
+                    navController.navigate(Routes.HOME) {
+                        popUpTo(Routes.PROFILE_SETUP) { inclusive = true }
                     }
                 }
             )

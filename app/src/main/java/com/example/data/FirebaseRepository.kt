@@ -15,6 +15,7 @@ import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
@@ -54,7 +55,10 @@ class FirebaseRepository(
                     mapOf(
                         "name" to profile.name,
                         "email" to profile.email,
-                        "phone" to profile.phone,
+                        "phone" to profile.effectiveMobile,
+                        "mobile" to profile.effectiveMobile,
+                        "city" to profile.city,
+                        "state" to profile.state,
                         "vehicleType" to profile.vehicleType.name,
                         "plan" to profile.plan,
                         "planPrice" to profile.planPrice,
@@ -71,6 +75,75 @@ class FirebaseRepository(
             } catch (e: Exception) {
                 Log.e("FirebaseRepo", "Failed to sync user: ${e.message}")
                 onComplete?.invoke(false)
+            }
+        }
+    }
+
+    // --- Firestore Check for Google Login Flow ---
+    fun checkUserFirestoreProfile(
+        uid: String,
+        onResult: (profile: UserProfile?, isProfileIncomplete: Boolean, isMembershipActive: Boolean) -> Unit
+    ) {
+        scope.launch {
+            try {
+                val doc = firestore?.collection("users")?.document(uid)?.get()?.await()
+                if (doc != null && doc.exists()) {
+                    val mobile = doc.getString("mobile") ?: doc.getString("phone") ?: ""
+                    val city = doc.getString("city") ?: ""
+                    val state = doc.getString("state") ?: ""
+                    val name = doc.getString("name") ?: ""
+                    val email = doc.getString("email") ?: ""
+                    val plan = doc.getString("plan") ?: "7DAYS"
+                    val planPrice = doc.getLong("planPrice")?.toInt() ?: 129
+                    val planExpireMillis = doc.getLong("planExpireMillis") ?: 0L
+                    val isApproved = doc.getBoolean("isApproved") ?: false
+                    val isAdmin = doc.getBoolean("isAdmin") ?: false
+                    val isActive = doc.getBoolean("isActive") ?: true
+                    val vehicleTypeStr = doc.getString("vehicleType") ?: "AUTO"
+                    val vehicleType = com.example.model.VehicleType.fromString(vehicleTypeStr)
+                    val referralCode = doc.getString("referralCode") ?: "SMART50"
+
+                    val profile = UserProfile(
+                        uid = uid,
+                        name = name,
+                        email = email,
+                        phone = mobile,
+                        vehicleType = vehicleType,
+                        plan = plan,
+                        planPrice = planPrice,
+                        planExpireMillis = planExpireMillis,
+                        isApproved = isApproved,
+                        isAdmin = isAdmin,
+                        isActive = isActive,
+                        referralCode = referralCode,
+                        mobile = mobile,
+                        city = city,
+                        state = state
+                    )
+                    prefs.saveUserProfile(profile)
+
+                    val isIncomplete = mobile.trim().isEmpty() || city.trim().isEmpty() || state.trim().isEmpty()
+                    val isMembershipActive = isAdmin || isApproved || (planExpireMillis > System.currentTimeMillis()) || com.example.auth.PhoneAuthManager.isAdminAccount(mobile) || com.example.auth.PhoneAuthManager.isAdminAccount(email)
+
+                    withContext(Dispatchers.Main) {
+                        onResult(profile, isIncomplete, isMembershipActive)
+                    }
+                } else {
+                    // Document does not exist yet -> incomplete profile
+                    withContext(Dispatchers.Main) {
+                        onResult(null, true, false)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("FirebaseRepo", "checkUserFirestoreProfile error: ${e.message}")
+                val localProfile = prefs.userProfile.value
+                val isIncomplete = localProfile.effectiveMobile.trim().isEmpty() ||
+                        localProfile.city.trim().isEmpty() ||
+                        localProfile.state.trim().isEmpty()
+                val isMembershipActive = localProfile.isPlanValid || localProfile.isAdmin
+                withContext(Dispatchers.Main) {
+                    onResult(localProfile, isIncomplete, isMembershipActive)
+                }
             }
         }
     }
