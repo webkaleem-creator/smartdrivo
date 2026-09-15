@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SmartDrivo Admin Control Center</title>
+  
+  <!-- CRITICAL: Instant Auth Guard before page renders -->
+  <script>
+    if (sessionStorage.getItem('smartdrivo_admin_auth') !== 'true') {
+      window.location.replace('login.html');
+    }
+  </script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --bg: #0C0E12;
+      --surface: #14171E;
+      --card: #1A1F29;
+      --accent: #FF6600;
+      --accent-hover: #E65100;
+      --accent-light: rgba(255, 102, 0, 0.15);
+      --success: #10B981;
+      --error: #EF4444;
+      --warning: #F59E0B;
+      --text: #F8FAFC;
+      --text-dim: #94A3B8;
+      --border: #272F3D;
+    }
+    * { 
+      box-sizing: border-box; 
+      margin: 0; 
+      padding: 0; 
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; 
+    }
+    body { 
+      background: var(--bg); 
+      color: var(--text); 
+      padding: 24px; 
+      min-height: 100vh;
+    }
+    .container { 
+      max-width: 1140px; 
+      margin: 0 auto; 
+    }
+    header { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+      padding-bottom: 20px; 
+      border-bottom: 1px solid var(--border); 
+      margin-bottom: 24px; 
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .brand { 
+      display: flex; 
+      align-items: center; 
+      gap: 14px; 
+    }
+    .logo { 
+      background: linear-gradient(135deg, #FF7A00 0%, #E65100 100%); 
+      color: #FFF; 
+      width: 48px; 
+      height: 48px; 
+      border-radius: 12px; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      font-size: 24px; 
+      box-shadow: 0 4px 16px rgba(255, 102, 0, 0.35);
+    }
+    h1 { 
+      font-size: 22px; 
+      font-weight: 800;
+      color: #FFF;
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .badge { 
+      padding: 6px 12px; 
+      border-radius: 6px; 
+      font-size: 12px; 
+      font-weight: 700; 
+      text-transform: uppercase; 
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .badge-approved { 
+      background: rgba(16, 185, 129, 0.15); 
+      color: var(--success); 
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .badge-pending { 
+      background: rgba(245, 158, 11, 0.15); 
+      color: var(--warning); 
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+    .badge-rejected { 
+      background: rgba(239, 68, 68, 0.15); 
+      color: var(--error); 
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .badge-user {
+      background: rgba(255, 102, 0, 0.15);
+      color: var(--accent);
+      border: 1px solid rgba(255, 102, 0, 0.3);
+    }
+    .btn-logout {
+      background: #202632;
+      color: #F87171;
+      border: 1px solid #3F2327;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+    .btn-logout:hover {
+      background: #3B1219;
+      border-color: #EF4444;
+      color: #FFF;
+    }
+    .nav-tabs { 
+      display: flex; 
+      gap: 10px; 
+      margin-bottom: 24px; 
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .tab-btn { 
+      background: var(--surface); 
+      border: 1px solid var(--border); 
+      color: var(--text-dim); 
+      padding: 10px 18px; 
+      border-radius: 8px; 
+      cursor: pointer; 
+      font-weight: 600; 
+      font-size: 13px;
+      transition: all 0.2s; 
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tab-btn:hover {
+      color: #FFF;
+      border-color: #3B4659;
+    }
+    .tab-btn.active { 
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%); 
+      color: #FFF; 
+      border-color: var(--accent); 
+      box-shadow: 0 4px 14px rgba(255, 102, 0, 0.25);
+    }
+    .panel { 
+      display: none; 
+      background: var(--surface); 
+      border: 1px solid var(--border); 
+      border-radius: 14px; 
+      padding: 24px; 
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    }
+    .panel.active { 
+      display: block; 
+    }
+    .panel-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: #FFF;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .panel-desc {
+      color: var(--text-dim);
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+    .card { 
+      background: var(--card); 
+      border: 1px solid var(--border); 
+      border-radius: 10px; 
+      padding: 18px; 
+      margin-bottom: 14px; 
+    }
+    .btn { 
+      background: var(--accent); 
+      color: #FFF; 
+      border: none; 
+      padding: 9px 18px; 
+      border-radius: 8px; 
+      font-weight: 700; 
+      font-size: 13px;
+      cursor: pointer; 
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .btn:hover {
+      background: var(--accent-hover);
+      box-shadow: 0 4px 12px rgba(255, 102, 0, 0.3);
+    }
+    .btn-success {
+      background: #10B981;
+    }
+    .btn-success:hover {
+      background: #059669;
+    }
+    .btn-danger { 
+      background: #EF4444; 
+      color: #fff; 
+    }
+    .btn-danger:hover {
+      background: #DC2626;
+    }
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 12px;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+    .form-group { 
+      margin-bottom: 18px; 
+    }
+    label { 
+      display: block; 
+      font-size: 13px; 
+      font-weight: 600;
+      color: #CBD5E1; 
+      margin-bottom: 8px; 
+    }
+    input[type="text"], input[type="number"] { 
+      width: 100%; 
+      max-width: 520px; 
+      padding: 11px 14px; 
+      background: #0D0F13; 
+      border: 1px solid var(--border); 
+      border-radius: 8px; 
+      color: #FFF; 
+      font-size: 14px; 
+      transition: all 0.2s;
+    }
+    input:focus { 
+      outline: none; 
+      border-color: var(--accent); 
+      box-shadow: 0 0 0 3px var(--accent-light);
+    }
+    table { 
+      width: 100%; 
+      border-collapse: collapse; 
+      margin-top: 14px; 
+    }
+    th, td { 
+      text-align: left; 
+      padding: 14px 12px; 
+      border-bottom: 1px solid var(--border); 
+      font-size: 13px; 
+    }
+    th { 
+      color: var(--text-dim); 
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+    }
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand">
+        <div class="logo"><i class="fa-solid fa-bolt"></i></div>
+        <div>
+          <h1>SmartDrivo Admin Control Center</h1>
+          <p style="font-size: 12px; color: var(--text-dim);">Live Firebase Driver & Payment Management</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span class="badge badge-approved"><i class="fa-solid fa-circle-check"></i> System Online</span>
+        <span class="badge badge-user"><i class="fa-solid fa-user-shield"></i> <span id="adminUserLabel">kkaleem4u</span></span>
+        <button class="btn-logout" onclick="adminLogout()" title="End session and log out">
+          <i class="fa-solid fa-arrow-right-from-bracket"></i> Logout
+        </button>
+      </div>
+    </header>
+
+    <div class="nav-tabs">
+      <button class="tab-btn active" onclick="showTab('payments', event)"><i class="fa-solid fa-receipt"></i> Pending Payments</button>
+      <button class="tab-btn" onclick="showTab('drivers', event)"><i class="fa-solid fa-users"></i> Registered Drivers</button>
+      <button class="tab-btn" onclick="showTab('pricing', event)"><i class="fa-solid fa-qrcode"></i> Plans & UPI QR</button>
+      <button class="tab-btn" onclick="showTab('community', event)"><i class="fa-solid fa-share-nodes"></i> Community Links</button>
+      <button class="tab-btn" onclick="showTab('logs', event)"><i class="fa-solid fa-terminal"></i> App Logs</button>
+    </div>
+
+    <!-- 1. Pending Payments Panel -->
+    <div id="payments" class="panel active">
+      <h2 class="panel-title"><i class="fa-solid fa-money-bill-transfer" style="color: var(--accent);"></i> Payment Verification Queue (Manual UPI & UTR)</h2>
+      <p class="panel-desc">Approve or reject UTR transactions to activate driver memberships.</p>
+      
+      <div id="paymentsList">
+        <div class="card" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+              <strong style="font-size: 15px;">Ramesh Kumar (Auto)</strong>
+              <span class="badge badge-pending">PENDING</span>
+            </div>
+            <div style="font-size: 13px; color: var(--text-dim); line-height: 1.5;">
+              UTR: <strong style="color: #FFF;">425619847231</strong> &nbsp;|&nbsp; Plan: <strong style="color: var(--accent);">7 DAYS (₹129)</strong> &nbsp;|&nbsp; Phone: +91 9876543210
+            </div>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button class="btn btn-success" onclick="alert('Payment Approved! Driver membership activated for 7 days.')">
+              <i class="fa-solid fa-check"></i> Approve
+            </button>
+            <button class="btn btn-danger" onclick="alert('Payment Rejected')">
+              <i class="fa-solid fa-xmark"></i> Reject
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Registered Drivers Panel -->
+    <div id="drivers" class="panel">
+      <h2 class="panel-title"><i class="fa-solid fa-id-card" style="color: var(--accent);"></i> Driver Directory</h2>
+      <p class="panel-desc">All onboarded auto & bike drivers currently registered on SmartDrivo.</p>
+
+      <!-- 1. Search Box: Search user by phone number or email -->
+      <div style="margin-bottom: 18px; display: flex; align-items: center; gap: 10px; max-width: 480px; position: relative;">
+        <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--text-dim); font-size: 13px; pointer-events: none;"></i>
+        <input 
+          type="text" 
+          id="driverSearchInput" 
+          placeholder="Search driver by phone number or email..." 
+          oninput="filterDrivers()"
+          style="width: 100%; padding: 10px 36px 10px 38px; background: #0D0F13; border: 1px solid var(--border); border-radius: 8px; color: #FFF; font-size: 13px;"
+        >
+        <button 
+          type="button" 
+          id="clearSearchBtn" 
+          onclick="clearDriverSearch()" 
+          style="display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; color: var(--text-dim); cursor: pointer; padding: 4px 6px; font-size: 13px;" 
+          title="Clear search"
+        >
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <table id="driversTable">
+        <thead>
+          <tr>
+            <th>Driver Name</th>
+            <th>Phone / Email</th>
+            <th>Vehicle</th>
+            <th>Active Plan</th>
+            <th>Expiry</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Ramesh Kumar</strong></td>
+            <td>
+              <div>+91 9876543210</div>
+              <div style="font-size: 11px; color: var(--text-dim);">ramesh.auto@gmail.com</div>
+            </td>
+            <td><span class="badge" style="background:#2C2215; color:#F59E0B;">AUTO</span></td>
+            <td>7 Days (₹129)</td>
+            <td>17/09/2026</td>
+            <td><span class="badge badge-approved status-badge"><i class="fa-solid fa-circle-check"></i> Active</span></td>
+            <td>
+              <button type="button" class="btn btn-danger btn-sm toggle-status-btn" data-status="active" onclick="toggleDriverStatus(this)" title="Click to Deactivate driver">
+                <i class="fa-solid fa-toggle-on"></i> Deactivate
+              </button>
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Suresh Sharma</strong></td>
+            <td>
+              <div>+91 9123456780</div>
+              <div style="font-size: 11px; color: var(--text-dim);">suresh.rider@gmail.com</div>
+            </td>
+            <td><span class="badge" style="background:#172554; color:#60A5FA;">BIKE</span></td>
+            <td>1 Month (₹329)</td>
+            <td>10/10/2026</td>
+            <td><span class="badge badge-approved status-badge"><i class="fa-solid fa-circle-check"></i> Active</span></td>
+            <td>
+              <button type="button" class="btn btn-danger btn-sm toggle-status-btn" data-status="active" onclick="toggleDriverStatus(this)" title="Click to Deactivate driver">
+                <i class="fa-solid fa-toggle-on"></i> Deactivate
+              </button>
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Amit Verma</strong></td>
+            <td>
+              <div>+91 9988776655</div>
+              <div style="font-size: 11px; color: var(--text-dim);">amit.verma@smartdrivo.in</div>
+            </td>
+            <td><span class="badge" style="background:#2C2215; color:#F59E0B;">AUTO</span></td>
+            <td>15 Days (₹199)</td>
+            <td>28/09/2026</td>
+            <td><span class="badge badge-approved status-badge"><i class="fa-solid fa-circle-check"></i> Active</span></td>
+            <td>
+              <button type="button" class="btn btn-danger btn-sm toggle-status-btn" data-status="active" onclick="toggleDriverStatus(this)" title="Click to Deactivate driver">
+                <i class="fa-solid fa-toggle-on"></i> Deactivate
+              </button>
+            </td>
+          </tr>
+          <tr id="noDriversRow" style="display: none;">
+            <td colspan="7" style="text-align: center; padding: 24px; color: var(--text-dim);">
+              <i class="fa-solid fa-user-slash" style="font-size: 20px; margin-bottom: 8px; display: block; opacity: 0.5;"></i>
+              No drivers found matching phone number or email.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 3. Plans & UPI Settings Panel -->
+    <div id="pricing" class="panel">
+      <h2 class="panel-title"><i class="fa-solid fa-credit-card" style="color: var(--accent);"></i> UPI Payment Configuration</h2>
+      <p class="panel-desc">Configure the payment receiving address and driver subscription pricing.</p>
+      
+      <div class="form-group" style="margin-top: 16px;">
+        <label>Admin UPI ID</label>
+        <input type="text" id="upiIdInput" value="gpay-11189725657@okaxis">
+      </div>
+      <div class="form-group">
+        <label>Account Beneficiary Name</label>
+        <input type="text" value="SmartDrivo">
+      </div>
+      <button class="btn" onclick="alert('UPI Settings updated in Firebase!')">
+        <i class="fa-solid fa-floppy-disk"></i> Save UPI Details
+      </button>
+
+      <h2 class="panel-title" style="margin-top: 32px;"><i class="fa-solid fa-tags" style="color: var(--accent);"></i> Membership Plan Pricing (₹)</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 14px;">
+        <div class="card">
+          <label>3 Days Plan (₹)</label>
+          <input type="number" value="59">
+        </div>
+        <div class="card">
+          <label>7 Days Plan (₹)</label>
+          <input type="number" value="129">
+        </div>
+        <div class="card">
+          <label>15 Days Plan (₹)</label>
+          <input type="number" value="199">
+        </div>
+        <div class="card">
+          <label>1 Month Plan (₹)</label>
+          <input type="number" value="329">
+        </div>
+      </div>
+      <button class="btn" style="margin-top: 14px;" onclick="alert('Plan pricing updated successfully!')">
+        <i class="fa-solid fa-floppy-disk"></i> Save Plan Prices
+      </button>
+    </div>
+
+    <!-- 4. Community Links Panel -->
+    <div id="community" class="panel">
+      <h2 class="panel-title"><i class="fa-solid fa-comments" style="color: var(--accent);"></i> Social & Driver Community Links</h2>
+      <p class="panel-desc">Manage the direct support and community links accessible from the mobile app.</p>
+      
+      <div class="form-group" style="margin-top: 16px;">
+        <label><i class="fa-brands fa-whatsapp" style="color:#25D366;"></i> WhatsApp Driver Group Link</label>
+        <input type="text" value="https://chat.whatsapp.com/smartdrivo">
+      </div>
+      <div class="form-group">
+        <label><i class="fa-brands fa-telegram" style="color:#229ED9;"></i> Telegram Channel URL</label>
+        <input type="text" value="https://t.me/smartdrivo_riders">
+      </div>
+      <div class="form-group">
+        <label><i class="fa-brands fa-instagram" style="color:#E1306C;"></i> Instagram Page Link</label>
+        <input type="text" value="https://instagram.com/smartdrivo">
+      </div>
+      <button class="btn" onclick="alert('Community links updated!')">
+        <i class="fa-solid fa-floppy-disk"></i> Save Links
+      </button>
+    </div>
+
+    <!-- 5. App Logs Panel -->
+    <div id="logs" class="panel">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <h2 class="panel-title"><i class="fa-solid fa-microchip" style="color: var(--accent);"></i> Accessibility & Detection Debug Logs</h2>
+          <p class="panel-desc">Real-time driver app automation and order accept telemetry.</p>
+        </div>
+        <button class="btn btn-danger" onclick="document.getElementById('logContent').innerHTML='[System] Debug logs cleared by admin.';">
+          <i class="fa-solid fa-trash-can"></i> Clear Logs
+        </button>
+      </div>
+      <div id="logContent" style="margin-top: 10px; background: #000; padding: 16px; border-radius: 8px; font-family: 'SF Mono', Consolas, Monaco, monospace; font-size: 12px; color: #10B981; line-height: 1.8; border: 1px solid var(--border); overflow-x: auto;">
+        [12:30:15] Rapido package detected: com.rapido.rider<br>
+        [12:30:15] Match candidate: Fare ₹145, Drop Distance 7.2km<br>
+        [12:30:16] Action Click successful on com.rapido.rider:id/btn_accept_order<br>
+        [12:30:17] Confirmation verified: 'accepted!' found<br>
+        [12:30:17] Floating overlay popup triggered (Auto-dismiss in 5 mins)<br>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Tab Switching
+    function showTab(tabId, ev) {
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById(tabId).classList.add('active');
+      if (ev && ev.currentTarget) {
+        ev.currentTarget.classList.add('active');
+      }
+    }
+
+    // Set logged in username if stored
+    const storedUser = sessionStorage.getItem('smartdrivo_admin_user');
+    if (storedUser) {
+      const userLabel = document.getElementById('adminUserLabel');
+      if (userLabel) userLabel.textContent = storedUser;
+    }
+
+    // Admin Logout Functionality
+    function adminLogout() {
+      if (confirm('Are you sure you want to log out of the SmartDrivo Admin Panel?')) {
+        sessionStorage.removeItem('smartdrivo_admin_auth');
+        sessionStorage.removeItem('smartdrivo_admin_user');
+        sessionStorage.removeItem('smartdrivo_admin_logged_at');
+        sessionStorage.clear();
+        window.location.replace('login.html');
+      }
+    }
+
+    // 1. Search Box: Filter Registered Drivers by Phone Number or Email
+    function filterDrivers() {
+      const input = document.getElementById('driverSearchInput');
+      const query = input ? input.value.toLowerCase().trim() : '';
+      const clearBtn = document.getElementById('clearSearchBtn');
+      if (clearBtn) {
+        clearBtn.style.display = query.length > 0 ? 'block' : 'none';
+      }
+
+      const rows = document.querySelectorAll('#driversTable tbody tr');
+      let visibleCount = 0;
+
+      rows.forEach(row => {
+        if (row.id === 'noDriversRow') return;
+        // Search in Phone / Email column (cell index 1) as well as driver name (cell index 0)
+        const phoneEmail = row.cells[1] ? row.cells[1].textContent.toLowerCase() : '';
+        const driverName = row.cells[0] ? row.cells[0].textContent.toLowerCase() : '';
+
+        if (!query || phoneEmail.includes(query) || driverName.includes(query)) {
+          row.style.display = '';
+          visibleCount++;
+        } else {
+          row.style.display = 'none';
+        }
+      });
+
+      const noDriversRow = document.getElementById('noDriversRow');
+      if (noDriversRow) {
+        noDriversRow.style.display = (visibleCount === 0) ? '' : 'none';
+      }
+    }
+
+    function clearDriverSearch() {
+      const input = document.getElementById('driverSearchInput');
+      if (input) {
+        input.value = '';
+        filterDrivers();
+        input.focus();
+      }
+    }
+
+    // 2. Active/Deactivate Toggle Button for each user
+    function toggleDriverStatus(button) {
+      const row = button.closest('tr');
+      if (!row) return;
+
+      const statusBadge = row.querySelector('.status-badge');
+      const currentStatus = button.getAttribute('data-status');
+
+      if (currentStatus === 'active') {
+        // Toggle to Deactivated
+        button.setAttribute('data-status', 'deactivated');
+        button.className = 'btn btn-success btn-sm toggle-status-btn';
+        button.innerHTML = '<i class="fa-solid fa-toggle-off"></i> Activate';
+        button.title = 'Click to Activate driver';
+
+        if (statusBadge) {
+          statusBadge.className = 'badge badge-rejected status-badge';
+          statusBadge.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> Deactivated';
+        }
+      } else {
+        // Toggle to Active
+        button.setAttribute('data-status', 'active');
+        button.className = 'btn btn-danger btn-sm toggle-status-btn';
+        button.innerHTML = '<i class="fa-solid fa-toggle-on"></i> Deactivate';
+        button.title = 'Click to Deactivate driver';
+
+        if (statusBadge) {
+          statusBadge.className = 'badge badge-approved status-badge';
+          statusBadge.innerHTML = '<i class="fa-solid fa-circle-check"></i> Active';
+        }
+      }
+    }
+  </script>
+</body>
+</html>

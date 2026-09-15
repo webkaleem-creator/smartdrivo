@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">SmartDrivo</string>
+    <string name="accessibility_service_description">SmartDrivo monitors and assists drivers by reading incoming ride order details and auto-accepting matched trips safely.</string>
+</resources>
