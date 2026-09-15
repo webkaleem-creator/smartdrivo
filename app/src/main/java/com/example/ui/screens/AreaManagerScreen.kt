@@ -80,11 +80,8 @@ fun AreaManagerScreen(
     repository: FirebaseRepository,
     onBack: () -> Unit
 ) {
-    val savedGoTo by prefs.goToAreas.collectAsState()
-    val savedNoGo by prefs.noGoAreas.collectAsState()
-
-    var goToGroups by remember(savedGoTo) { mutableStateOf(savedGoTo) }
-    var noGoGroups by remember(savedNoGo) { mutableStateOf(savedNoGo) }
+    var goToGroups by remember { mutableStateOf(prefs.goToAreas.value) }
+    var noGoGroups by remember { mutableStateOf(prefs.noGoAreas.value) }
 
     var goToGroupNameInput by remember { mutableStateOf("") }
     var noGoGroupNameInput by remember { mutableStateOf("") }
@@ -95,6 +92,8 @@ fun AreaManagerScreen(
 
     fun addGoToGroup() {
         val trimmed = goToGroupNameInput.trim()
+        goToGroupNameInput = ""
+        focusManager.clearFocus()
         if (trimmed.isNotBlank()) {
             if (!goToGroups.any { it.name.equals(trimmed, ignoreCase = true) }) {
                 val newGroup = AreaGroup(
@@ -102,11 +101,12 @@ fun AreaManagerScreen(
                     name = trimmed,
                     type = AreaType.GO_TO,
                     isEnabled = true,
-                    keywords = emptyList(),
+                    keywords = listOf(trimmed),
                     filtersEnabled = false
                 )
-                goToGroups = goToGroups + newGroup
-                goToGroupNameInput = ""
+                val updated = goToGroups + newGroup
+                goToGroups = updated
+                prefs.saveAreaGroups(updated, noGoGroups)
             } else {
                 coroutineScope.launch {
                     snackbarHostState.showSnackbar("'$trimmed' group already exists")
@@ -117,6 +117,8 @@ fun AreaManagerScreen(
 
     fun addNoGoGroup() {
         val trimmed = noGoGroupNameInput.trim()
+        noGoGroupNameInput = ""
+        focusManager.clearFocus()
         if (trimmed.isNotBlank()) {
             if (!noGoGroups.any { it.name.equals(trimmed, ignoreCase = true) }) {
                 val newGroup = AreaGroup(
@@ -124,11 +126,12 @@ fun AreaManagerScreen(
                     name = trimmed,
                     type = AreaType.NO_GO,
                     isEnabled = true,
-                    keywords = emptyList(),
+                    keywords = listOf(trimmed),
                     filtersEnabled = false
                 )
-                noGoGroups = noGoGroups + newGroup
-                noGoGroupNameInput = ""
+                val updated = noGoGroups + newGroup
+                noGoGroups = updated
+                prefs.saveAreaGroups(goToGroups, updated)
             } else {
                 coroutineScope.launch {
                     snackbarHostState.showSnackbar("'$trimmed' group already exists")
@@ -137,9 +140,7 @@ fun AreaManagerScreen(
         }
     }
 
-    val saveButtonText by remember(goToGroups, noGoGroups) {
-        derivedStateOf { "Save Area Groups (${goToGroups.size} Go-To • ${noGoGroups.size} No-Go)" }
-    }
+    val saveButtonText = "Save Area Groups (${goToGroups.size} Go-To • ${noGoGroups.size} No-Go)"
 
     fun saveAllGroups() {
         focusManager.clearFocus()
@@ -387,32 +388,44 @@ fun AreaManagerScreen(
                                     AreaGroupCard(
                                         group = group,
                                         onToggle = {
-                                             goToGroups = goToGroups.map { g ->
+                                            val updated = goToGroups.map { g ->
                                                 if (g.id == group.id) g.copy(isEnabled = !g.isEnabled) else g
                                             }
+                                            goToGroups = updated
+                                            prefs.saveAreaGroups(updated, noGoGroups)
                                         },
                                         onFiltersToggle = {
-                                            goToGroups = goToGroups.map { g ->
+                                            val updated = goToGroups.map { g ->
                                                 if (g.id == group.id) g.copy(filtersEnabled = !g.filtersEnabled) else g
                                             }
+                                            goToGroups = updated
+                                            prefs.saveAreaGroups(updated, noGoGroups)
                                         },
                                         onMinFareChange = { newValue ->
-                                            goToGroups = goToGroups.map { g ->
+                                            val updated = goToGroups.map { g ->
                                                 if (g.id == group.id) g.copy(minFare = newValue) else g
                                             }
+                                            goToGroups = updated
+                                            prefs.saveAreaGroups(updated, noGoGroups)
                                         },
                                         onMaxPickupChange = { newValue ->
-                                            goToGroups = goToGroups.map { g ->
+                                            val updated = goToGroups.map { g ->
                                                 if (g.id == group.id) g.copy(maxPickupKm = newValue) else g
                                             }
+                                            goToGroups = updated
+                                            prefs.saveAreaGroups(updated, noGoGroups)
                                         },
                                         onMaxDropChange = { newValue ->
-                                            goToGroups = goToGroups.map { g ->
+                                            val updated = goToGroups.map { g ->
                                                 if (g.id == group.id) g.copy(maxDropKm = newValue) else g
                                             }
+                                            goToGroups = updated
+                                            prefs.saveAreaGroups(updated, noGoGroups)
                                         },
                                         onDelete = {
-                                            goToGroups = goToGroups.filterNot { it.id == group.id }
+                                            val updated = goToGroups.filterNot { it.id == group.id }
+                                            goToGroups = updated
+                                            prefs.saveAreaGroups(updated, noGoGroups)
                                         }
                                     )
                                 }
@@ -550,32 +563,44 @@ fun AreaManagerScreen(
                                     AreaGroupCard(
                                         group = group,
                                         onToggle = {
-                                            noGoGroups = noGoGroups.map { g ->
+                                            val updated = noGoGroups.map { g ->
                                                 if (g.id == group.id) g.copy(isEnabled = !g.isEnabled) else g
                                             }
+                                            noGoGroups = updated
+                                            prefs.saveAreaGroups(goToGroups, updated)
                                         },
                                         onFiltersToggle = {
-                                            noGoGroups = noGoGroups.map { g ->
+                                            val updated = noGoGroups.map { g ->
                                                 if (g.id == group.id) g.copy(filtersEnabled = !g.filtersEnabled) else g
                                             }
+                                            noGoGroups = updated
+                                            prefs.saveAreaGroups(goToGroups, updated)
                                         },
                                         onMinFareChange = { newValue ->
-                                            noGoGroups = noGoGroups.map { g ->
+                                            val updated = noGoGroups.map { g ->
                                                 if (g.id == group.id) g.copy(minFare = newValue) else g
                                             }
+                                            noGoGroups = updated
+                                            prefs.saveAreaGroups(goToGroups, updated)
                                         },
                                         onMaxPickupChange = { newValue ->
-                                            noGoGroups = noGoGroups.map { g ->
+                                            val updated = noGoGroups.map { g ->
                                                 if (g.id == group.id) g.copy(maxPickupKm = newValue) else g
                                             }
+                                            noGoGroups = updated
+                                            prefs.saveAreaGroups(goToGroups, updated)
                                         },
                                         onMaxDropChange = { newValue ->
-                                            noGoGroups = noGoGroups.map { g ->
+                                            val updated = noGoGroups.map { g ->
                                                 if (g.id == group.id) g.copy(maxDropKm = newValue) else g
                                             }
+                                            noGoGroups = updated
+                                            prefs.saveAreaGroups(goToGroups, updated)
                                         },
                                         onDelete = {
-                                            noGoGroups = noGoGroups.filterNot { it.id == group.id }
+                                            val updated = noGoGroups.filterNot { it.id == group.id }
+                                            noGoGroups = updated
+                                            prefs.saveAreaGroups(goToGroups, updated)
                                         }
                                     )
                                 }
