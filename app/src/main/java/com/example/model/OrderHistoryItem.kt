@@ -1,5 +1,7 @@
 package com.example.model
 
+import androidx.compose.runtime.Immutable
+
 enum class OrderStatus {
     ACCEPTED,
     REJECTED,
@@ -7,6 +9,7 @@ enum class OrderStatus {
     MISSED
 }
 
+@Immutable
 data class OrderHistoryItem(
     val id: String = "",
     val timestamp: Long = System.currentTimeMillis(),

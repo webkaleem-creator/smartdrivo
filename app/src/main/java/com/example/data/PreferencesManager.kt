@@ -310,7 +310,7 @@ class PreferencesManager(private val context: Context) {
             putBoolean(KEY_AUTOSTART, settings.autostartOnBoot)
             putBoolean(KEY_GOTO_ENABLED, settings.isGoToEnabled)
             putBoolean(KEY_NOGO_ENABLED, settings.isNoGoEnabled)
-            commit()
+            apply()
         }
         _isGoToEnabled.value = settings.isGoToEnabled
         _isNoGoEnabled.value = settings.isNoGoEnabled

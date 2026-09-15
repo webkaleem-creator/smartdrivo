@@ -51,6 +51,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,6 +91,27 @@ fun ProfileScreen(
     val userProfile by prefs.userProfile.collectAsState()
     var showAccountDialog by remember { mutableStateOf(false) }
     var showTutorialDialog by remember { mutableStateOf(false) }
+
+    val referralCode by remember(userProfile.referralCode) {
+        derivedStateOf { userProfile.referralCode }
+    }
+    val isAdmin by remember(userProfile.isAdmin) {
+        derivedStateOf { userProfile.isAdmin }
+    }
+    val userDisplayName by remember(userProfile.name) {
+        derivedStateOf { userProfile.name.ifEmpty { "Driver" } }
+    }
+    val userEffectiveMobile by remember(userProfile.effectiveMobile) {
+        derivedStateOf { userProfile.effectiveMobile.ifEmpty { "N/A" } }
+    }
+    val userLocation by remember(userProfile.city, userProfile.state) {
+        derivedStateOf {
+            listOf(userProfile.city, userProfile.state).filter { it.isNotEmpty() }.joinToString(", ")
+        }
+    }
+    val userPlanDisplay by remember(userProfile.plan) {
+        derivedStateOf { userProfile.plan.ifEmpty { "Free User" } }
+    }
 
     Scaffold(
         topBar = {
@@ -137,10 +159,10 @@ fun ProfileScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item { Spacer(modifier = Modifier.height(4.dp)) }
+            item(key = "top_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(4.dp)) }
 
             // Group 1: Membership & Payment History
-            item {
+            item(key = "group_membership_payment", contentType = "options_group") {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(20.dp),
@@ -170,7 +192,7 @@ fun ProfileScreen(
             }
 
             // Group 2: My Account & Settings
-            item {
+            item(key = "group_account_settings", contentType = "options_group") {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(20.dp),
@@ -200,7 +222,7 @@ fun ProfileScreen(
             }
 
             // Group 3: Contact Support & Driver Tutorial
-            item {
+            item(key = "group_support_tutorial", contentType = "options_group") {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(20.dp),
@@ -230,7 +252,7 @@ fun ProfileScreen(
             }
 
             // Group 4: Referral & Admin Settings
-            item {
+            item(key = "group_referral_admin", contentType = "options_group") {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(20.dp),
@@ -254,7 +276,7 @@ fun ProfileScreen(
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = userProfile.referralCode,
+                                    text = referralCode,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 16.sp,
                                     fontFamily = FontFamily.Default,
@@ -264,7 +286,7 @@ fun ProfileScreen(
                             Row {
                                 IconButton(onClick = {
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    clipboard.setPrimaryClip(ClipData.newPlainText("Referral", userProfile.referralCode))
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("Referral", referralCode))
                                     Toast.makeText(context, "Referral Code Copied!", Toast.LENGTH_SHORT).show()
                                 }) {
                                     Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = BluePrimary)
@@ -274,7 +296,7 @@ fun ProfileScreen(
                                         action = Intent.ACTION_SEND
                                         putExtra(
                                             Intent.EXTRA_TEXT,
-                                            "Join SmartDrivo to auto-accept high paying Rapido, Uber & Ola rides! Use my referral code: ${userProfile.referralCode}"
+                                            "Join SmartDrivo to auto-accept high paying Rapido, Uber & Ola rides! Use my referral code: $referralCode"
                                         )
                                         type = "text/plain"
                                     }
@@ -311,7 +333,7 @@ fun ProfileScreen(
                                 )
                             }
                             Switch(
-                                checked = userProfile.isAdmin,
+                                checked = isAdmin,
                                 onCheckedChange = {
                                     prefs.saveUserProfile(userProfile.copy(isAdmin = it))
                                 },
@@ -324,7 +346,7 @@ fun ProfileScreen(
                             )
                         }
 
-                        if (userProfile.isAdmin) {
+                        if (isAdmin) {
                             Button(
                                 onClick = onNavigateToAdminPanel,
                                 modifier = Modifier.fillMaxWidth().height(44.dp),
@@ -350,7 +372,7 @@ fun ProfileScreen(
             }
 
             // Log Out Button
-            item {
+            item(key = "logout_button", contentType = "action_button") {
                 Button(
                     onClick = onLogout,
                     modifier = Modifier.fillMaxWidth().height(48.dp),
@@ -371,7 +393,7 @@ fun ProfileScreen(
             }
 
             // App Brand Footer
-            item {
+            item(key = "footer", contentType = "footer") {
                 Box(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                     contentAlignment = Alignment.Center
@@ -404,13 +426,13 @@ fun ProfileScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "Name: ${userProfile.name.ifEmpty { "Driver" }}",
+                        text = "Name: $userDisplayName",
                         fontSize = 14.sp,
                         fontFamily = FontFamily.Default,
                         color = TextDarkPrimary
                     )
                     Text(
-                        text = "Mobile: ${userProfile.effectiveMobile.ifEmpty { "N/A" }}",
+                        text = "Mobile: $userEffectiveMobile",
                         fontSize = 14.sp,
                         fontFamily = FontFamily.Default,
                         color = TextDarkSecondary
@@ -423,9 +445,9 @@ fun ProfileScreen(
                             color = TextDarkSecondary
                         )
                     }
-                    if (userProfile.city.isNotEmpty() || userProfile.state.isNotEmpty()) {
+                    if (userLocation.isNotEmpty()) {
                         Text(
-                            text = "Location: ${listOf(userProfile.city, userProfile.state).filter { it.isNotEmpty() }.joinToString(", ")}",
+                            text = "Location: $userLocation",
                             fontSize = 14.sp,
                             fontFamily = FontFamily.Default,
                             color = TextDarkSecondary
@@ -438,7 +460,7 @@ fun ProfileScreen(
                         color = TextDarkSecondary
                     )
                     Text(
-                        text = "Plan: ${userProfile.plan.ifEmpty { "Free User" }}",
+                        text = "Plan: $userPlanDisplay",
                         fontSize = 14.sp,
                         fontFamily = FontFamily.Default,
                         color = TextDarkSecondary

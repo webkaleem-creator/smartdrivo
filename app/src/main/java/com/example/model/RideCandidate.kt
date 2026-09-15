@@ -1,8 +1,11 @@
 package com.example.model
 
+import androidx.compose.runtime.Immutable
+
 /**
  * Extracted ride request details detected on screen
  */
+@Immutable
 data class RideCandidate(
     val fare: Float?,
     val pickupDistKm: Float?,

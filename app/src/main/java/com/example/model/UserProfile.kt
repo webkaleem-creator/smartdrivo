@@ -1,5 +1,8 @@
 package com.example.model
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class UserProfile(
     val uid: String = "",
     val name: String = "",

@@ -47,6 +47,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +58,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.example.data.PreferencesManager
 import com.example.model.OrderHistoryItem
 import com.example.model.OrderStatus
@@ -100,19 +104,21 @@ fun OrderHistoryScreen(
     val history by prefs.orderHistory.collectAsState()
     val totalAccepted by prefs.totalAcceptedFlow.collectAsState()
 
-    fun loadStats() {
-        prefs.loadStats()
-    }
+    val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        loadStats()
+        withContext(Dispatchers.IO) {
+            prefs.loadStats()
+        }
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                loadStats()
+                coroutineScope.launch(Dispatchers.IO) {
+                    prefs.loadStats()
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -137,10 +143,14 @@ fun OrderHistoryScreen(
     }
     val sevenDaysAgo = remember { System.currentTimeMillis() - 7 * 86400000L }
 
-    val acceptedCount = remember(history) { history.count { it.status == OrderStatus.ACCEPTED } }
-    val ignoredCount = remember(history) { history.count { it.status == OrderStatus.IGNORED } }
-    val rejectedCount = remember(history) {
-        history.count { it.status == OrderStatus.REJECTED || it.status == OrderStatus.MISSED }
+    val acceptedCount by remember(history) {
+        derivedStateOf { history.count { it.status == OrderStatus.ACCEPTED } }
+    }
+    val ignoredCount by remember(history) {
+        derivedStateOf { history.count { it.status == OrderStatus.IGNORED } }
+    }
+    val rejectedCount by remember(history) {
+        derivedStateOf { history.count { it.status == OrderStatus.REJECTED || it.status == OrderStatus.MISSED } }
     }
     val allCount by remember(history) { derivedStateOf { history.size } }
 
@@ -398,7 +408,7 @@ fun OrderHistoryScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 val dates = listOf("All", "Today", "Yesterday", "Last 7 Days")
-                items(dates) { d ->
+                items(dates, key = { "date_$it" }, contentType = { "date_chip" }) { d ->
                     FilterChip(
                         selected = selectedDateRange == d,
                         onClick = { selectedDateRange = d },
@@ -412,7 +422,7 @@ fun OrderHistoryScreen(
                     )
                 }
 
-                item {
+                item(key = "platform_all", contentType = "platform_chip") {
                     FilterChip(
                         selected = selectedPlatformFilter == null,
                         onClick = { selectedPlatformFilter = null },
@@ -426,7 +436,7 @@ fun OrderHistoryScreen(
                     )
                 }
 
-                items(Platform.entries) { platform ->
+                items(Platform.entries, key = { "platform_${it.name}" }, contentType = { "platform_chip" }) { platform ->
                     FilterChip(
                         selected = selectedPlatformFilter == platform,
                         onClick = {
@@ -473,10 +483,14 @@ fun OrderHistoryScreen(
                         .padding(horizontal = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(filteredList, key = { it.id }) { item ->
+                    items(
+                        items = filteredList,
+                        key = { it.id },
+                        contentType = { "order_card" }
+                    ) { item ->
                         HistoryCard(item)
                     }
-                    item {
+                    item(key = "bottom_spacer", contentType = "spacer") {
                         Spacer(modifier = Modifier.height(24.dp))
                     }
                 }

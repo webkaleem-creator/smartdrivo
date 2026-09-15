@@ -72,6 +72,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -117,6 +118,7 @@ private val LightGrayText = Color(0xFF94A3B8)
 private val CardNavy = Color(0xFF132238)
 private val BorderNavy = Color(0xFF1E324F)
 
+@Immutable
 private data class FeatureItem(
     val title: String,
     val description: String,

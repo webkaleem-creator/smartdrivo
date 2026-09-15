@@ -1,11 +1,14 @@
 package com.example.model
 
+import androidx.compose.runtime.Immutable
+
 enum class PaymentStatus {
     PENDING,
     APPROVED,
     REJECTED
 }
 
+@Immutable
 data class PaymentSubmission(
     val paymentId: String = "",
     val uid: String = "",

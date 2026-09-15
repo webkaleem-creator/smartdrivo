@@ -88,7 +88,11 @@ fun AdminPanelScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(submissions) { sub ->
+                items(
+                    items = submissions,
+                    key = { it.paymentId },
+                    contentType = { "admin_payment_item" }
+                ) { sub ->
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),

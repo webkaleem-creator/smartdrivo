@@ -67,6 +67,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -94,7 +95,9 @@ import com.example.model.FilterMode
 import com.example.model.OrderHistoryItem
 import com.example.model.OrderStatus
 import com.example.model.Platform
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import com.example.service.FloatingOverlayService
 import com.example.service.SmartDrivoAccessibilityService
 import com.example.ui.components.SmartDrivoLogo
@@ -125,6 +128,16 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+
+@Immutable
+private data class SimRideData(
+    val pickupDistKm: Float,
+    val dropDistKm: Float,
+    val fare: Float,
+    val pickupAddress: String,
+    val dropAddress: String,
+    val dropArea: String
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -267,7 +280,9 @@ fun HomeScreen(
     }
 
     LaunchedEffect(Unit) {
-        prefs.loadStats()
+        withContext(Dispatchers.IO) {
+            prefs.loadStats()
+        }
     }
 
     // Calculate real-time stats for today
@@ -293,6 +308,45 @@ fun HomeScreen(
         }
     }
 
+    val isMembershipActive by remember(userProfile.isPlanValid, userProfile.isAdmin) {
+        derivedStateOf { userProfile.isPlanValid || userProfile.isAdmin }
+    }
+    val membershipStatusText by remember(isMembershipActive) {
+        derivedStateOf { if (isMembershipActive) "● Membership Active" else "○ Membership Inactive" }
+    }
+    val membershipStatusColor by remember(isMembershipActive) {
+        derivedStateOf { if (isMembershipActive) StatusActiveGreen else StatusInactiveRed }
+    }
+
+    val isAutoAcceptActive by remember(settings.isAutoAcceptActive) {
+        derivedStateOf { settings.isAutoAcceptActive }
+    }
+    val autoAcceptContainerColor by remember(isAutoAcceptActive) {
+        derivedStateOf { if (isAutoAcceptActive) StatusActiveGreenBg else StatusInactiveRedBg }
+    }
+    val autoAcceptBorderColor by remember(isAutoAcceptActive) {
+        derivedStateOf { if (isAutoAcceptActive) StatusActiveGreenBorder else StatusInactiveRedBorder }
+    }
+    val autoAcceptIconTint by remember(isAutoAcceptActive) {
+        derivedStateOf { if (isAutoAcceptActive) StatusActiveGreen else StatusInactiveRed }
+    }
+    val autoAcceptIconBg by remember(isAutoAcceptActive) {
+        derivedStateOf { if (isAutoAcceptActive) Color(0xFFDCFCE7) else Color(0xFFFFEBEE) }
+    }
+    val autoAcceptStatusSubtitle by remember(isAutoAcceptActive) {
+        derivedStateOf {
+            if (isAutoAcceptActive) "ACTIVE — Instant click & filter enabled"
+            else "INACTIVE — Auto click is paused"
+        }
+    }
+
+    val rapidoActive by remember(settings.rapidoEnabled) { derivedStateOf { settings.rapidoEnabled } }
+    val uberActive by remember(settings.uberEnabled) { derivedStateOf { settings.uberEnabled } }
+    val olaActive by remember(settings.olaEnabled) { derivedStateOf { settings.olaEnabled } }
+    val autoActive by remember(settings.autoEnabled) { derivedStateOf { settings.autoEnabled } }
+    val bikeActive by remember(settings.bikeEnabled) { derivedStateOf { settings.bikeEnabled } }
+    val carActive by remember(settings.carEnabled) { derivedStateOf { settings.carEnabled } }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
@@ -309,9 +363,9 @@ fun HomeScreen(
                                 color = TextDarkPrimary
                             )
                             Text(
-                                text = if (userProfile.isPlanValid || userProfile.isAdmin) "● Membership Active" else "○ Membership Inactive",
+                                text = membershipStatusText,
                                 fontSize = 14.sp,
-                                color = if (userProfile.isPlanValid || userProfile.isAdmin) StatusActiveGreen else StatusInactiveRed
+                                color = membershipStatusColor
                             )
                         }
                     }
@@ -340,11 +394,11 @@ fun HomeScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            item { Spacer(modifier = Modifier.height(4.dp)) }
+            item(key = "top_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(4.dp)) }
 
             // Accessibility Service Warning (Colorful Warning Card)
             if (!isAccessibilityGranted) {
-                item {
+                item(key = "accessibility_warning", contentType = "warning_card") {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = StatusWarningYellowBg),
                         shape = RoundedCornerShape(16.dp),
@@ -396,7 +450,7 @@ fun HomeScreen(
                     }
                 }
             } else if (!isOverlayGranted) {
-                item {
+                item(key = "overlay_warning", contentType = "warning_card") {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = BlueContainer),
                         shape = RoundedCornerShape(16.dp),
@@ -450,20 +504,20 @@ fun HomeScreen(
             }
 
             // 2. AUTO-ACCEPT ORDERS toggle card (MOVED TO TOP)
-            item {
+            item(key = "auto_accept_toggle", contentType = "main_toggle_card") {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            handleToggleAutoAccept(!settings.isAutoAcceptActive)
+                            handleToggleAutoAccept(!isAutoAcceptActive)
                         },
                     colors = CardDefaults.cardColors(
-                        containerColor = if (settings.isAutoAcceptActive) StatusActiveGreenBg else StatusInactiveRedBg
+                        containerColor = autoAcceptContainerColor
                     ),
                     shape = RoundedCornerShape(16.dp),
                     border = BorderStroke(
                         1.5.dp,
-                        if (settings.isAutoAcceptActive) StatusActiveGreenBorder else StatusInactiveRedBorder
+                        autoAcceptBorderColor
                     )
                 ) {
                     Row(
@@ -481,7 +535,7 @@ fun HomeScreen(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .background(
-                                        if (settings.isAutoAcceptActive) Color(0xFFDCFCE7) else Color(0xFFFFEBEE),
+                                        autoAcceptIconBg,
                                         RoundedCornerShape(10.dp)
                                     ),
                                 contentAlignment = Alignment.Center
@@ -489,7 +543,7 @@ fun HomeScreen(
                                 Icon(
                                     Icons.Default.ElectricBolt,
                                     contentDescription = null,
-                                    tint = if (settings.isAutoAcceptActive) StatusActiveGreen else StatusInactiveRed,
+                                    tint = autoAcceptIconTint,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -503,10 +557,7 @@ fun HomeScreen(
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = if (settings.isAutoAcceptActive)
-                                        "ACTIVE — Instant click & filter enabled"
-                                    else
-                                        "INACTIVE — Auto click is paused",
+                                    text = autoAcceptStatusSubtitle,
                                     fontSize = 14.sp,
                                     color = TextDarkSecondary
                                 )
@@ -514,7 +565,7 @@ fun HomeScreen(
                         }
 
                         Switch(
-                            checked = settings.isAutoAcceptActive,
+                            checked = isAutoAcceptActive,
                             onCheckedChange = { shouldEnable ->
                                 handleToggleAutoAccept(shouldEnable)
                             },
@@ -530,7 +581,7 @@ fun HomeScreen(
             }
 
             // 3. Filter Mode buttons + Fare Criteria card + Distance Criteria card
-            item {
+            item(key = "filter_settings", contentType = "filter_settings_card") {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
@@ -955,7 +1006,7 @@ fun HomeScreen(
             }
 
             // 4. DRIVER PLATFORMS section (Rapido, Uber, Ola)
-            item {
+            item(key = "driver_platforms", contentType = "platforms_card") {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
@@ -999,8 +1050,8 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             FilterChip(
-                                selected = settings.rapidoEnabled,
-                                onClick = { prefs.saveAppSettings(settings.copy(rapidoEnabled = !settings.rapidoEnabled)) },
+                                selected = rapidoActive,
+                                onClick = { prefs.saveAppSettings(settings.copy(rapidoEnabled = !rapidoActive)) },
                                 label = { Text("Rapido ✓", fontSize = 14.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = PlatformRapido,
@@ -1010,14 +1061,14 @@ fun HomeScreen(
                                 ),
                                 border = FilterChipDefaults.filterChipBorder(
                                     enabled = true,
-                                    selected = settings.rapidoEnabled,
+                                    selected = rapidoActive,
                                     borderColor = PlatformRapido,
                                     selectedBorderColor = PlatformRapido
                                 )
                             )
                             FilterChip(
-                                selected = settings.uberEnabled,
-                                onClick = { prefs.saveAppSettings(settings.copy(uberEnabled = !settings.uberEnabled)) },
+                                selected = uberActive,
+                                onClick = { prefs.saveAppSettings(settings.copy(uberEnabled = !uberActive)) },
                                 label = { Text("Uber ✓", fontSize = 14.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = Color(0xFF212121),
@@ -1027,14 +1078,14 @@ fun HomeScreen(
                                 ),
                                 border = FilterChipDefaults.filterChipBorder(
                                     enabled = true,
-                                    selected = settings.uberEnabled,
+                                    selected = uberActive,
                                     borderColor = Color(0xFF757575),
                                     selectedBorderColor = Color(0xFF212121)
                                 )
                             )
                             FilterChip(
-                                selected = settings.olaEnabled,
-                                onClick = { prefs.saveAppSettings(settings.copy(olaEnabled = !settings.olaEnabled)) },
+                                selected = olaActive,
+                                onClick = { prefs.saveAppSettings(settings.copy(olaEnabled = !olaActive)) },
                                 label = { Text("Ola ✓", fontSize = 14.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = StatusActiveGreen,
@@ -1044,7 +1095,7 @@ fun HomeScreen(
                                 ),
                                 border = FilterChipDefaults.filterChipBorder(
                                     enabled = true,
-                                    selected = settings.olaEnabled,
+                                    selected = olaActive,
                                     borderColor = StatusActiveGreen,
                                     selectedBorderColor = StatusActiveGreen
                                 )
@@ -1055,7 +1106,7 @@ fun HomeScreen(
             }
 
             // 5. VEHICLE FILTERS section (Auto, Bike, Car)
-            item {
+            item(key = "vehicle_filters", contentType = "vehicles_card") {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
@@ -1099,8 +1150,8 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             FilterChip(
-                                selected = settings.autoEnabled,
-                                onClick = { prefs.saveAppSettings(settings.copy(autoEnabled = !settings.autoEnabled)) },
+                                selected = autoActive,
+                                onClick = { prefs.saveAppSettings(settings.copy(autoEnabled = !autoActive)) },
                                 leadingIcon = {
                                     Icon(
                                         Icons.Default.ElectricRickshaw,
@@ -1117,8 +1168,8 @@ fun HomeScreen(
                                 )
                             )
                             FilterChip(
-                                selected = settings.bikeEnabled,
-                                onClick = { prefs.saveAppSettings(settings.copy(bikeEnabled = !settings.bikeEnabled)) },
+                                selected = bikeActive,
+                                onClick = { prefs.saveAppSettings(settings.copy(bikeEnabled = !bikeActive)) },
                                 leadingIcon = {
                                     Icon(
                                         Icons.Default.DirectionsBike,
@@ -1135,8 +1186,8 @@ fun HomeScreen(
                                 )
                             )
                             FilterChip(
-                                selected = settings.carEnabled,
-                                onClick = { prefs.saveAppSettings(settings.copy(carEnabled = !settings.carEnabled)) },
+                                selected = carActive,
+                                onClick = { prefs.saveAppSettings(settings.copy(carEnabled = !carActive)) },
                                 leadingIcon = {
                                     Icon(
                                         Icons.Default.DirectionsCar,
@@ -1158,7 +1209,7 @@ fun HomeScreen(
             }
 
             // 6. Today's Performance Stats
-            item {
+            item(key = "today_performance_stats", contentType = "stats_card") {
                 Text(
                     text = "Today's Performance",
                     fontSize = 20.sp,
@@ -1223,7 +1274,7 @@ fun HomeScreen(
 
             // Last Accepted Ride Info Card
             if (lastAccepted != null) {
-                item {
+                item(key = "last_accepted_ride", contentType = "last_accepted_card") {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = StatusActiveGreenBg),
@@ -1269,7 +1320,7 @@ fun HomeScreen(
             }
 
             // 7. Area Rules Engine card
-            item {
+            item(key = "area_rules_engine", contentType = "area_rules_card") {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1338,7 +1389,7 @@ fun HomeScreen(
             }
 
             // 8. Test Ride Simulation button (keep at very bottom)
-            item {
+            item(key = "test_simulation_button", contentType = "simulation_button") {
                 Button(
                     onClick = { showSimulateDialog = true },
                     modifier = Modifier
@@ -1484,14 +1535,6 @@ fun HomeScreen(
                         val dateStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
 
                         val now = System.currentTimeMillis()
-                        data class SimRideData(
-                            val pickupDistKm: Float,
-                            val dropDistKm: Float,
-                            val fare: Float,
-                            val pickupAddress: String,
-                            val dropAddress: String,
-                            val dropArea: String
-                        )
 
                         val simData = when (simPlatform) {
                             Platform.RAPIDO -> SimRideData(

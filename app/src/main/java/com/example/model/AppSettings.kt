@@ -1,5 +1,7 @@
 package com.example.model
 
+import androidx.compose.runtime.Immutable
+
 enum class ClickSpeed(val delayMs: Long, val label: String) {
     SPEED_1MS(1L, "1ms (Instant)"),
     SPEED_10MS(10L, "10ms (Ultra fast)"),
@@ -42,12 +44,14 @@ enum class FilterMode(val displayName: String) {
     BOTH("Both")
 }
 
+@Immutable
 data class CommunityLinks(
     val whatsappUrl: String = "https://chat.whatsapp.com/smartdrivo",
     val telegramUrl: String = "https://t.me/smartdrivo_riders",
     val instagramUrl: String = "https://instagram.com/smartdrivo"
 )
 
+@Immutable
 data class AppSettings(
     val isAutoAcceptActive: Boolean = false,
     val isFastestModeEnabled: Boolean = false,

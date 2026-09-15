@@ -71,10 +71,14 @@ class FirebaseRepository(
                     ),
                     SetOptions.merge()
                 )?.await()
-                onComplete?.invoke(true)
+                withContext(Dispatchers.Main) {
+                    onComplete?.invoke(true)
+                }
             } catch (e: Exception) {
                 Log.e("FirebaseRepo", "Failed to sync user: ${e.message}")
-                onComplete?.invoke(false)
+                withContext(Dispatchers.Main) {
+                    onComplete?.invoke(false)
+                }
             }
         }
     }
@@ -206,11 +210,15 @@ class FirebaseRepository(
                         "approvedAt" to submission.approvedAt
                     )
                 )?.await()
-                onComplete(true)
+                withContext(Dispatchers.Main) {
+                    onComplete(true)
+                }
             } catch (e: Exception) {
                 Log.w("FirebaseRepo", "Payment submission firestore fallback: ${e.message}")
                 // Still notify success locally
-                onComplete(true)
+                withContext(Dispatchers.Main) {
+                    onComplete(true)
+                }
             }
         }
     }

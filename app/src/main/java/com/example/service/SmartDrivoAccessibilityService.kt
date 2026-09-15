@@ -21,6 +21,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import androidx.core.content.ContextCompat
+import androidx.compose.runtime.Immutable
 import com.example.data.FirebaseRepository
 import com.example.data.PreferencesManager
 import com.example.engine.AreaRulesEngine
@@ -321,6 +322,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         return "${candidate.platform}_${fare}_${pickDist}_${dropDist}_${pickup}"
     }
 
+    @Immutable
     data class DirectRideFilterSettings(
         val minFare: Float,
         val maxFare: Float,

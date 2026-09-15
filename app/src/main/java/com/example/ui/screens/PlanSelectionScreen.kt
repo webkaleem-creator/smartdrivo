@@ -84,7 +84,11 @@ fun PlanSelectionScreen(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(MembershipPlan.DEFAULT_PLANS) { plan ->
+            items(
+                items = MembershipPlan.DEFAULT_PLANS,
+                key = { it.id },
+                contentType = { "membership_plan" }
+            ) { plan ->
                 val isSelected = plan.id == selectedPlan.id
                 val borderColor = if (isSelected) AccentGreen else MaterialTheme.colorScheme.outline
                 val bgColor = if (isSelected) Color(0xFF0D2517) else MaterialTheme.colorScheme.surfaceVariant

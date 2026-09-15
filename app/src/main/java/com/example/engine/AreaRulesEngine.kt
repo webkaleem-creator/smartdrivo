@@ -5,10 +5,14 @@ import com.example.model.AreaType
 import com.example.model.AppSettings
 import com.example.model.FilterMode
 import com.example.model.RideCandidate
+import androidx.compose.runtime.Immutable
 
 sealed class DecisionResult {
+    @Immutable
     data class Accept(val reason: String) : DecisionResult()
+    @Immutable
     data class Reject(val reason: String) : DecisionResult()
+    @Immutable
     data class Ignore(val reason: String) : DecisionResult()
 }
 

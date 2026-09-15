@@ -140,7 +140,9 @@ fun AreaManagerScreen(
         }
     }
 
-    val saveButtonText = "Save Area Groups (${goToGroups.size} Go-To • ${noGoGroups.size} No-Go)"
+    val saveButtonText by remember(goToGroups.size, noGoGroups.size) {
+        derivedStateOf { "Save Area Groups (${goToGroups.size} Go-To • ${noGoGroups.size} No-Go)" }
+    }
 
     fun saveAllGroups() {
         focusManager.clearFocus()
@@ -228,10 +230,10 @@ fun AreaManagerScreen(
                 .padding(horizontal = 14.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item { Spacer(modifier = Modifier.height(4.dp)) }
+            item(key = "top_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(4.dp)) }
 
             // Rules Overview Banner
-            item {
+            item(key = "rules_banner", contentType = "banner") {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
                     shape = RoundedCornerShape(14.dp),
@@ -276,7 +278,7 @@ fun AreaManagerScreen(
             }
 
             // SECTION 1: GO-TO GROUPS (Green)
-            item {
+            item(key = "section_goto_groups", contentType = "area_section") {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color.White),
                     shape = RoundedCornerShape(16.dp),
@@ -451,7 +453,7 @@ fun AreaManagerScreen(
             }
 
             // SECTION 2: NO-GO GROUPS (Red)
-            item {
+            item(key = "section_nogo_groups", contentType = "area_section") {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color.White),
                     shape = RoundedCornerShape(16.dp),
@@ -625,7 +627,7 @@ fun AreaManagerScreen(
                 }
             }
 
-            item { Spacer(modifier = Modifier.height(24.dp)) }
+            item(key = "bottom_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(24.dp)) }
         }
     }
 }

@@ -5,8 +5,10 @@ import android.content.Intent
 import android.graphics.Rect
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import androidx.compose.runtime.Immutable
 import java.util.regex.Pattern
 
+@Immutable
 data class DetectedButton(
     val node: AccessibilityNodeInfo,
     val buttonId: String,
@@ -14,6 +16,7 @@ data class DetectedButton(
     val method: String = "Unknown"
 )
 
+@Immutable
 data class RapidoOrderData(
     val baseFare: Float = 0f,
     val tipAmount: Float = 0f,
@@ -96,6 +99,7 @@ object RapidoAdapter {
         return res
     }
 
+    @Immutable
     data class TextNodeEntry(
         val text: String,
         val bounds: Rect,

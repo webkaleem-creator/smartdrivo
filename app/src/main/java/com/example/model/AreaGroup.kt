@@ -1,5 +1,7 @@
 package com.example.model
 
+import androidx.compose.runtime.Immutable
+
 enum class AreaType {
     GO_TO,
     NO_GO
@@ -8,6 +10,7 @@ enum class AreaType {
 /**
  * Area Group definition for GO_TO or NO_GO filtering with per-group customization
  */
+@Immutable
 data class AreaGroup(
     val id: String = "",
     val name: String = "",

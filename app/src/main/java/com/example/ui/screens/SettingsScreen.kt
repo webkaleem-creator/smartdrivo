@@ -159,10 +159,10 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item { Spacer(modifier = Modifier.height(4.dp)) }
+            item(key = "top_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(4.dp)) }
 
             // 1. FARE & DISTANCE FILTERS (with Fastest Mode toggle)
-            item {
+            item(key = "fare_distance_section", contentType = "settings_card") {
                 SectionHeader("1. FARE & DISTANCE FILTERS")
                 Card(
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
@@ -473,7 +473,7 @@ fun SettingsScreen(
             }
 
             // 2. SUPPORTED PLATFORMS (Rapido, Uber, Ola toggles)
-            item {
+            item(key = "platforms_section", contentType = "settings_card") {
                 SectionHeader("2. SUPPORTED PLATFORMS")
                 Card(
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
@@ -528,7 +528,7 @@ fun SettingsScreen(
                 }
             }
 
-            item {
+            item(key = "bottom_spacer", contentType = "spacer") {
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }
