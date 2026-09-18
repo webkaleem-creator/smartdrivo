@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCopy
@@ -95,6 +96,7 @@ fun MoreScreen(
     onNavigateToPlanSelection: () -> Unit,
     onNavigateToPaymentHistory: () -> Unit,
     onNavigateToSettings: () -> Unit = {},
+    onNavigateToDiagnostics: () -> Unit = {},
     onNavigateToCommunity: () -> Unit = {},
     onNavigateToAdminPanel: () -> Unit = {},
     onLogout: () -> Unit,
@@ -643,7 +645,25 @@ fun MoreScreen(
                 }
             }
 
-            // 6. ADMINISTRATIVE (Only if user has Admin privileges)
+            // 6. ENGINE RELIABILITY & DIAGNOSTICS
+            item {
+                SectionHeader("ENGINE RELIABILITY")
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = CardBackground),
+                    border = BorderStroke(1.dp, CardBorderDefault)
+                ) {
+                    MoreCardRow(
+                        icon = Icons.Default.BugReport,
+                        title = "Ride Diagnostics Monitor",
+                        subtitle = "Live rule evaluations, button detection & latencies",
+                        onClick = onNavigateToDiagnostics
+                    )
+                }
+            }
+
+            // 7. ADMINISTRATIVE (Only if user has Admin privileges)
             if (userProfile.isAdmin) {
                 item {
                     SectionHeader("ADMINISTRATIVE")
@@ -663,7 +683,7 @@ fun MoreScreen(
                 }
             }
 
-            // 7. Log Out Button
+            // 8. Log Out Button
             item {
                 Spacer(modifier = Modifier.height(4.dp))
                 Button(

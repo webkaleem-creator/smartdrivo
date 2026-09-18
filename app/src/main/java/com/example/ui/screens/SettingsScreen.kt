@@ -19,7 +19,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CurrencyRupee
 import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.Layers
@@ -53,9 +55,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import com.example.ui.theme.LightSurface
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -82,6 +86,7 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     prefs: PreferencesManager,
     onNavigateToAdminWeb: () -> Unit = {},
+    onNavigateToDiagnostics: () -> Unit = {},
     onBack: () -> Unit
 ) {
     val settings by prefs.appSettings.collectAsState()
@@ -542,6 +547,65 @@ fun SettingsScreen(
                                 prefs.saveAppSettings(settings.copy(olaEnabled = isEnabled))
                                 showSavedSnackbar()
                             }
+                        )
+                    }
+                }
+            }
+
+            // Diagnostics & Reliability Section
+            item {
+                SectionHeader("ENGINE DIAGNOSTICS & RELIABILITY")
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = LightSurface),
+                    border = BorderStroke(1.dp, CardBorderDefault),
+                    onClick = onNavigateToDiagnostics
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(BlueContainer),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.BugReport,
+                                    contentDescription = null,
+                                    tint = BluePrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Ride Diagnostics Monitor",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TextDarkPrimary
+                                )
+                                Text(
+                                    text = "Live rule evaluations, button detection & latencies",
+                                    fontSize = 12.sp,
+                                    color = TextDarkSecondary
+                                )
+                            }
+                        }
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = "Open Diagnostics",
+                            tint = TextDarkTertiary
                         )
                     }
                 }
