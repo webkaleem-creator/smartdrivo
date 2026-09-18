@@ -23,6 +23,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import androidx.core.content.ContextCompat
 import com.example.data.FirebaseRepository
 import com.example.data.PreferencesManager
+import com.example.data.RideDiagnosticsManager
 import com.example.engine.AreaRulesEngine
 import com.example.engine.DecisionResult
 import com.example.engine.OlaAdapter
@@ -786,14 +787,8 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         if (!settings.uberEnabled) return
 
         // Fix 1 - SpeculativeClick:
-        // Only trigger when BOTH conditions are true:
-        // - Package is com.ubercab
-        // - Screen contains fare text with ₹ symbol
-        // Never fire speculative click on any other screen.
+        // Blind speculative click is disabled to guarantee safe button detection with no blind wrong taps.
         val actualPkg = root.packageName?.toString() ?: pkgName
-        if (isUberPackage(actualPkg) && screenContainsRupeeText(root)) {
-            performUberSpeculativeClick(root, actualPkg)
-        }
 
         // Debounce: 150ms max
         val now = System.currentTimeMillis()
@@ -812,6 +807,17 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                 platform = Platform.UBER,
                 defaultVehicle = prefs.userProfile.value.vehicleType
             )
+
+            // Duplicate protection for Uber
+            if (candidate.bookingId != null && isDuplicateUberBookingId(candidate.bookingId)) {
+                Log.i(TAG, "⏭️ Duplicate Uber order skipped (bookingId: ${candidate.bookingId})")
+                RideDiagnosticsManager.recordDuplicateEvent(candidate.bookingId!!)
+                resetProcessing()
+                return
+            }
+            if (candidate.bookingId != null) {
+                recordUberBookingId(candidate.bookingId!!)
+            }
 
             // PART B/E: Detection-First Insert: IMMEDIATELY create one History record with PROCESSING status in Room
             val recordId = onOrderDetectedFast(candidate)
@@ -1035,26 +1041,46 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     }
 
     private fun fallbackUberTap(candidate: RideCandidate) {
-        val metrics = resources.displayMetrics
-        val specX = metrics.widthPixels.toFloat() * 0.65f
-        val specY = metrics.heightPixels.toFloat() * 0.80f
-        simulateTapGesture(specX, specY, isInternalFallback = true) { success ->
-            if (success) {
-                onUberAccepted(candidate)
-            } else {
-                resetProcessing()
-            }
-        }
+        Log.w(TAG, "❌ [Uber] Accept button not detected or invalid in hierarchy! Refusing blind coordinate taps.")
+        val recordId = activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+        onOrderActionCompletedFast(
+            recordId = recordId,
+            candidate = candidate,
+            status = OrderStatus.FAILED,
+            reasonCode = "BUTTON_NOT_FOUND",
+            reasonText = "Accept button node not detected in Uber hierarchy",
+            actionSucceeded = false,
+            timesClicked = 0,
+            buttonFound = false,
+            buttonDetails = "Accept button node not detected in hierarchy",
+            clickMethod = "None (blind tap prevented)",
+            errorMsg = "Safe button not found - blind taps blocked"
+        )
+        resetProcessing()
     }
 
-    private fun onUberAccepted(candidate: RideCandidate) {
+    private fun onUberAccepted(candidate: RideCandidate, timesClicked: Int = 1) {
         val now = System.currentTimeMillis()
         val dateStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(now))
         val timeStr = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(now))
         val detectionTime = if (candidate.detectionTimeMs > 0L) candidate.detectionTimeMs else (now - 145L)
+        val recordId = activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+
+        onOrderActionCompletedFast(
+            recordId = recordId,
+            candidate = candidate,
+            status = OrderStatus.ACCEPTED,
+            reasonCode = "FILTERS_MATCHED",
+            reasonText = buildAcceptedFilterReason(candidate),
+            actionSucceeded = true,
+            timesClicked = timesClicked,
+            buttonFound = true,
+            buttonDetails = "Uber Accept button verified in hierarchy",
+            clickMethod = "Strict Button ACTION_CLICK ($timesClicked attempts)"
+        )
 
         val historyItem = OrderHistoryItem(
-            id = UUID.randomUUID().toString(),
+            id = recordId,
             timestamp = now,
             dateStr = dateStr,
             timeStr = timeStr,
@@ -1067,12 +1093,12 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             dropAddress = candidate.dropAddress ?: "Drop Location",
             dropArea = candidate.dropArea ?: "City Area",
             amount = candidate.fare ?: 0f,
-            bookingId = candidate.bookingId ?: "BK-${System.currentTimeMillis().toString().takeLast(6)}",
+            bookingId = candidate.bookingId ?: recordId,
             detectionTimeMs = detectionTime,
             clickTimeMs = now,
             baseFare = candidate.baseFare ?: (candidate.fare ?: 0f),
             tipAmount = candidate.tipAmount ?: 0f,
-            timesClicked = 1,
+            timesClicked = timesClicked,
             reason = buildAcceptedFilterReason(candidate)
         )
 
@@ -1298,6 +1324,19 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                 defaultVehicle = prefs.userProfile.value.vehicleType
             )
 
+            // Duplicate protection for Ola
+            val bookingId = candidate.bookingId
+            if (!bookingId.isNullOrBlank() && isDuplicateOlaBookingId(bookingId)) {
+                Log.i(TAG, "⏭️ Duplicate Ola order skipped (bookingId: $bookingId)")
+                RideDiagnosticsManager.recordDuplicateEvent(bookingId)
+                resetProcessing()
+                setOlaState(OlaState.IDLE)
+                return
+            }
+            if (!bookingId.isNullOrBlank()) {
+                recordOlaBookingId(bookingId)
+            }
+
             // PART B/E: Detection-First Insert: IMMEDIATELY create one History record with PROCESSING status in Room
             val recordId = onOrderDetectedFast(candidate)
             Log.i(TAG, "⚡ Ola order detected & inserted to Room [PROCESSING]: Fare=₹${candidate.fare}, pickup=${candidate.pickupAddress}")
@@ -1323,18 +1362,6 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                     // Direct filters passed, continue evaluation
                 }
                 else -> { /* no-op */ }
-            }
-
-            // Skip duplicate orders
-            val bookingId = candidate.bookingId
-            if (!bookingId.isNullOrBlank() && isDuplicateOlaBookingId(bookingId)) {
-                Log.i(TAG, "⏭️ Duplicate Ola order skipped (bookingId: $bookingId)")
-                resetProcessing()
-                setOlaState(OlaState.IDLE)
-                return
-            }
-            if (!bookingId.isNullOrBlank()) {
-                recordOlaBookingId(bookingId)
             }
 
             // Fix 2: Vibrate only once per order using lastVibratedOrderId
@@ -1569,25 +1596,23 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     }
 
     private fun fallbackOlaTap(candidate: RideCandidate) {
-        val metrics = resources.displayMetrics
-        val tapX = metrics.widthPixels.toFloat() * 0.50f
-        val tapY = metrics.heightPixels.toFloat() * 0.80f
-        val swipeStartX = metrics.widthPixels.toFloat() * 0.15f
-        val swipeEndX = metrics.widthPixels.toFloat() * 0.85f
-
-        Log.i(TAG, "Ola Method 3 Fallback: Tapping and swiping screen at bottom ($tapX, $tapY)")
-        simulateTapGesture(tapX, tapY, isInternalFallback = true) { tapSuccess ->
-            simulateSwipeGesture(swipeStartX, tapY, swipeEndX, tapY) { swipeSuccess ->
-                if (tapSuccess || swipeSuccess) {
-                    Log.i(TAG, "✓ Ola Method 3 SUCCESSFUL via screen tap/swipe at bottom!")
-                    onOlaAccepted(candidate, timesClicked = 3)
-                } else {
-                    Log.w(TAG, "All Ola auto-accept methods failed.")
-                    resetProcessing()
-                    setOlaState(OlaState.IDLE)
-                }
-            }
-        }
+        Log.w(TAG, "❌ [Ola] Accept button not detected or invalid in hierarchy! Refusing blind coordinate taps.")
+        val recordId = activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+        onOrderActionCompletedFast(
+            recordId = recordId,
+            candidate = candidate,
+            status = OrderStatus.FAILED,
+            reasonCode = "BUTTON_NOT_FOUND",
+            reasonText = "Accept button/slider node not detected in Ola hierarchy",
+            actionSucceeded = false,
+            timesClicked = 0,
+            buttonFound = false,
+            buttonDetails = "Accept button/slider node not detected in hierarchy",
+            clickMethod = "None (blind tap prevented)",
+            errorMsg = "Safe button not found - blind taps blocked"
+        )
+        resetProcessing()
+        setOlaState(OlaState.IDLE)
     }
 
     /**
@@ -1601,9 +1626,23 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         val dateStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(now))
         val timeStr = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(now))
         val detectionTime = if (candidate.detectionTimeMs > 0L) candidate.detectionTimeMs else (now - 145L)
+        val recordId = activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+
+        onOrderActionCompletedFast(
+            recordId = recordId,
+            candidate = candidate,
+            status = OrderStatus.ACCEPTED,
+            reasonCode = "FILTERS_MATCHED",
+            reasonText = buildAcceptedFilterReason(candidate),
+            actionSucceeded = true,
+            timesClicked = timesClicked,
+            buttonFound = true,
+            buttonDetails = "Ola Accept button/slider verified in hierarchy",
+            clickMethod = "Strict Button ACTION_CLICK ($timesClicked attempts)"
+        )
 
         val historyItem = OrderHistoryItem(
-            id = UUID.randomUUID().toString(),
+            id = recordId,
             timestamp = now,
             dateStr = dateStr,
             timeStr = timeStr,
@@ -1616,7 +1655,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             dropAddress = candidate.dropAddress ?: "Drop Location",
             dropArea = candidate.dropArea ?: "City Area",
             amount = candidate.fare ?: 0f,
-            bookingId = candidate.bookingId ?: "BK-${System.currentTimeMillis().toString().takeLast(6)}",
+            bookingId = candidate.bookingId ?: recordId,
             detectionTimeMs = detectionTime,
             clickTimeMs = now,
             baseFare = candidate.baseFare ?: (candidate.fare ?: 0f),
@@ -2490,6 +2529,20 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                 "❌ [Rapido] Accept button with text 'Accept' or 'ACCEPT' NOT found on screen (attempt #$attemptNumber)! " +
                     "Doing nothing - will NOT click randomly."
             )
+            val recordId = activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+            onOrderActionCompletedFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.FAILED,
+                reasonCode = "BUTTON_NOT_FOUND",
+                reasonText = "Accept button node not detected in Rapido screen",
+                actionSucceeded = false,
+                timesClicked = 0,
+                buttonFound = false,
+                buttonDetails = "Accept button with 'Accept'/'ACCEPT' not found on screen",
+                clickMethod = "None (blind tap prevented)",
+                errorMsg = "Safe button not found - blind taps blocked"
+            )
             resetProcessing()
             return
         }
@@ -2498,6 +2551,20 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         // Do NOT click on the order card, ride details, or any other area.
         if (isOrderCardOrDetailsNode(acceptNode)) {
             Log.w(TAG, "❌ [Rapido] Detected node is an order card or ride details container! Refusing to click.")
+            val recordId = activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+            onOrderActionCompletedFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.FAILED,
+                reasonCode = "CARD_NODE_DETECTED",
+                reasonText = "Detected node is an order card - click prevented",
+                actionSucceeded = false,
+                timesClicked = 0,
+                buttonFound = false,
+                buttonDetails = "Target node is card/details container",
+                clickMethod = "None (blind tap prevented)",
+                errorMsg = "Card node detected - blind taps blocked"
+            )
             resetProcessing()
             return
         }
@@ -2549,6 +2616,20 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                 simulateTapGesture(cx, cy, isInternalFallback = true)
             } else {
                 Log.w(TAG, "❌ [Rapido] Accept button bounds invalid ($bounds) - doing nothing, no random click")
+                val recordId = activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+                onOrderActionCompletedFast(
+                    recordId = recordId,
+                    candidate = candidate,
+                    status = OrderStatus.FAILED,
+                    reasonCode = "INVALID_BOUNDS",
+                    reasonText = "Accept button bounds invalid - click prevented",
+                    actionSucceeded = false,
+                    timesClicked = 0,
+                    buttonFound = false,
+                    buttonDetails = "Button bounds invalid: $bounds",
+                    clickMethod = "None (blind tap prevented)",
+                    errorMsg = "Button bounds empty/invalid - blind taps blocked"
+                )
                 resetProcessing()
                 return
             }
@@ -2568,6 +2649,19 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                     title = "SmartDrivo Active",
                     text = "🎉 Order Accepted! Monitoring next..."
                 )
+                val recordId = activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+                onOrderActionCompletedFast(
+                    recordId = recordId,
+                    candidate = candidate,
+                    status = OrderStatus.ACCEPTED,
+                    reasonCode = "FILTERS_MATCHED",
+                    reasonText = "Auto-accepted (attempt #$attemptNumber)",
+                    actionSucceeded = true,
+                    timesClicked = attemptNumber,
+                    buttonFound = true,
+                    buttonDetails = "Accept button matched: '${acceptNode.text}' / ID: '${acceptNode.viewIdResourceName}'",
+                    clickMethod = "Strict Button Click (attempt #$attemptNumber)"
+                )
                 logOrderEvent(
                     candidate = candidate,
                     status = OrderStatus.ACCEPTED,
@@ -2584,6 +2678,20 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                     executeRapidoAutoAccept(candidate, currentRoot, attemptNumber + 1)
                 } else {
                     Log.w(TAG, "Reached max attempts for Rapido auto-accept verification.")
+                    val recordId = activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+                    onOrderActionCompletedFast(
+                        recordId = recordId,
+                        candidate = candidate,
+                        status = OrderStatus.FAILED,
+                        reasonCode = "VERIFICATION_TIMEOUT",
+                        reasonText = "Order popup still visible after max attempts",
+                        actionSucceeded = false,
+                        timesClicked = attemptNumber,
+                        buttonFound = true,
+                        buttonDetails = "Button clicked but popup did not dismiss",
+                        clickMethod = "Strict Button Click",
+                        errorMsg = "Verification timed out after 5 attempts"
+                    )
                     resetProcessing()
                 }
             }
@@ -3589,9 +3697,26 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         reasonCode: String,
         reasonText: String,
         actionSucceeded: Boolean,
-        timesClicked: Int = 1
+        timesClicked: Int = 1,
+        buttonFound: Boolean = (status == OrderStatus.ACCEPTED),
+        buttonDetails: String = "",
+        clickMethod: String = "",
+        errorMsg: String? = null
     ) {
         val now = System.currentTimeMillis()
+        val totalLatency = if (candidate.detectionTimeMs > 0L) (now - candidate.detectionTimeMs).coerceAtLeast(1L) else 100L
+        val actionLatency = (now - candidate.timestamp).coerceAtLeast(15L)
+        RideDiagnosticsManager.recordAction(
+            id = recordId,
+            status = status,
+            buttonFound = buttonFound,
+            buttonDetails = buttonDetails,
+            clickMethod = clickMethod,
+            finalAction = "$status: $reasonText",
+            error = errorMsg,
+            actionLatencyMs = actionLatency,
+            totalLatencyMs = totalLatency
+        )
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val updated = rideHistoryRepository.onOrderActionCompleted(
