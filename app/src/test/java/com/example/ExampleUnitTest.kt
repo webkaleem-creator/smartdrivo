@@ -55,23 +55,6 @@ class ExampleUnitTest {
     }
 
     @Test
-    fun testRapidoStrictAcceptMatch() {
-        assertTrue(RapidoAdapter.isStrictAcceptMatch("Accept"))
-        assertTrue(RapidoAdapter.isStrictAcceptMatch("ACCEPT"))
-        assertTrue(RapidoAdapter.isStrictAcceptMatch("accept"))
-        assertTrue(RapidoAdapter.isStrictAcceptMatch("स्वीकार करें"))
-        assertTrue(RapidoAdapter.isStrictAcceptMatch("स्वीकार"))
-        assertTrue(RapidoAdapter.isStrictAcceptMatch("Accept Order"))
-        assertTrue(RapidoAdapter.isStrictAcceptMatch("Accept Ride"))
-        assertFalse(RapidoAdapter.isStrictAcceptMatch("Don't Accept"))
-        assertFalse(RapidoAdapter.isStrictAcceptMatch("Cancel"))
-        assertFalse(RapidoAdapter.isStrictAcceptMatch("Decline"))
-        assertFalse(RapidoAdapter.isStrictAcceptMatch("Reject"))
-        assertFalse(RapidoAdapter.isStrictAcceptMatch(null))
-        assertFalse(RapidoAdapter.isStrictAcceptMatch(""))
-    }
-
-    @Test
     fun testOlaAndUberAcceptTextMatching() {
         assertTrue(OlaAdapter.isAcceptText("Accept"))
         assertTrue(OlaAdapter.isAcceptText("ACCEPT"))
@@ -454,5 +437,125 @@ class ExampleUnitTest {
         val data3 = RapidoAdapter.extractOrderDataFromTexts(texts3)
         assertNull(data3.pickupKm)
         assertEquals(11.2f, data3.dropKm ?: 0f, 0.01f)
+    }
+
+    @Test
+    fun testBlocklistAddressExclusionInRapidoAdapter() {
+        val blocklistItems = listOf(
+            "Accepted", "Auto-Accept Orders", "Max Pickup", "Max Drop",
+            "ADDRESS", "Fare", "Distance", "Filter", "Settings", "Home", "History", "Areas"
+        )
+        for (item in blocklistItems) {
+            assertTrue("Item $item should match blocklist", RapidoAdapter.matchesBlocklist(item))
+            assertTrue("Item $item should be invalid address", RapidoAdapter.isInvalidAddress(item))
+        }
+
+        // Test that when extracted texts only contain blocklist words or SmartDrivo UI texts, address is "Address unavailable"
+        val smartDrivoTexts = listOf(
+            "Auto-Accept Orders",
+            "Accepted",
+            "Max Pickup",
+            "Max Drop",
+            "Fare",
+            "Distance",
+            "Filter",
+            "Settings",
+            "ADDRESS"
+        )
+        val orderData = RapidoAdapter.extractOrderDataFromTexts(smartDrivoTexts)
+        assertEquals("Address unavailable", orderData.pickupAddress)
+        assertEquals("Address unavailable", orderData.dropAddress)
+
+        // Test with real addresses mixed with blocklist items
+        val mixedTexts = listOf(
+            "₹90",
+            "1.5 km",
+            "Max Pickup (km)",
+            "Koramangala 4th Block",
+            "4.0 km",
+            "Auto-Accept Orders",
+            "Indiranagar 100ft Road"
+        )
+        val mixedOrderData = RapidoAdapter.extractOrderDataFromTexts(mixedTexts)
+        assertEquals("Koramangala 4th Block", mixedOrderData.pickupAddress)
+        assertEquals("Indiranagar 100ft Road", mixedOrderData.dropAddress)
+    }
+
+    @Test
+    fun testSmartDrivoPackageIdentification() {
+        assertTrue(RapidoAdapter.isSmartDrivoPackage("com.aistudio.smartdrivo.krmx"))
+        assertTrue(RapidoAdapter.isSmartDrivoPackage("com.example"))
+        assertTrue(RapidoAdapter.isSmartDrivoPackage("com.example.smartdrivo"))
+        assertFalse(RapidoAdapter.isSmartDrivoPackage("com.rapido.passenger"))
+        assertFalse(RapidoAdapter.isSmartDrivoPackage("com.rapido.rider"))
+        assertFalse(RapidoAdapter.isSmartDrivoPackage("com.rapido.captain"))
+    }
+
+    @Test
+    fun testRapidoHomeScreenDetection() {
+        // Root containing "Today's Earnings" -> HOME SCREEN
+        val homeTexts1 = listOf("ON DUTY", "Today's Earnings", "₹450", "Blue Performance", "Map")
+        assertTrue("Should detect home screen with Today's Earnings", RapidoAdapter.isRapidoHomeScreenTexts(homeTexts1))
+
+        // Root containing "ON DUTY" -> HOME SCREEN
+        val homeTexts2 = listOf("ON DUTY", "Captain", "Rating: 4.8")
+        assertTrue("Should detect home screen with ON DUTY", RapidoAdapter.isRapidoHomeScreenTexts(homeTexts2))
+
+        // Root containing "Blue Performance" -> HOME SCREEN
+        val homeTexts3 = listOf("Blue Performance", "Level 2", "Incentives")
+        assertTrue("Should detect home screen with Blue Performance", RapidoAdapter.isRapidoHomeScreenTexts(homeTexts3))
+
+        // Real order popup texts -> NOT home screen
+        val orderTexts = listOf("₹85 +₹20", "0.4 km", "MG Road", "Indiranagar", "Accept")
+        assertFalse("Real order should not be detected as home screen", RapidoAdapter.isRapidoHomeScreenTexts(orderTexts))
+    }
+
+    @Test
+    fun testRapidoEarningsFareExclusion() {
+        // Today's Earnings should NOT be extracted as order fare
+        val homeTexts = listOf("Today's Earnings", "₹350", "ON DUTY", "Blue Performance")
+        val data = RapidoAdapter.extractOrderDataFromTexts(homeTexts)
+        assertEquals("Fare from Today's Earnings must be ignored", 0f, data.totalFare, 0.01f)
+
+        // Real order fare should be extracted
+        val orderTexts = listOf("Auto", "₹95", "1.2 km", "Koramangala", "Accept")
+        val orderData = RapidoAdapter.extractOrderDataFromTexts(orderTexts)
+        assertEquals("Real order fare must be extracted", 95f, orderData.totalFare, 0.01f)
+    }
+
+    @Test
+    fun testRapidoOrderPopupValidationRules() {
+        // 1. Home screen data: MUST FAIL
+        val homeTexts = listOf("ON DUTY", "Today's Earnings", "₹350", "Blue Performance")
+        val validation1 = RapidoAdapter.validateRapidoOrderPopupFromTexts(homeTexts, hasAcceptButton = false)
+        assertFalse("Home screen should not be a valid order popup", validation1.isValid)
+
+        // 2. Genuine order popup with all 3: Fare, pickup km, Accept button: MUST PASS
+        val validTexts = listOf("₹75", "0.4 km", "Koramangala", "Indiranagar", "Accept")
+        val validation2 = RapidoAdapter.validateRapidoOrderPopupFromTexts(validTexts, hasAcceptButton = true)
+        assertTrue("Valid order with fare, pickup km, and Accept button should pass", validation2.isValid)
+        assertEquals(75f, validation2.fare ?: 0f, 0.01f)
+        assertEquals(0.4f, validation2.pickupDistKm ?: 0f, 0.01f)
+
+        // 3. Genuine order popup with "Nearby": MUST PASS
+        val nearbyTexts = listOf("₹60", "Nearby", "MG Road", "Indiranagar", "Accept")
+        val validation3 = RapidoAdapter.validateRapidoOrderPopupFromTexts(nearbyTexts, hasAcceptButton = true)
+        assertTrue("Valid order with Nearby, fare, and Accept button should pass", validation3.isValid)
+        assertTrue(validation3.hasNearby)
+
+        // 4. Missing Accept button: MUST FAIL
+        val noAcceptTexts = listOf("₹75", "0.4 km", "Koramangala")
+        val validation4 = RapidoAdapter.validateRapidoOrderPopupFromTexts(noAcceptTexts, hasAcceptButton = false)
+        assertFalse("Order missing Accept button must fail", validation4.isValid)
+
+        // 5. Missing pickup distance and missing Nearby: MUST FAIL
+        val noDistTexts = listOf("₹75", "Koramangala")
+        val validation5 = RapidoAdapter.validateRapidoOrderPopupFromTexts(noDistTexts, hasAcceptButton = true)
+        assertFalse("Order missing distance and Nearby must fail", validation5.isValid)
+
+        // 6. Missing fare (e.g. only earnings): MUST FAIL
+        val noFareTexts = listOf("0.4 km", "Today's Earnings", "₹350", "Koramangala")
+        val validation6 = RapidoAdapter.validateRapidoOrderPopupFromTexts(noFareTexts, hasAcceptButton = true)
+        assertFalse("Order with only earnings fare must fail", validation6.isValid)
     }
 }

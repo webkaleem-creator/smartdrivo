@@ -19,3 +19,4 @@ debug.keystore
 *.jks
 my-upload-key.jks
 .build-outputs/
+*.apk

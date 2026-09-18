@@ -22,6 +22,7 @@ import com.example.model.VehicleType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -83,8 +84,52 @@ class PreferencesManager(private val context: Context) {
             _hasOpenedBefore.value = value
         }
 
-    private val _orderHistory = MutableStateFlow(loadOrderHistory())
-    val orderHistory: StateFlow<List<OrderHistoryItem>> = _orderHistory.asStateFlow()
+    init {
+        // Initialize shared StateFlows on first access
+        if (_sharedOrderHistory.value.isEmpty()) {
+            val initial = loadOrderHistory()
+            if (initial.isNotEmpty()) {
+                _sharedOrderHistory.value = initial
+            }
+        }
+        val storedTotal = prefs.getInt(KEY_TOTAL_ACCEPTED, 0)
+        val historyAccepted = _sharedOrderHistory.value.count { it.status == OrderStatus.ACCEPTED }
+        val count = maxOf(storedTotal, historyAccepted)
+        if (_sharedTotalAccepted.value < count) {
+            _sharedTotalAccepted.value = count
+        }
+
+        // Keep _sharedOrderHistory reactively synced with Room database
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                com.example.data.db.RideHistoryRepository.getInstance(context).allHistory.collect { entities ->
+                    val items = entities.map { it.toOrderHistoryItem() }
+                    _sharedOrderHistory.value = items
+                    val accepted = items.count { it.status == OrderStatus.ACCEPTED }
+                    val stored = prefs.getInt(KEY_TOTAL_ACCEPTED, 0)
+                    _sharedTotalAccepted.value = maxOf(stored, accepted)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // Auto-refresh StateFlow if preferences change from any service or thread
+        prefs.registerOnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_ORDER_HISTORY) {
+                val updated = loadOrderHistory()
+                _sharedOrderHistory.value = updated
+                val accepted = updated.count { it.status == OrderStatus.ACCEPTED }
+                val tot = maxOf(prefs.getInt(KEY_TOTAL_ACCEPTED, 0), accepted)
+                _sharedTotalAccepted.value = tot
+            } else if (key == KEY_TOTAL_ACCEPTED) {
+                _sharedTotalAccepted.value = prefs.getInt(KEY_TOTAL_ACCEPTED, 0)
+            }
+        }
+    }
+
+    private val _orderHistory = _sharedOrderHistory
+    val orderHistory: StateFlow<List<OrderHistoryItem>> = _sharedOrderHistory.asStateFlow()
 
     private val _paymentSubmissions = MutableStateFlow(loadPaymentSubmissions())
     val paymentSubmissions: StateFlow<List<PaymentSubmission>> = _paymentSubmissions.asStateFlow()
@@ -119,8 +164,8 @@ class PreferencesManager(private val context: Context) {
     private val _lastAcceptedRide = MutableStateFlow<OrderHistoryItem?>(loadLastAccepted())
     val lastAcceptedRide: StateFlow<OrderHistoryItem?> = _lastAcceptedRide.asStateFlow()
 
-    private val _totalAccepted = MutableStateFlow(prefs.getInt(KEY_TOTAL_ACCEPTED, 0))
-    val totalAcceptedFlow: StateFlow<Int> = _totalAccepted.asStateFlow()
+    private val _totalAccepted = _sharedTotalAccepted
+    val totalAcceptedFlow: StateFlow<Int> = _sharedTotalAccepted.asStateFlow()
 
     val totalAccepted: Int
         get() = prefs.getInt(KEY_TOTAL_ACCEPTED, 0)
@@ -185,7 +230,7 @@ class PreferencesManager(private val context: Context) {
 
     fun loadStats(): List<OrderHistoryItem> {
         val latest = loadOrderHistory()
-        _orderHistory.value = latest
+        _sharedOrderHistory.value = latest
         val storedTotal = prefs.getInt(KEY_TOTAL_ACCEPTED, 0)
         val historyAccepted = latest.count { it.status == OrderStatus.ACCEPTED }
         val count = maxOf(storedTotal, historyAccepted)
@@ -193,8 +238,19 @@ class PreferencesManager(private val context: Context) {
             prefs.edit().putInt(KEY_TOTAL_ACCEPTED, count).apply()
         }
         _totalAccepted.value = count
+        _sharedTotalAccepted.value = count
         _lastAcceptedRide.value = loadLastAccepted()
         return latest
+    }
+
+    fun notifyOrderHistoryChanged() {
+        val latest = loadOrderHistory()
+        _sharedOrderHistory.value = latest
+        val storedTotal = prefs.getInt(KEY_TOTAL_ACCEPTED, 0)
+        val historyAccepted = latest.count { it.status == OrderStatus.ACCEPTED }
+        val count = maxOf(storedTotal, historyAccepted)
+        _sharedTotalAccepted.value = count
+        _totalAccepted.value = count
     }
 
     var isPendingAutoAcceptActivation: Boolean
@@ -232,7 +288,6 @@ class PreferencesManager(private val context: Context) {
             putString(KEY_NAME, profile.name)
             putString(KEY_EMAIL, profile.email)
             putString(KEY_PHONE, profile.phone)
-            putString(KEY_MOBILE, if (profile.mobile.isNotEmpty()) profile.mobile else profile.phone)
             putString(KEY_CITY, profile.city)
             putString(KEY_STATE, profile.state)
             putString(KEY_VEHICLE, profile.vehicleType.name)
@@ -254,13 +309,12 @@ class PreferencesManager(private val context: Context) {
         val name = prefs.getString(KEY_NAME, "") ?: ""
         val email = prefs.getString(KEY_EMAIL, "") ?: ""
         val phone = prefs.getString(KEY_PHONE, "") ?: ""
-        val mobile = prefs.getString(KEY_MOBILE, "") ?: phone
         val city = prefs.getString(KEY_CITY, "") ?: ""
         val state = prefs.getString(KEY_STATE, "") ?: ""
         val vehicleStr = prefs.getString(KEY_VEHICLE, "AUTO")
-        val plan = prefs.getString(KEY_PLAN, "7DAYS") ?: "7DAYS"
-        val price = prefs.getInt(KEY_PLAN_PRICE, 129)
-        val expire = prefs.getLong(KEY_PLAN_EXPIRE, System.currentTimeMillis() + 7L * 86400000L)
+        val plan = prefs.getString(KEY_PLAN, "NONE") ?: "NONE"
+        val price = prefs.getInt(KEY_PLAN_PRICE, 0)
+        val expire = prefs.getLong(KEY_PLAN_EXPIRE, 0L)
         val isApproved = prefs.getBoolean(KEY_IS_APPROVED, false)
         val isAdmin = prefs.getBoolean(KEY_IS_ADMIN, false)
         val isActive = prefs.getBoolean(KEY_IS_ACTIVE, true)
@@ -271,6 +325,8 @@ class PreferencesManager(private val context: Context) {
             name = name,
             email = email,
             phone = phone,
+            city = city,
+            state = state,
             vehicleType = VehicleType.fromString(vehicleStr),
             plan = plan,
             planPrice = price,
@@ -278,14 +334,16 @@ class PreferencesManager(private val context: Context) {
             isApproved = isApproved,
             isAdmin = isAdmin,
             isActive = isActive,
-            referralCode = referral,
-            mobile = mobile,
-            city = city,
-            state = state
+            referralCode = referral
         )
     }
 
     // --- App Settings ---
+    fun setAutoAcceptActive(active: Boolean) {
+        val current = _appSettings.value
+        saveAppSettings(current.copy(isAutoAcceptActive = active))
+    }
+
     fun saveAppSettings(settings: AppSettings) {
         prefs.edit().apply {
             putBoolean(KEY_AUTO_ACCEPT, settings.isAutoAcceptActive)
@@ -310,7 +368,7 @@ class PreferencesManager(private val context: Context) {
             putBoolean(KEY_AUTOSTART, settings.autostartOnBoot)
             putBoolean(KEY_GOTO_ENABLED, settings.isGoToEnabled)
             putBoolean(KEY_NOGO_ENABLED, settings.isNoGoEnabled)
-            apply()
+            commit()
         }
         _isGoToEnabled.value = settings.isGoToEnabled
         _isNoGoEnabled.value = settings.isNoGoEnabled
@@ -576,7 +634,9 @@ class PreferencesManager(private val context: Context) {
     // --- Order History ---
     fun addOrderHistory(item: OrderHistoryItem) {
         val current = loadOrderHistory().toMutableList()
-        val existingIndex = current.indexOfFirst { it.id == item.id }
+        val existingIndex = current.indexOfFirst {
+            it.id == item.id || (item.bookingId.isNotBlank() && it.bookingId == item.bookingId)
+        }
         if (existingIndex >= 0) {
             current[existingIndex] = item
         } else {
@@ -586,6 +646,17 @@ class PreferencesManager(private val context: Context) {
             current.removeAt(current.size - 1)
         }
         saveOrderHistory(current)
+
+        // Also persist to Room
+        val entity = com.example.data.db.entity.RideHistoryEntity.fromOrderHistoryItem(item)
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                com.example.data.db.AppDatabase.getInstance(context).rideHistoryDao().insert(entity)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
         if (item.status == OrderStatus.ACCEPTED) {
             _lastAcceptedRide.value = item
             saveLastAccepted(item)
@@ -603,6 +674,17 @@ class PreferencesManager(private val context: Context) {
             .apply()
         _lastAcceptedRide.value = null
         _totalAccepted.value = 0
+        _sharedTotalAccepted.value = 0
+        _sharedOrderHistory.value = emptyList()
+
+        // Clear Room database
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                com.example.data.db.RideHistoryRepository.getInstance(context).clearHistory()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     private fun saveOrderHistory(list: List<OrderHistoryItem>) {
@@ -632,7 +714,8 @@ class PreferencesManager(private val context: Context) {
             arr.put(obj)
         }
         prefs.edit().putString(KEY_ORDER_HISTORY, arr.toString()).apply()
-        _orderHistory.value = list
+        // Immediate StateFlow UI update trigger
+        _sharedOrderHistory.value = list
     }
 
     private fun loadOrderHistory(): List<OrderHistoryItem> {
@@ -917,6 +1000,8 @@ class PreferencesManager(private val context: Context) {
                 put("name", u.name)
                 put("email", u.email)
                 put("phone", u.phone)
+                put("city", u.city)
+                put("state", u.state)
                 put("vehicleType", u.vehicleType.name)
                 put("plan", u.plan)
                 put("planPrice", u.planPrice)
@@ -951,6 +1036,8 @@ class PreferencesManager(private val context: Context) {
                             name = obj.optString("name", ""),
                             email = obj.optString("email", ""),
                             phone = obj.optString("phone", ""),
+                            city = obj.optString("city", ""),
+                            state = obj.optString("state", ""),
                             vehicleType = VehicleType.fromString(obj.optString("vehicleType", "AUTO")),
                             plan = obj.optString("plan", "7DAYS"),
                             planPrice = obj.optInt("planPrice", 129),
@@ -967,76 +1054,7 @@ class PreferencesManager(private val context: Context) {
             } catch (e: Exception) { e.printStackTrace() }
         }
 
-        // Default initial drivers for instant search and status display
-        val defaultList = listOf(
-            UserProfile(
-                uid = "admin_9949957404",
-                name = "Kaleem (Admin)",
-                email = "webkaleem@gmail.com",
-                phone = "+919949957404",
-                vehicleType = VehicleType.AUTO,
-                plan = "LIFETIME_ADMIN",
-                planPrice = 0,
-                planExpireMillis = System.currentTimeMillis() + (3650L * 86400000L),
-                isApproved = true,
-                isAdmin = true,
-                isActive = true
-            ),
-            UserProfile(
-                uid = "driver_rajesh_9876543210",
-                name = "Rajesh Kumar",
-                email = "rajesh.driver@gmail.com",
-                phone = "+919876543210",
-                vehicleType = VehicleType.AUTO,
-                plan = "7DAYS",
-                planPrice = 129,
-                planExpireMillis = System.currentTimeMillis() + (5L * 86400000L),
-                isApproved = true,
-                isAdmin = false,
-                isActive = true
-            ),
-            UserProfile(
-                uid = "driver_arif_9848022338",
-                name = "Mohammed Arif",
-                email = "arif.ride@gmail.com",
-                phone = "+919848022338",
-                vehicleType = VehicleType.BIKE,
-                plan = "3DAYS",
-                planPrice = 59,
-                planExpireMillis = System.currentTimeMillis() + (2L * 86400000L),
-                isApproved = true,
-                isAdmin = false,
-                isActive = true
-            ),
-            UserProfile(
-                uid = "driver_suresh_9123456789",
-                name = "Suresh Reddy",
-                email = "suresh.uber@gmail.com",
-                phone = "+919123456789",
-                vehicleType = VehicleType.CAR,
-                plan = "1MONTH",
-                planPrice = 329,
-                planExpireMillis = System.currentTimeMillis() - (1L * 86400000L),
-                isApproved = false,
-                isAdmin = false,
-                isActive = false
-            ),
-            UserProfile(
-                uid = "driver_vikram_9988776655",
-                name = "Vikram Singh",
-                email = "vikram.ola@gmail.com",
-                phone = "+919988776655",
-                vehicleType = VehicleType.AUTO,
-                plan = "3DAYS",
-                planPrice = 59,
-                planExpireMillis = System.currentTimeMillis() - (3L * 86400000L),
-                isApproved = false,
-                isAdmin = false,
-                isActive = false
-            )
-        )
-        persistAllUsersToPrefs(defaultList)
-        return defaultList
+        return emptyList()
     }
 
     // --- Global Admin Settings ---
@@ -1066,11 +1084,30 @@ class PreferencesManager(private val context: Context) {
     companion object {
         const val DEFAULT_UPI_ID = "gpay-11189725657@okaxis"
 
+        // Process-wide shared StateFlow for instant cross-component updates (UI auto-refresh)
+        private val _sharedOrderHistory = MutableStateFlow<List<OrderHistoryItem>>(emptyList())
+        val sharedOrderHistory: StateFlow<List<OrderHistoryItem>> = _sharedOrderHistory.asStateFlow()
+
+        private val _sharedTotalAccepted = MutableStateFlow<Int>(0)
+        val sharedTotalAccepted: StateFlow<Int> = _sharedTotalAccepted.asStateFlow()
+
+        @Volatile
+        private var instance: PreferencesManager? = null
+
+        fun getInstance(context: Context): PreferencesManager {
+            return instance ?: synchronized(this) {
+                instance ?: PreferencesManager(context.applicationContext).also { instance = it }
+            }
+        }
+
+        fun updateSharedOrderHistory(list: List<OrderHistoryItem>) {
+            _sharedOrderHistory.value = list
+        }
+
         private const val KEY_UID = "user_uid"
         private const val KEY_NAME = "user_name"
         private const val KEY_EMAIL = "user_email"
         private const val KEY_PHONE = "user_phone"
-        private const val KEY_MOBILE = "user_mobile"
         private const val KEY_CITY = "user_city"
         private const val KEY_STATE = "user_state"
         private const val KEY_VEHICLE = "user_vehicle"

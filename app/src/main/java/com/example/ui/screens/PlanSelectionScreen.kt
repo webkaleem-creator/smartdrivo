@@ -169,7 +169,7 @@ fun PlanSelectionScreen(
                             ) {
                                 Text(
                                     text = "SELECTED MEMBERSHIP PLAN",
-                                    fontSize = 8.sp,
+                                    fontSize = 7.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.Black
                                 )

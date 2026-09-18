@@ -47,7 +47,6 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,13 +57,12 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.PreferencesManager
 import com.example.model.OrderHistoryItem
 import com.example.model.OrderStatus
 import com.example.model.Platform
+import com.example.ui.viewmodel.RideHistoryViewModel
 import com.example.ui.theme.BlueContainer
 import com.example.ui.theme.BluePrimary
 import com.example.ui.theme.BlueSecondary
@@ -99,26 +97,28 @@ enum class HistoryTab(val label: String) {
 @Composable
 fun OrderHistoryScreen(
     prefs: PreferencesManager,
+    viewModel: RideHistoryViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
     onBack: () -> Unit
 ) {
-    val history by prefs.orderHistory.collectAsState()
+    val historyEntities by viewModel.history.collectAsStateWithLifecycle()
+    val history = remember(historyEntities) {
+        historyEntities.map { it.toOrderHistoryItem() }
+    }
     val totalAccepted by prefs.totalAcceptedFlow.collectAsState()
 
-    val coroutineScope = rememberCoroutineScope()
+    fun loadStats() {
+        prefs.loadStats()
+    }
 
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            prefs.loadStats()
-        }
+        loadStats()
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                coroutineScope.launch(Dispatchers.IO) {
-                    prefs.loadStats()
-                }
+                loadStats()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -143,14 +143,14 @@ fun OrderHistoryScreen(
     }
     val sevenDaysAgo = remember { System.currentTimeMillis() - 7 * 86400000L }
 
-    val acceptedCount by remember(history) {
-        derivedStateOf { history.count { it.status == OrderStatus.ACCEPTED } }
+    val acceptedCount = remember(history) { history.count { it.status == OrderStatus.ACCEPTED } }
+    val rejectedCount = remember(history) {
+        history.count { isNoGoOrder(it) }
     }
-    val ignoredCount by remember(history) {
-        derivedStateOf { history.count { it.status == OrderStatus.IGNORED } }
-    }
-    val rejectedCount by remember(history) {
-        derivedStateOf { history.count { it.status == OrderStatus.REJECTED || it.status == OrderStatus.MISSED } }
+    val ignoredCount = remember(history) {
+        history.count {
+            !isNoGoOrder(it) && it.status != OrderStatus.ACCEPTED
+        }
     }
     val allCount by remember(history) { derivedStateOf { history.size } }
 
@@ -159,8 +159,8 @@ fun OrderHistoryScreen(
             history.filter { item ->
                 val matchTab = when (selectedTab) {
                     HistoryTab.ACCEPTED -> item.status == OrderStatus.ACCEPTED
-                    HistoryTab.IGNORED -> item.status == OrderStatus.IGNORED
-                    HistoryTab.REJECTED -> item.status == OrderStatus.REJECTED || item.status == OrderStatus.MISSED
+                    HistoryTab.REJECTED -> isNoGoOrder(item)
+                    HistoryTab.IGNORED -> !isNoGoOrder(item) && item.status != OrderStatus.ACCEPTED
                     HistoryTab.ALL -> true
                 }
                 val matchPlatform = selectedPlatformFilter == null || item.platform == selectedPlatformFilter
@@ -194,7 +194,7 @@ fun OrderHistoryScreen(
                     Text(
                         text = "Order History (${history.size})",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp,
+                        fontSize = 18.sp,
                         color = TextDarkPrimary
                     )
                 },
@@ -209,7 +209,10 @@ fun OrderHistoryScreen(
                 },
                 actions = {
                     if (history.isNotEmpty()) {
-                        IconButton(onClick = { prefs.clearOrderHistory() }) {
+                        IconButton(onClick = {
+                            viewModel.clearHistory()
+                            prefs.clearOrderHistory()
+                        }) {
                             Icon(
                                 Icons.Default.DeleteSweep,
                                 contentDescription = "Clear History",
@@ -243,7 +246,7 @@ fun OrderHistoryScreen(
                         TabRowDefaults.SecondaryIndicator(
                             Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
                             color = BluePrimary,
-                            height = 3.dp
+                            height = 2.5.dp
                         )
                     }
                 },
@@ -274,22 +277,22 @@ fun OrderHistoryScreen(
                             ) {
                                 Text(
                                     text = tab.label,
-                                    fontSize = 14.sp,
+                                    fontSize = 13.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                     color = if (isSelected) BluePrimary else TextDarkSecondary
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
                                 Box(
                                     modifier = Modifier
                                         .background(
                                             if (isSelected) badgeColor.copy(alpha = 0.15f) else Color(0xFFEEEEEE),
                                             CircleShape
                                         )
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        .padding(horizontal = 5.dp, vertical = 1.dp)
                                 ) {
                                     Text(
                                         text = tabCount.toString(),
-                                        fontSize = 12.sp,
+                                        fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = if (isSelected) badgeColor else TextDarkSecondary
                                     )
@@ -304,15 +307,15 @@ fun OrderHistoryScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                shape = RoundedCornerShape(16.dp),
+                    .padding(horizontal = 10.dp, vertical = 3.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = CardBackground),
                 border = BorderStroke(1.dp, CardBorderDefault)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(14.dp),
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -323,21 +326,21 @@ fun OrderHistoryScreen(
                     ) {
                         Text(
                             text = "Accepted",
-                            fontSize = 14.sp,
+                            fontSize = 11.sp,
                             color = TextDarkSecondary,
                             fontWeight = FontWeight.Normal
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(2.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
-                                    .size(8.dp)
+                                    .size(7.dp)
                                     .background(StatusActiveGreen, CircleShape)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = totalAcceptedCount.toString(),
-                                fontSize = 20.sp,
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = TextDarkPrimary
                             )
@@ -347,7 +350,7 @@ fun OrderHistoryScreen(
                     Box(
                         modifier = Modifier
                             .width(1.dp)
-                            .height(40.dp)
+                            .height(28.dp)
                             .background(CardBorderDefault)
                     )
 
@@ -358,14 +361,14 @@ fun OrderHistoryScreen(
                     ) {
                         Text(
                             text = "Assisted Fare",
-                            fontSize = 14.sp,
+                            fontSize = 11.sp,
                             color = TextDarkSecondary,
                             fontWeight = FontWeight.Normal
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "₹$totalEarnings",
-                            fontSize = 20.sp,
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = BluePrimary
                         )
@@ -374,7 +377,7 @@ fun OrderHistoryScreen(
                     Box(
                         modifier = Modifier
                             .width(1.dp)
-                            .height(40.dp)
+                            .height(28.dp)
                             .background(CardBorderDefault)
                     )
 
@@ -385,14 +388,14 @@ fun OrderHistoryScreen(
                     ) {
                         Text(
                             text = "Total Logged",
-                            fontSize = 14.sp,
+                            fontSize = 11.sp,
                             color = TextDarkSecondary,
                             fontWeight = FontWeight.Normal
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = history.size.toString(),
-                            fontSize = 20.sp,
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = BlueSecondary
                         )
@@ -404,15 +407,15 @@ fun OrderHistoryScreen(
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 10.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                val dates = listOf("All", "Today", "Yesterday", "Last 7 Days")
-                items(dates, key = { "date_$it" }, contentType = { "date_chip" }) { d ->
+                val dates = listOf("All", "Today", "Yesterday")
+                items(dates) { d ->
                     FilterChip(
                         selected = selectedDateRange == d,
                         onClick = { selectedDateRange = d },
-                        label = { Text(d, fontSize = 14.sp) },
+                        label = { Text(d, fontSize = 12.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = BluePrimary,
                             selectedLabelColor = Color.White,
@@ -422,27 +425,13 @@ fun OrderHistoryScreen(
                     )
                 }
 
-                item(key = "platform_all", contentType = "platform_chip") {
-                    FilterChip(
-                        selected = selectedPlatformFilter == null,
-                        onClick = { selectedPlatformFilter = null },
-                        label = { Text("All Platforms", fontSize = 14.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = BluePrimary,
-                            selectedLabelColor = Color.White,
-                            containerColor = Color.White,
-                            labelColor = TextDarkPrimary
-                        )
-                    )
-                }
-
-                items(Platform.entries, key = { "platform_${it.name}" }, contentType = { "platform_chip" }) { platform ->
+                items(Platform.entries) { platform ->
                     FilterChip(
                         selected = selectedPlatformFilter == platform,
                         onClick = {
                             selectedPlatformFilter = if (selectedPlatformFilter == platform) null else platform
                         },
-                        label = { Text(platform.displayName, fontSize = 14.sp) },
+                        label = { Text(platform.displayName, fontSize = 12.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = when (platform) {
                                 Platform.RAPIDO -> PlatformRapido
@@ -457,13 +446,13 @@ fun OrderHistoryScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(2.dp))
 
             if (filteredList.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(20.dp),
+                        .padding(16.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -472,7 +461,7 @@ fun OrderHistoryScreen(
                         else
                             "No orders match the selected tab or filter.",
                         color = TextDarkSecondary,
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
                 }
@@ -480,18 +469,14 @@ fun OrderHistoryScreen(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(horizontal = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(
-                        items = filteredList,
-                        key = { it.id },
-                        contentType = { "order_card" }
-                    ) { item ->
+                    items(filteredList, key = { it.id }) { item ->
                         HistoryCard(item)
                     }
-                    item(key = "bottom_spacer", contentType = "spacer") {
-                        Spacer(modifier = Modifier.height(24.dp))
+                    item {
+                        Spacer(modifier = Modifier.height(16.dp))
                     }
                 }
             }
@@ -511,13 +496,24 @@ private fun HistoryCard(item: OrderHistoryItem) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = CardBackground),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         border = BorderStroke(1.dp, CardBorderDefault)
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            val isNoGo = isNoGoOrder(item)
+            val effectiveStatus = when {
+                item.status == OrderStatus.PROCESSING -> OrderStatus.PROCESSING
+                item.status == OrderStatus.ACCEPTED -> OrderStatus.ACCEPTED
+                item.status == OrderStatus.FAILED -> OrderStatus.FAILED
+                item.status == OrderStatus.SKIPPED -> OrderStatus.SKIPPED
+                isNoGo || item.status == OrderStatus.REJECTED -> OrderStatus.REJECTED
+                item.status == OrderStatus.MISSED -> OrderStatus.MISSED
+                else -> OrderStatus.IGNORED
+            }
+
             // Row 1: Platform badge + Vehicle badge + Status badge
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -526,7 +522,7 @@ private fun HistoryCard(item: OrderHistoryItem) {
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     // Platform badge
                     val (platformBg, platformText) = when (item.platform) {
@@ -536,12 +532,12 @@ private fun HistoryCard(item: OrderHistoryItem) {
                     }
                     Box(
                         modifier = Modifier
-                            .background(platformBg, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                            .background(platformBg, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
                             item.platform.displayName,
-                            fontSize = 12.sp,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = platformText
                         )
@@ -550,12 +546,12 @@ private fun HistoryCard(item: OrderHistoryItem) {
                     // Vehicle badge
                     Box(
                         modifier = Modifier
-                            .background(BlueContainer, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                            .background(BlueContainer, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
                             item.vehicleType.name,
-                            fontSize = 12.sp,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = BlueSecondary
                         )
@@ -563,22 +559,30 @@ private fun HistoryCard(item: OrderHistoryItem) {
                 }
 
                 // Status badge
-                val (statusBg, statusTextColor) = when (item.status) {
+                val (statusBg, statusTextColor) = when (effectiveStatus) {
+                    OrderStatus.PROCESSING -> Pair(Color(0xFFFFF8E1), Color(0xFFE65100))
                     OrderStatus.ACCEPTED -> Pair(StatusActiveGreenBg, StatusActiveGreen)
                     OrderStatus.REJECTED -> Pair(StatusInactiveRedBg, StatusInactiveRed)
                     OrderStatus.IGNORED -> Pair(StatusWarningYellowBg, StatusWarningYellow)
+                    OrderStatus.FAILED -> Pair(Color(0xFFFFEBEE), Color(0xFFC62828))
+                    OrderStatus.SKIPPED -> Pair(Color(0xFFEDE7F6), Color(0xFF512DA8))
                     OrderStatus.MISSED -> Pair(Color(0xFFEEEEEE), Color.Gray)
                 }
-                val isToggleOff = item.status == OrderStatus.IGNORED && (item.reason.contains("toggle", ignoreCase = true) || item.reason.contains("OFF", ignoreCase = true))
-                val statusLabel = if (isToggleOff) "IGNORED • TOGGLE OFF" else item.status.name
+                val isToggleOff = effectiveStatus == OrderStatus.IGNORED && (item.reason.contains("toggle", ignoreCase = true) || item.reason.contains("OFF", ignoreCase = true))
+                val statusLabel = when {
+                    effectiveStatus == OrderStatus.PROCESSING -> "PROCESSING"
+                    isToggleOff -> "IGNORED • TOGGLE OFF"
+                    effectiveStatus == OrderStatus.FAILED -> "ACTION FAILED"
+                    else -> effectiveStatus.name
+                }
                 Box(
                     modifier = Modifier
-                        .background(statusBg, RoundedCornerShape(6.dp))
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                        .background(statusBg, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
                         text = statusLabel,
-                        fontSize = 12.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = statusTextColor
                     )
@@ -592,23 +596,23 @@ private fun HistoryCard(item: OrderHistoryItem) {
             ) {
                 Text(
                     text = "🕒 $formattedTime",
-                    fontSize = 14.sp,
+                    fontSize = 11.sp,
                     color = TextDarkSecondary,
                     fontWeight = FontWeight.Normal
                 )
             }
 
-            // Row 3: Bold large Fare + Base/Tip breakdown
+            // Row 3: Bold Fare (14sp) + Base/Tip breakdown
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(8.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFFFAFAFA)),
                 border = BorderStroke(1.dp, Color(0xFFEEEEEE))
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -616,13 +620,13 @@ private fun HistoryCard(item: OrderHistoryItem) {
                         val displayFare = if (item.amount > 0f) "₹${item.amount.toInt()}" else "₹--"
                         Text(
                             text = displayFare,
-                            fontSize = 20.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = BluePrimary
                         )
                         Text(
                             text = "Total Fare",
-                            fontSize = 14.sp,
+                            fontSize = 10.sp,
                             color = TextDarkSecondary,
                             fontWeight = FontWeight.Normal
                         )
@@ -641,50 +645,50 @@ private fun HistoryCard(item: OrderHistoryItem) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 text = "Base: ₹${base.toInt()}",
-                                fontSize = 14.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = TextDarkPrimary
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("•", color = CardBorderDefault)
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("•", fontSize = 10.sp, color = CardBorderDefault)
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = "Tip: +₹${tip.toInt()}",
-                                fontSize = 14.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (tip > 0f) StatusActiveGreen else TextDarkSecondary
                             )
                         }
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(1.dp))
                         Text(
                             text = if (tip > 0f) "Includes rider tip/bonus" else "Standard base fare",
-                            fontSize = 14.sp,
+                            fontSize = 10.sp,
                             color = TextDarkSecondary
                         )
                     }
                 }
             }
 
-            // Row 4: Pick distance + Trip distance chips
+            // Row 4: Pick distance + Trip distance chips (padding 4dp, font 10sp)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 // Pickup distance chip
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(6.dp),
                     color = BlueContainer,
                     border = BorderStroke(1.dp, BlueSecondary.copy(alpha = 0.25f))
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("📍", fontSize = 12.sp)
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("📍", fontSize = 10.sp)
+                        Spacer(modifier = Modifier.width(3.dp))
                         Text(
                             text = "Pickup: ${if (item.pickupDistKm > 0f) "%.1f km".format(item.pickupDistKm) else "Nearby"}",
-                            fontSize = 14.sp,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = BlueSecondary
                         )
@@ -693,19 +697,19 @@ private fun HistoryCard(item: OrderHistoryItem) {
 
                 // Trip distance chip
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(6.dp),
                     color = Color(0xFFF1F5F9),
                     border = BorderStroke(1.dp, CardBorderDefault)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("🎯", fontSize = 12.sp)
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("🎯", fontSize = 10.sp)
+                        Spacer(modifier = Modifier.width(3.dp))
                         Text(
                             text = "Trip: ${if (item.dropDistKm > 0f) "%.1f km".format(item.dropDistKm) else "N/A"}",
-                            fontSize = 14.sp,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = TextDarkPrimary
                         )
@@ -715,8 +719,8 @@ private fun HistoryCard(item: OrderHistoryItem) {
 
             HorizontalDivider(color = CardBorderDefault)
 
-            // Row 5: Full pickup and drop addresses (Card row style: icon on left, title bold, subtitle below in gray)
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Row 5: Full pickup and drop addresses (labels 10sp, address 11sp)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 // Full Pickup address
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -724,15 +728,15 @@ private fun HistoryCard(item: OrderHistoryItem) {
                 ) {
                     Box(
                         modifier = Modifier
-                            .padding(top = 4.dp)
-                            .size(12.dp)
+                            .padding(top = 3.dp)
+                            .size(8.dp)
                             .background(StatusActiveGreen, CircleShape)
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = "PICKUP ADDRESS",
-                            fontSize = 12.sp,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextDarkSecondary
                         )
@@ -741,10 +745,10 @@ private fun HistoryCard(item: OrderHistoryItem) {
                         } ?: "Pickup Location"
                         Text(
                             text = cleanPickup,
-                            fontSize = 14.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Normal,
                             color = TextDarkPrimary,
-                            lineHeight = 20.sp
+                            lineHeight = 15.sp
                         )
                     }
                 }
@@ -756,15 +760,15 @@ private fun HistoryCard(item: OrderHistoryItem) {
                 ) {
                     Box(
                         modifier = Modifier
-                            .padding(top = 4.dp)
-                            .size(12.dp)
+                            .padding(top = 3.dp)
+                            .size(8.dp)
                             .background(StatusInactiveRed, CircleShape)
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = "DROP ADDRESS",
-                            fontSize = 12.sp,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextDarkSecondary
                         )
@@ -773,46 +777,43 @@ private fun HistoryCard(item: OrderHistoryItem) {
                         } ?: "Drop Location"
                         Text(
                             text = cleanDrop,
-                            fontSize = 14.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Normal,
                             color = TextDarkPrimary,
-                            lineHeight = 20.sp
+                            lineHeight = 15.sp
                         )
                     }
                 }
             }
 
             // Status Reason Section for each order:
-            // - ACCEPTED: show which filter matched (e.g. "Fare ₹113 matched, Pickup 0.6km matched")
-            // - IGNORED: show "No criteria matched" or "Fare unavailable - order skipped"
-            // - REJECTED: show "No-Go area matched: [area name]"
-            when (item.status) {
+            when (effectiveStatus) {
                 OrderStatus.ACCEPTED -> {
                     val reasonText = formatAcceptedFilterReason(item)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(StatusActiveGreenBg, RoundedCornerShape(10.dp))
-                            .border(BorderStroke(1.dp, StatusActiveGreen.copy(alpha = 0.5f)), RoundedCornerShape(10.dp))
-                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                            .background(StatusActiveGreenBg, RoundedCornerShape(8.dp))
+                            .border(BorderStroke(1.dp, StatusActiveGreen.copy(alpha = 0.5f)), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("✅", fontSize = 16.sp)
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("✅", fontSize = 13.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
                             Column {
                                 Text(
                                     text = "Order Accepted",
-                                    fontSize = 12.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = StatusActiveGreen
                                 )
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Spacer(modifier = Modifier.height(1.dp))
                                 Text(
                                     text = reasonText,
-                                    fontSize = 14.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = TextDarkPrimary
                                 )
@@ -826,34 +827,39 @@ private fun HistoryCard(item: OrderHistoryItem) {
                         (item.amount <= 0f && item.baseFare <= 0f) && (item.reason.isBlank() || item.reason.contains("fare", ignoreCase = true) || item.reason.equals("No criteria matched", ignoreCase = true)) -> "Fare unavailable - order skipped"
                         item.reason.isNotBlank() && item.reason.contains("Nearby", ignoreCase = true) -> "Pickup is Nearby - order skipped"
                         item.reason.isNotBlank() && (item.reason.contains("toggle", ignoreCase = true) || item.reason.contains("OFF", ignoreCase = true)) -> "Auto-accept toggle was OFF"
+                        item.reason.isNotBlank() && (item.reason.contains("drop distance", ignoreCase = true) || item.reason.contains("Drop ", ignoreCase = true)) -> item.reason
+                        item.reason.isNotBlank() && item.reason.contains("pickup distance", ignoreCase = true) -> item.reason
+                        item.reason.isNotBlank() && item.reason.contains("fare", ignoreCase = true) -> item.reason
+                        item.reason.isNotBlank() && item.reason.contains("exceeds max limit", ignoreCase = true) -> item.reason
+                        item.reason.isNotBlank() && item.reason.contains("below min fare", ignoreCase = true) -> item.reason
                         item.reason.isNotBlank() && item.reason.contains("skipped", ignoreCase = true) -> item.reason
                         item.reason.isNotBlank() && !item.reason.equals("No criteria matched", ignoreCase = true) -> item.reason
-                        else -> "No criteria matched"
+                        else -> "Filter criteria not matched"
                     }
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(StatusWarningYellowBg, RoundedCornerShape(10.dp))
-                            .border(BorderStroke(1.dp, StatusWarningYellow.copy(alpha = 0.6f)), RoundedCornerShape(10.dp))
-                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                            .background(StatusWarningYellowBg, RoundedCornerShape(8.dp))
+                            .border(BorderStroke(1.dp, StatusWarningYellow.copy(alpha = 0.6f)), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("ℹ️", fontSize = 16.sp)
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("ℹ️", fontSize = 13.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
                             Column {
                                 Text(
                                     text = "Order Ignored",
-                                    fontSize = 12.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = StatusWarningYellow
                                 )
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Spacer(modifier = Modifier.height(1.dp))
                                 Text(
                                     text = ignoredReason,
-                                    fontSize = 14.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = TextDarkPrimary
                                 )
@@ -862,52 +868,140 @@ private fun HistoryCard(item: OrderHistoryItem) {
                     }
                 }
                 OrderStatus.REJECTED -> {
-                    val rejectedReason = when {
-                        item.reason.isNotBlank() && (item.reason.contains("drop distance", ignoreCase = true) || item.reason.contains("exceeds max limit", ignoreCase = true) || item.reason.contains("Drop ", ignoreCase = true)) -> {
+                    val areaName = extractAreaName(item)
+                    val rejectedReason = if (item.reason.isNotBlank() && item.reason.contains("No-Go", ignoreCase = true)) {
+                        if (areaName.isNotBlank() && !item.reason.contains(areaName, ignoreCase = true)) {
+                            "${item.reason}: $areaName"
+                        } else {
                             item.reason
                         }
-                        item.reason.isNotBlank() && item.reason.contains("pickup distance", ignoreCase = true) -> {
-                            item.reason
-                        }
-                        item.reason.isNotBlank() && item.reason.contains("fare", ignoreCase = true) -> {
-                            item.reason
-                        }
-                        item.reason.isNotBlank() && item.reason.contains("No-Go", ignoreCase = true) -> {
-                            val areaName = extractAreaName(item)
-                            "No-Go area matched: $areaName"
-                        }
-                        item.reason.isNotBlank() && !item.reason.equals("rejected", ignoreCase = true) -> {
-                            item.reason
-                        }
-                        else -> {
-                            val areaName = extractAreaName(item)
-                            "No-Go area matched: $areaName"
-                        }
+                    } else if (areaName.isNotBlank()) {
+                        "No-Go area matched: $areaName"
+                    } else if (item.reason.isNotBlank()) {
+                        item.reason
+                    } else {
+                        "No-Go area matched"
                     }
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(StatusInactiveRedBg, RoundedCornerShape(10.dp))
-                            .border(BorderStroke(1.dp, StatusInactiveRed.copy(alpha = 0.5f)), RoundedCornerShape(10.dp))
-                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                            .background(StatusInactiveRedBg, RoundedCornerShape(8.dp))
+                            .border(BorderStroke(1.dp, StatusInactiveRed.copy(alpha = 0.5f)), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("❌", fontSize = 16.sp)
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("❌", fontSize = 13.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
                             Column {
                                 Text(
                                     text = "Order Rejected",
-                                    fontSize = 12.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = StatusInactiveRed
                                 )
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Spacer(modifier = Modifier.height(1.dp))
                                 Text(
                                     text = rejectedReason,
-                                    fontSize = 14.sp,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = TextDarkPrimary
+                                )
+                            }
+                        }
+                    }
+                }
+                OrderStatus.PROCESSING -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFFFF9C4), RoundedCornerShape(8.dp))
+                            .border(BorderStroke(1.dp, Color(0xFFFBC02D).copy(alpha = 0.6f)), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("⏳", fontSize = 13.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Processing Order",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFE65100)
+                                )
+                                Spacer(modifier = Modifier.height(1.dp))
+                                Text(
+                                    text = item.decisionReasonText.ifBlank { item.reason.ifBlank { "Evaluating ride filters..." } },
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = TextDarkPrimary
+                                )
+                            }
+                        }
+                    }
+                }
+                OrderStatus.FAILED -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFFFEBEE), RoundedCornerShape(8.dp))
+                            .border(BorderStroke(1.dp, Color(0xFFEF9A9A)), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("⚠️", fontSize = 13.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Action Failed",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFC62828)
+                                )
+                                Spacer(modifier = Modifier.height(1.dp))
+                                Text(
+                                    text = item.reason.ifBlank { "Accept action could not complete" },
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = TextDarkPrimary
+                                )
+                            }
+                        }
+                    }
+                }
+                OrderStatus.SKIPPED -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFEDE7F6), RoundedCornerShape(8.dp))
+                            .border(BorderStroke(1.dp, Color(0xFFD1C4E9)), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("⏭️", fontSize = 13.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Order Skipped",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF512DA8)
+                                )
+                                Spacer(modifier = Modifier.height(1.dp))
+                                Text(
+                                    text = item.reason.ifBlank { "Skipped duplicate or invalid order" },
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = TextDarkPrimary
                                 )
@@ -919,28 +1013,96 @@ private fun HistoryCard(item: OrderHistoryItem) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFFF5F5F5), RoundedCornerShape(10.dp))
-                            .border(BorderStroke(1.dp, Color(0xFFE0E0E0)), RoundedCornerShape(10.dp))
-                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                            .background(Color(0xFFF5F5F5), RoundedCornerShape(8.dp))
+                            .border(BorderStroke(1.dp, Color(0xFFE0E0E0)), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("⏱️", fontSize = 16.sp)
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("⏱️", fontSize = 13.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
                             Column {
                                 Text(
                                     text = "Order Missed",
-                                    fontSize = 12.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.Gray
                                 )
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Spacer(modifier = Modifier.height(1.dp))
                                 Text(
                                     text = item.reason.ifBlank { "Order timed out before response" },
-                                    fontSize = 14.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
+                                    color = TextDarkSecondary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Part J — Performance Latencies (Truthful recorded values)
+            val totalMs = when {
+                item.totalProcessingMs > 0L -> item.totalProcessingMs
+                item.clickTimeMs > item.detectionTimeMs && item.detectionTimeMs > 0L -> item.clickTimeMs - item.detectionTimeMs
+                else -> 0L
+            }
+
+            if (totalMs > 0L || item.historyInsertLatencyMs > 0L || item.decisionLatencyMs > 0L || item.actionLatencyMs > 0L) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "⚡ RESPONSE SPEED",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = BluePrimary
+                            )
+                            if (totalMs > 0L) {
+                                Text(
+                                    text = "Total: ${totalMs} ms",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextDarkPrimary
+                                )
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            if (item.historyInsertLatencyMs > 0L) {
+                                Text(
+                                    text = "Insert: ${item.historyInsertLatencyMs} ms",
+                                    fontSize = 9.5.sp,
+                                    color = TextDarkSecondary
+                                )
+                            }
+                            if (item.decisionLatencyMs > 0L) {
+                                Text(
+                                    text = "Decision: ${item.decisionLatencyMs} ms",
+                                    fontSize = 9.5.sp,
+                                    color = TextDarkSecondary
+                                )
+                            }
+                            if (item.actionLatencyMs > 0L) {
+                                Text(
+                                    text = "Action: ${item.actionLatencyMs} ms",
+                                    fontSize = 9.5.sp,
                                     color = TextDarkSecondary
                                 )
                             }
@@ -1035,4 +1197,13 @@ private fun extractAreaName(item: OrderHistoryItem): String {
         if (after.isNotBlank()) return after
     }
     return "Restricted Area"
+}
+
+/**
+ * Returns true if an order history item was rejected due to matching a No-Go area.
+ */
+private fun isNoGoOrder(item: OrderHistoryItem): Boolean {
+    return item.reason.contains("No-Go", ignoreCase = true) ||
+           item.reason.contains("nogo", ignoreCase = true) ||
+           item.reason.contains("No Go", ignoreCase = true)
 }

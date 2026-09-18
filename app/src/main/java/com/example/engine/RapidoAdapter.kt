@@ -1,14 +1,10 @@
 package com.example.engine
 
-import android.content.Context
-import android.content.Intent
 import android.graphics.Rect
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
-import androidx.compose.runtime.Immutable
 import java.util.regex.Pattern
 
-@Immutable
 data class DetectedButton(
     val node: AccessibilityNodeInfo,
     val buttonId: String,
@@ -16,7 +12,6 @@ data class DetectedButton(
     val method: String = "Unknown"
 )
 
-@Immutable
 data class RapidoOrderData(
     val baseFare: Float = 0f,
     val tipAmount: Float = 0f,
@@ -28,9 +23,156 @@ data class RapidoOrderData(
     val bookingId: String? = null
 )
 
+data class RapidoPopupValidation(
+    val isValid: Boolean,
+    val fare: Float? = null,
+    val pickupDistKm: Float? = null,
+    val hasNearby: Boolean = false,
+    val acceptButton: DetectedButton? = null,
+    val failureReason: String? = null
+)
+
 object RapidoAdapter {
 
     private const val TAG = "RapidoAdapter"
+
+    val HOME_SCREEN_KEYWORDS = listOf(
+        "today's earnings",
+        "todays earnings",
+        "today's earning",
+        "todays earning",
+        "today earnings",
+        "today earning",
+        "on duty",
+        "blue performance"
+    )
+
+    /**
+     * Requirement 3: Check if the root node contains "Today's Earnings" or "ON DUTY" or "Blue Performance"
+     * -> this is the HOME SCREEN, skip completely.
+     */
+    fun isRapidoHomeScreen(root: AccessibilityNodeInfo?): Boolean {
+        if (root == null) return false
+        val textList = mutableListOf<String>()
+        collectAllNodeTextsForHomeCheck(root, textList)
+        return isRapidoHomeScreenTexts(textList)
+    }
+
+    fun isRapidoHomeScreenTexts(texts: List<String>): Boolean {
+        if (texts.isEmpty()) return false
+        for (t in texts) {
+            val lower = t.lowercase().trim()
+            for (keyword in HOME_SCREEN_KEYWORDS) {
+                if (lower.contains(keyword)) {
+                    logD(TAG, "🏠 Rapido home screen keyword detected in item: '$keyword' in '$t'")
+                    return true
+                }
+            }
+        }
+        val combined = texts.joinToString(" ").lowercase()
+        for (keyword in HOME_SCREEN_KEYWORDS) {
+            if (combined.contains(keyword)) {
+                logD(TAG, "🏠 Rapido home screen keyword detected in combined: '$keyword'")
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun collectAllNodeTextsForHomeCheck(node: AccessibilityNodeInfo?, outList: MutableList<String>, depth: Int = 0) {
+        if (node == null || depth > 15 || outList.size > 80) return
+        val text = node.text?.toString()?.trim()
+        val desc = node.contentDescription?.toString()?.trim()
+        if (!text.isNullOrEmpty()) outList.add(text)
+        if (!desc.isNullOrEmpty()) outList.add(desc)
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            if (child != null) {
+                collectAllNodeTextsForHomeCheck(child, outList, depth + 1)
+            }
+        }
+    }
+
+    /**
+     * Checks whether a ₹ amount is located within an "Earnings", "Today's Earnings",
+     * or "Performance" text context.
+     */
+    fun isEarningsContext(texts: List<String>, index: Int): Boolean {
+        val current = texts[index].lowercase()
+        if (current.contains("earning") || current.contains("today's") || current.contains("todays") ||
+            current.contains("today earning") || current.contains("performance") || current.contains("on duty") ||
+            current.contains("balance") || current.contains("wallet")
+        ) {
+            return true
+        }
+        if (index > 0) {
+            val prev = texts[index - 1].lowercase().trim()
+            if (prev.contains("earning") || prev.contains("today's") || prev.contains("todays") ||
+                prev.contains("today earning") || prev.contains("performance") || prev.contains("balance") ||
+                prev.contains("wallet") || prev == "today"
+            ) {
+                return true
+            }
+        }
+        if (index > 1) {
+            val prev2 = texts[index - 2].lowercase().trim()
+            if (prev2.contains("today's") || prev2.contains("todays") || prev2.contains("earning") ||
+                prev2.contains("performance") || prev2 == "today"
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Checks whether an accessibility node is inside a "Today's Earnings" or "Earnings" container.
+     */
+    fun isNodeInsideEarningsContainer(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        val selfText = (node.text?.toString() ?: "").lowercase()
+        val selfDesc = (node.contentDescription?.toString() ?: "").lowercase()
+        val selfId = (node.viewIdResourceName ?: "").lowercase()
+
+        if (selfText.contains("earning") || selfDesc.contains("earning") || selfId.contains("earning") ||
+            selfText.contains("today's") || selfDesc.contains("today's") || selfText.contains("todays") ||
+            selfText.contains("performance") || selfDesc.contains("performance") || selfId.contains("performance") ||
+            selfText.contains("on duty") || selfDesc.contains("on duty")
+        ) {
+            return true
+        }
+
+        var curr = node.parent
+        var depth = 0
+        while (curr != null && depth < 3) {
+            val pText = (curr.text?.toString() ?: "").lowercase()
+            val pDesc = (curr.contentDescription?.toString() ?: "").lowercase()
+            val pId = (curr.viewIdResourceName ?: "").lowercase()
+            if (pText.contains("earning") || pDesc.contains("earning") || pId.contains("earning") ||
+                pText.contains("today's") || pDesc.contains("today's") || pText.contains("todays") ||
+                pText.contains("performance") || pDesc.contains("performance") || pId.contains("performance") ||
+                pText.contains("on duty") || pDesc.contains("on duty")
+            ) {
+                return true
+            }
+            for (i in 0 until curr.childCount) {
+                val sib = curr.getChild(i)
+                if (sib != null) {
+                    val sText = (sib.text?.toString() ?: "").lowercase()
+                    val sDesc = (sib.contentDescription?.toString() ?: "").lowercase()
+                    val sId = (sib.viewIdResourceName ?: "").lowercase()
+                    val isEarning = sText.contains("earning") || sDesc.contains("earning") || sId.contains("earning") ||
+                        sText.contains("today's") || sDesc.contains("today's") || sText.contains("todays") ||
+                        sText.contains("performance") || sDesc.contains("performance") ||
+                        sText.contains("on duty") || sDesc.contains("on duty")
+                    if (isEarning) return true
+                }
+            }
+            curr = curr.parent
+            depth++
+        }
+        return false
+    }
 
     private fun logI(tag: String, msg: String) {
         try {
@@ -51,6 +193,37 @@ object RapidoAdapter {
     val KM_REGEX = Regex("""([0-9]+(?:\.[0-9]+)?)\s*km(?!\s*/\s*h|\s*ph|\s*/\s*hr)""", RegexOption.IGNORE_CASE)
     val RUPEE_AMOUNT_REGEX = Pattern.compile("₹\\s*([0-9]+(?:\\.[0-9]+)?)")
 
+    val SMARTDRIVO_UI_BLOCKLIST = listOf(
+        "Accepted",
+        "Auto-Accept Orders",
+        "Max Pickup",
+        "Max Drop",
+        "ADDRESS",
+        "Fare",
+        "Distance",
+        "Filter",
+        "Settings",
+        "Home",
+        "History",
+        "Areas"
+    )
+
+    fun matchesBlocklist(text: String?): Boolean {
+        if (text.isNullOrBlank()) return false
+        val lower = text.trim().lowercase()
+        return SMARTDRIVO_UI_BLOCKLIST.any { blocked ->
+            lower.contains(blocked.lowercase())
+        }
+    }
+
+    fun isSmartDrivoPackage(pkg: String?): Boolean {
+        if (pkg.isNullOrBlank()) return false
+        val p = pkg.lowercase().trim()
+        return p == "com.aistudio.smartdrivo.krmx" ||
+               p == "com.example" ||
+               p.contains("smartdrivo")
+    }
+
     val FORBIDDEN_ADDRESS_TEXTS = setOf(
         "auto", "services", "nearby",
         "view", "go to", "home", "credit", "orders", "surge",
@@ -66,6 +239,9 @@ object RapidoAdapter {
         val clean = text.trim()
         if (clean.length < 2) return true
         val lower = clean.lowercase()
+
+        // Blocklist of SmartDrivo UI strings that should NEVER be saved as addresses
+        if (matchesBlocklist(clean)) return true
 
         // Requirement: Do NOT use "Auto", "Services", "Nearby" as addresses
         if (lower == "auto" || lower == "services" || lower == "nearby") return true
@@ -99,15 +275,23 @@ object RapidoAdapter {
         return res
     }
 
-    @Immutable
     data class TextNodeEntry(
         val text: String,
         val bounds: Rect,
-        val viewId: String?
+        val viewId: String?,
+        val packageName: String? = null
     )
 
-    private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextNodeEntry>) {
+    private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextNodeEntry>, inheritedPkg: String? = null) {
         if (node == null) return
+        val nodePkg = node.packageName?.toString()
+        val effectivePkg = nodePkg ?: inheritedPkg
+
+        // Strict requirement: Never extract from SmartDrivo UI
+        if (isSmartDrivoPackage(effectivePkg)) {
+            return
+        }
+
         val text = node.text?.toString()?.trim()
         val desc = node.contentDescription?.toString()?.trim()
         val content = when {
@@ -118,10 +302,14 @@ object RapidoAdapter {
         if (!content.isNullOrEmpty()) {
             val bounds = Rect()
             node.getBoundsInScreen(bounds)
-            list.add(TextNodeEntry(content, bounds, node.viewIdResourceName))
+            list.add(TextNodeEntry(content, bounds, node.viewIdResourceName, effectivePkg))
         }
         for (i in 0 until node.childCount) {
-            collectEntries(node.getChild(i), list)
+            val child = node.getChild(i)
+            if (child != null) {
+                collectEntries(child, list, effectivePkg)
+                child.recycle()
+            }
         }
     }
 
@@ -137,15 +325,30 @@ object RapidoAdapter {
      * - Do NOT use "Auto", "Services", "Nearby" as addresses
      */
     fun extractOrderData(root: AccessibilityNodeInfo): RapidoOrderData {
+        val rootPkg = root.packageName?.toString().orEmpty()
+        if (isSmartDrivoPackage(rootPkg) || isRapidoHomeScreen(root)) {
+            return RapidoOrderData(
+                pickupAddress = "Address unavailable",
+                dropAddress = "Address unavailable"
+            )
+        }
+
         val entries = mutableListOf<TextNodeEntry>()
-        collectEntries(root, entries)
-        val textList = entries.map { it.text }
+        collectEntries(root, entries, rootPkg)
+
+        // Only extract address text from Rapido app package (com.rapido.passenger), not from SmartDrivo UI
+        val validEntries = entries.filter { entry ->
+            val pkg = entry.packageName.orEmpty()
+            !isSmartDrivoPackage(pkg) && (pkg.isEmpty() || isRapidoPackage(pkg) || pkg == "com.rapido.passenger")
+        }
+
+        val textList = validEntries.map { it.text }
         val data = extractOrderDataFromTexts(textList)
 
-        // View ID based address extraction from node tree
+        // View ID based address extraction from node tree (only from valid Rapido nodes)
         var pickupFromId: String? = null
         var dropFromId: String? = null
-        for (entry in entries) {
+        for (entry in validEntries) {
             val id = entry.viewId?.lowercase().orEmpty()
             if (pickupFromId == null && (id.contains("pickup") || id.contains("source") || id.contains("start_loc") || id.contains("tv_pickup"))) {
                 val clean = cleanRapidoAddress(entry.text)
@@ -160,7 +363,7 @@ object RapidoAdapter {
         // Booking ID extraction from text entries
         var bookingId: String? = null
         val bookingRegex = Regex("(?:CRN|ID|#|Booking\\s*ID)[:\\s-]*([A-Za-z0-9-]+)", RegexOption.IGNORE_CASE)
-        for (entry in entries) {
+        for (entry in validEntries) {
             val match = bookingRegex.find(entry.text)
             if (match != null) {
                 bookingId = match.groupValues[1].trim()
@@ -168,8 +371,21 @@ object RapidoAdapter {
             }
         }
 
-        val finalPickup = pickupFromId ?: data.pickupAddress
-        val finalDrop = dropFromId ?: data.dropAddress
+        val rawPickup = pickupFromId ?: data.pickupAddress
+        val rawDrop = dropFromId ?: data.dropAddress
+
+        // If extracted address matches any blocklist word → save as "Address unavailable" instead
+        val finalPickup = if (rawPickup.isNullOrBlank() || matchesBlocklist(rawPickup) || isInvalidAddress(rawPickup)) {
+            "Address unavailable"
+        } else {
+            rawPickup
+        }
+
+        val finalDrop = if (rawDrop.isNullOrBlank() || matchesBlocklist(rawDrop) || isInvalidAddress(rawDrop)) {
+            "Address unavailable"
+        } else {
+            rawDrop
+        }
 
         return data.copy(
             pickupAddress = finalPickup,
@@ -199,6 +415,11 @@ object RapidoAdapter {
 
         for (i in texts.indices) {
             val text = texts[i]
+            // Requirement 1: Ignore fare amounts that are inside "Today's Earnings" or "Earnings" context
+            if (isEarningsContext(texts, i)) {
+                logI(TAG, "Skipping ₹ amount in earnings/balance context at index $i: '$text'")
+                continue
+            }
             val matcher = rupeeMatcher.matcher(text)
             if (matcher.find()) {
                 val parsedBase = matcher.group(1)?.toFloatOrNull()
@@ -349,15 +570,29 @@ object RapidoAdapter {
             dropAddress = candidateLines.firstOrNull { it != pickupAddress } ?: candidateLines[1]
         }
 
-        // Step 3d (BUG 2): If address cannot be detected, save raw text from accessibility node instead of generic placeholder
+        // Step 3d: Fallback candidate filtering strictly excluding invalid and blocklisted texts
         if (pickupAddress == null) {
-            pickupAddress = texts.map { cleanRapidoAddress(it) }.firstOrNull { it.isNotBlank() && !it.contains("₹") && !it.matches(Regex("^[0-9.]+$")) }
-                ?: texts.firstOrNull { it.isNotBlank() }
+            pickupAddress = texts.map { cleanRapidoAddress(it) }.firstOrNull {
+                it.isNotBlank() && !it.contains("₹") && !it.matches(Regex("^[0-9.]+$")) && !isInvalidAddress(it) && !matchesBlocklist(it)
+            }
         }
         if (dropAddress == null) {
-            dropAddress = texts.map { cleanRapidoAddress(it) }.filter { it != pickupAddress }.firstOrNull { it.isNotBlank() && !it.contains("₹") && !it.matches(Regex("^[0-9.]+$")) }
-                ?: texts.drop(1).firstOrNull { it.isNotBlank() }
-                ?: pickupAddress
+            dropAddress = texts.map { cleanRapidoAddress(it) }.filter { it != pickupAddress }.firstOrNull {
+                it.isNotBlank() && !it.contains("₹") && !it.matches(Regex("^[0-9.]+$")) && !isInvalidAddress(it) && !matchesBlocklist(it)
+            }
+        }
+
+        // Requirement 2: If extracted address matches any blocklist word → save as "Address unavailable" instead
+        val safePickup = if (pickupAddress.isNullOrBlank() || matchesBlocklist(pickupAddress) || isInvalidAddress(pickupAddress)) {
+            "Address unavailable"
+        } else {
+            pickupAddress
+        }
+
+        val safeDrop = if (dropAddress.isNullOrBlank() || matchesBlocklist(dropAddress) || isInvalidAddress(dropAddress)) {
+            "Address unavailable"
+        } else {
+            dropAddress
         }
 
         return RapidoOrderData(
@@ -366,8 +601,8 @@ object RapidoAdapter {
             totalFare = totalFare,
             pickupKm = pickupKm,
             dropKm = dropKm,
-            pickupAddress = pickupAddress,
-            dropAddress = dropAddress
+            pickupAddress = safePickup,
+            dropAddress = safeDrop
         )
     }
 
@@ -558,110 +793,6 @@ object RapidoAdapter {
     }
 
     /**
-     * Brings Rapido Captain / Rider to the foreground using launch intent flags before clicking.
-     */
-    fun bringRapidoToForeground(context: Context, targetPkg: String? = null) {
-        val packages = listOfNotNull(
-            targetPkg?.takeIf { it.isNotEmpty() },
-            "com.rapido.rider",
-            "com.rapido.captain",
-            "com.rapido.passenger"
-        ).distinct()
-
-        for (pkg in packages) {
-            try {
-                val intent = context.packageManager.getLaunchIntentForPackage(pkg)
-                if (intent != null) {
-                    intent.addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                        Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
-                    )
-                    context.startActivity(intent)
-                    Log.i(TAG, "🚀 [RapidoAdapter] Brought Rapido to foreground: $pkg")
-                    return
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to bring Rapido ($pkg) to foreground: ${e.message}")
-            }
-        }
-    }
-
-    /**
-     * Finds node with exact or case-insensitive text/description "Accept" or "ACCEPT",
-     * resolving to a clickable target (node or clickable ancestor).
-     */
-    fun findAcceptTextNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-        if (root == null) return null
-
-        // 1. Fast system text query for "Accept" and "ACCEPT"
-        for (query in listOf("Accept", "ACCEPT", "accept")) {
-            val list = root.findAccessibilityNodeInfosByText(query)
-            if (!list.isNullOrEmpty()) {
-                for (node in list) {
-                    val text = node.text?.toString()?.trim()
-                    val desc = node.contentDescription?.toString()?.trim()
-                    if (isStrictAcceptMatch(text) || isStrictAcceptMatch(desc)) {
-                        val target = resolveClickableTarget(node)
-                        Log.i(TAG, "✓ findAcceptTextNode matched via system text query: text='$text', desc='$desc', id='${target.viewIdResourceName}', clickable=${target.isClickable}")
-                        return target
-                    }
-                }
-            }
-        }
-
-        // 2. Full recursive tree search for node with text or desc == "Accept" / "ACCEPT"
-        val found = findNodeByPredicate(root) { node ->
-            val text = node.text?.toString()?.trim()
-            val desc = node.contentDescription?.toString()?.trim()
-            isStrictAcceptMatch(text) || isStrictAcceptMatch(desc)
-        }
-        if (found != null) {
-            val target = resolveClickableTarget(found)
-            Log.i(TAG, "✓ findAcceptTextNode matched via tree search: text='${found.text}', id='${target.viewIdResourceName}', clickable=${target.isClickable}")
-            return target
-        }
-
-        // 3. Clickable node scan with children having "Accept" / "ACCEPT"
-        val clickableAccept = scanAllClickableNodesForAccept(root, root.packageName?.toString().orEmpty())
-        if (clickableAccept != null) {
-            Log.i(TAG, "✓ findAcceptTextNode matched via clickable scan: ${clickableAccept.buttonId}")
-            return clickableAccept.node
-        }
-
-        return null
-    }
-
-    fun isStrictAcceptMatch(value: String?): Boolean {
-        if (value.isNullOrBlank()) return false
-        val trimmed = value.trim()
-        if (isForbiddenText(trimmed)) return false
-        val lower = trimmed.lowercase()
-        if (lower.contains("don't") || lower.contains("do not") || lower.contains("cannot") || lower.contains("cancel") || lower.contains("decline") || lower.contains("reject")) {
-            return false
-        }
-        return trimmed.equals("Accept", ignoreCase = true) ||
-               trimmed.equals("ACCEPT", ignoreCase = true) ||
-               trimmed.contains("स्वीकार करें") ||
-               trimmed.contains("स्वीकार") ||
-               lower == "accept order" ||
-               lower == "accept ride"
-    }
-
-    private fun findNodeByPredicate(node: AccessibilityNodeInfo?, predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
-        if (node == null) return null
-        if (predicate(node)) return node
-        val count = node.childCount
-        for (i in 0 until count) {
-            val child = node.getChild(i)
-            val res = findNodeByPredicate(child, predicate)
-            if (res != null) return res
-        }
-        return null
-    }
-
-    /**
      * Resolves a clickable target for a matching node.
      * If the node itself is clickable, returns it. Otherwise walks up the ancestor chain
      * to find the nearest clickable parent or container. If none is clickable, returns the node.
@@ -671,6 +802,12 @@ object RapidoAdapter {
         var curr: AccessibilityNodeInfo? = node.parent
         while (curr != null) {
             if (curr.isClickable) {
+                val id = curr.viewIdResourceName?.lowercase() ?: ""
+                val cls = curr.className?.toString()?.lowercase() ?: ""
+                if (id.contains("card") || id.contains("details") || id.contains("container") ||
+                    id.contains("sheet") || id.contains("root") || cls.contains("cardview")) {
+                    break
+                }
                 return curr
             }
             val parent = curr.parent
@@ -681,40 +818,24 @@ object RapidoAdapter {
 
     /**
      * Scans and finds the accept button using MULTIPLE methods:
-     * 1. METHOD 1: Direct "Accept" / "ACCEPT" Text Node Search
-     * 2. METHOD 2: Scan ALL Clickable Nodes on Screen for "Accept" text or children text
-     * 3. METHOD 3: By Resource ID
-     * 4. METHOD 4: By Content Description
+     * 1. METHOD D: Scan ALL Clickable Nodes on Screen for "Accept" text or children text
+     * 2. METHOD B: By TEXT content (case-insensitive, includes Hindi "स्वीकार करें")
+     * 3. METHOD C: By Content Description ("Accept ride", "Accept order", etc.)
+     * 4. METHOD A: By Resource ID (acceptOrderBtn, btn_accept, accept_ride_button, btnAccept, accept_button, btn_accept_ride)
      * 5. Built-in findAccessibilityNodeInfosByText fallback
      */
     fun findAcceptButton(root: AccessibilityNodeInfo, currentPackage: String? = null): DetectedButton? {
         val rootPkg = currentPackage?.takeIf { it.isNotEmpty() } ?: root.packageName?.toString().orEmpty()
 
         // -------------------------------------------------------------
-        // STEP 1 - Primary "Accept" / "ACCEPT" Text Node Search
-        // -------------------------------------------------------------
-        val acceptTextNode = findAcceptTextNode(root)
-        if (acceptTextNode != null) {
-            val id = acceptTextNode.viewIdResourceName ?: "accept_text_node"
-            val text = acceptTextNode.text?.toString() ?: acceptTextNode.contentDescription?.toString() ?: "Accept"
-            Log.i(TAG, "✓ Rapido Accept DETECTED via [STEP 1: Text 'Accept'/'ACCEPT'] -> ID: '$id', Text: '$text', Package: '$rootPkg'")
-            return DetectedButton(
-                node = acceptTextNode,
-                buttonId = "$id (Text: '$text')",
-                packageName = rootPkg,
-                method = "ACCEPT_TEXT_NODE"
-            )
-        }
-
-        // -------------------------------------------------------------
-        // STEP 2 - Resource ID search
+        // STEP 1 - Primary Resource ID search (exact specification)
         // -------------------------------------------------------------
         val resIdNode = findAcceptNodeByResourceId(root)
         if (resIdNode != null) {
             val target = resolveClickableTarget(resIdNode)
             val id = resIdNode.viewIdResourceName ?: "accept_resource_id"
             val detectedPkg = target.packageName?.toString()?.takeIf { it.isNotEmpty() } ?: rootPkg
-            Log.i(TAG, "✓ Rapido Accept DETECTED via [STEP 2: Resource ID] -> ID: '$id', Package: '$detectedPkg'")
+            Log.i(TAG, "✓ Rapido Accept DETECTED via [STEP 1: Resource ID] -> ID: '$id', Package: '$detectedPkg'")
             return DetectedButton(
                 node = target,
                 buttonId = id,
@@ -856,8 +977,6 @@ object RapidoAdapter {
      * Finds and returns the first matching accept AccessibilityNodeInfo.
      */
     fun findAcceptNode(root: AccessibilityNodeInfo, currentPackage: String? = null): AccessibilityNodeInfo? {
-        val textNode = findAcceptTextNode(root)
-        if (textNode != null) return textNode
         return findAcceptButton(root, currentPackage)?.node
     }
 
@@ -1059,6 +1178,148 @@ object RapidoAdapter {
         }
         walk(root)
         return list
+    }
+
+    /**
+     * Requirement 1, 2, 3, 4:
+     * Validates that a genuine Rapido order popup is visible on screen.
+     * Must have ALL of these together:
+     * 1. A fare amount (₹ symbol with number) that is NOT inside "Today's Earnings" or "Earnings" container
+     * 2. A pickup distance in km (e.g. "0.4 km") OR "Nearby"
+     * 3. An "Accept" or "ACCEPT" button visible on screen
+     *
+     * In addition:
+     * - If the root node contains "Today's Earnings" or "ON DUTY" or "Blue Performance" -> HOME SCREEN, skip completely.
+     */
+    fun validateRapidoOrderPopup(root: AccessibilityNodeInfo?): RapidoPopupValidation {
+        if (root == null) {
+            return RapidoPopupValidation(isValid = false, failureReason = "Null root node")
+        }
+        val pkg = root.packageName?.toString().orEmpty()
+        if (isSmartDrivoPackage(pkg)) {
+            return RapidoPopupValidation(isValid = false, failureReason = "SmartDrivo UI package")
+        }
+
+        // Requirement 3: Check if root contains "Today's Earnings" or "ON DUTY" or "Blue Performance"
+        if (isRapidoHomeScreen(root)) {
+            return RapidoPopupValidation(
+                isValid = false,
+                failureReason = "Home screen detected ('Today's Earnings' / 'ON DUTY' / 'Blue Performance')"
+            )
+        }
+
+        val orderData = extractOrderData(root)
+
+        // Requirement 1a: Fare amount outside earnings container
+        if (orderData.totalFare <= 0f) {
+            return RapidoPopupValidation(
+                isValid = false,
+                failureReason = "Missing valid fare amount outside earnings container"
+            )
+        }
+
+        // Requirement 1b: A pickup distance in km OR "Nearby"
+        val allTexts = mutableListOf<String>()
+        collectAllNodeTextsForHomeCheck(root, allTexts)
+        val hasNearby = allTexts.any { it.trim().equals("nearby", ignoreCase = true) || it.contains("nearby", ignoreCase = true) }
+        val hasPickupKm = orderData.pickupKm != null && orderData.pickupKm > 0f
+
+        if (!hasPickupKm && !hasNearby) {
+            return RapidoPopupValidation(
+                isValid = false,
+                fare = orderData.totalFare,
+                failureReason = "Missing pickup distance in km or 'Nearby'"
+            )
+        }
+
+        // Requirement 1c: An "Accept" or "ACCEPT" button visible on screen
+        val acceptBtn = findAcceptButton(root)
+        if (acceptBtn == null) {
+            return RapidoPopupValidation(
+                isValid = false,
+                fare = orderData.totalFare,
+                pickupDistKm = orderData.pickupKm,
+                hasNearby = hasNearby,
+                failureReason = "Missing 'Accept' or 'ACCEPT' button"
+            )
+        }
+
+        val bounds = Rect()
+        acceptBtn.node.getBoundsInScreen(bounds)
+        if (bounds.width() <= 0 || bounds.height() <= 0) {
+            return RapidoPopupValidation(
+                isValid = false,
+                fare = orderData.totalFare,
+                pickupDistKm = orderData.pickupKm,
+                hasNearby = hasNearby,
+                failureReason = "Accept button is not visible on screen (zero dimensions)"
+            )
+        }
+
+        return RapidoPopupValidation(
+            isValid = true,
+            fare = orderData.totalFare,
+            pickupDistKm = orderData.pickupKm,
+            hasNearby = hasNearby,
+            acceptButton = acceptBtn
+        )
+    }
+
+    /**
+     * Text-based validation helper for testing.
+     */
+    fun validateRapidoOrderPopupFromTexts(texts: List<String>, hasAcceptButton: Boolean): RapidoPopupValidation {
+        if (texts.isEmpty()) {
+            return RapidoPopupValidation(isValid = false, failureReason = "Empty text list")
+        }
+
+        // Requirement 3: Check if contains "Today's Earnings" or "ON DUTY" or "Blue Performance"
+        if (isRapidoHomeScreenTexts(texts)) {
+            return RapidoPopupValidation(
+                isValid = false,
+                failureReason = "Home screen detected ('Today's Earnings' / 'ON DUTY' / 'Blue Performance')"
+            )
+        }
+
+        val orderData = extractOrderDataFromTexts(texts)
+
+        // Requirement 1a: Fare amount outside earnings container
+        if (orderData.totalFare <= 0f) {
+            return RapidoPopupValidation(
+                isValid = false,
+                failureReason = "Missing valid fare amount outside earnings container"
+            )
+        }
+
+        // Requirement 1b: A pickup distance in km OR "Nearby"
+        val hasNearby = texts.any { it.trim().equals("nearby", ignoreCase = true) || it.contains("nearby", ignoreCase = true) }
+        val hasPickupKm = orderData.pickupKm != null && orderData.pickupKm > 0f
+
+        if (!hasPickupKm && !hasNearby) {
+            return RapidoPopupValidation(
+                isValid = false,
+                fare = orderData.totalFare,
+                failureReason = "Missing pickup distance in km or 'Nearby'"
+            )
+        }
+
+        // Requirement 1c: "Accept" or "ACCEPT" button visible on screen
+        if (!hasAcceptButton) {
+            return RapidoPopupValidation(
+                isValid = false,
+                fare = orderData.totalFare,
+                pickupDistKm = orderData.pickupKm,
+                hasNearby = hasNearby,
+                failureReason = "Missing 'Accept' or 'ACCEPT' button"
+            )
+        }
+
+        return RapidoPopupValidation(
+            isValid = true,
+            fare = orderData.totalFare,
+            pickupDistKm = orderData.pickupKm,
+            hasNearby = hasNearby
+        )
     }
 }
 

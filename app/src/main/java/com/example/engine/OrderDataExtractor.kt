@@ -14,6 +14,37 @@ object OrderDataExtractor {
     // Speed filter regex - ignore km/h values
     private val SPEED_REGEX = Pattern.compile("[0-9]+(?:\\.[0-9]+)?\\s*(?:km/h|kmph|km\\s*/\\s*h|km/hr)\\b", Pattern.CASE_INSENSITIVE)
 
+    val SMARTDRIVO_UI_BLOCKLIST = listOf(
+        "Accepted",
+        "Auto-Accept Orders",
+        "Max Pickup",
+        "Max Drop",
+        "ADDRESS",
+        "Fare",
+        "Distance",
+        "Filter",
+        "Settings",
+        "Home",
+        "History",
+        "Areas"
+    )
+
+    fun matchesBlocklist(text: String?): Boolean {
+        if (text.isNullOrBlank()) return false
+        val lower = text.trim().lowercase()
+        return SMARTDRIVO_UI_BLOCKLIST.any { blocked ->
+            lower.contains(blocked.lowercase())
+        }
+    }
+
+    fun isSmartDrivoPackage(pkg: String?): Boolean {
+        if (pkg.isNullOrBlank()) return false
+        val p = pkg.lowercase().trim()
+        return p == "com.aistudio.smartdrivo.krmx" ||
+               p == "com.example" ||
+               p.contains("smartdrivo")
+    }
+
     // Pickup distance regex
     val PICKUP_REGEX = Pattern.compile("(?:(?:pickup|pick\\s*up|away)[\\s:•-]*([0-9]+(?:\\.[0-9]+)?)\\s*(?:km)?)|(?:([0-9]+(?:\\.[0-9]+)?)\\s*(?:km)?\\s*(?:pickup|pick\\s*up|away))", Pattern.CASE_INSENSITIVE)
 
@@ -50,8 +81,23 @@ object OrderDataExtractor {
             return UberAdapter.extractCandidate(root, defaultVehicle)
         }
 
+        val rootPkg = root.packageName?.toString().orEmpty()
+        // Strict requirement: Never extract from SmartDrivo UI
+        if (isSmartDrivoPackage(rootPkg)) {
+            return RideCandidate(
+                fare = null,
+                pickupDistKm = null,
+                dropDistKm = null,
+                pickupAddress = "Address unavailable",
+                dropAddress = "Address unavailable",
+                dropArea = "Main City Area",
+                platform = platform,
+                vehicleType = defaultVehicle
+            )
+        }
+
         val textList = mutableListOf<String>()
-        collectAllText(root, textList)
+        collectAllText(root, textList, platform, rootPkg)
         val combinedText = textList.joinToString(" \n ")
 
         val isBundled = isBundleOrder(combinedText)
@@ -78,15 +124,33 @@ object OrderDataExtractor {
         )
     }
 
-    private fun collectAllText(node: AccessibilityNodeInfo?, outList: MutableList<String>) {
+    private fun collectAllText(
+        node: AccessibilityNodeInfo?,
+        outList: MutableList<String>,
+        platform: Platform? = null,
+        inheritedPkg: String? = null
+    ) {
         if (node == null) return
+        val nodePkg = node.packageName?.toString()
+        val effectivePkg = nodePkg ?: inheritedPkg
+
+        // Strict requirement: Never extract from SmartDrivo UI
+        if (isSmartDrivoPackage(effectivePkg)) {
+            return
+        }
+
+        // Only extract address text from Rapido app package (com.rapido.passenger), not from SmartDrivo UI
+        if (platform == Platform.RAPIDO && effectivePkg != null && !effectivePkg.contains("rapido") && effectivePkg != "com.rapido.passenger") {
+            return
+        }
+
         node.text?.toString()?.trim()?.let { if (it.isNotEmpty()) outList.add(it) }
         node.contentDescription?.toString()?.trim()?.let { if (it.isNotEmpty()) outList.add(it) }
 
         for (i in 0 until node.childCount) {
             val child = node.getChild(i)
             if (child != null) {
-                collectAllText(child, outList)
+                collectAllText(child, outList, platform, effectivePkg)
                 child.recycle()
             }
         }
@@ -180,18 +244,18 @@ object OrderDataExtractor {
 
             if (pickup == null && (lower.startsWith("pickup:") || lower.startsWith("from:") || lower.startsWith("pick up:"))) {
                 val candidate = raw.substringAfter(":").trim()
-                if (candidate.length >= 3) pickup = candidate
+                if (candidate.length >= 3 && !matchesBlocklist(candidate)) pickup = candidate
             } else if (pickup == null && (lower == "pickup" || lower == "pick up" || lower == "from")) {
-                if (i + 1 < lines.size && lines[i + 1].trim().length >= 3) {
+                if (i + 1 < lines.size && lines[i + 1].trim().length >= 3 && !matchesBlocklist(lines[i + 1])) {
                     pickup = lines[i + 1].trim()
                 }
             }
 
             if (drop == null && (lower.startsWith("drop:") || lower.startsWith("destination:") || lower.startsWith("to:"))) {
                 val candidate = raw.substringAfter(":").trim()
-                if (candidate.length >= 3) drop = candidate
+                if (candidate.length >= 3 && !matchesBlocklist(candidate)) drop = candidate
             } else if (drop == null && (lower == "drop" || lower == "destination" || lower == "to")) {
-                if (i + 1 < lines.size && lines[i + 1].trim().length >= 3) {
+                if (i + 1 < lines.size && lines[i + 1].trim().length >= 3 && !matchesBlocklist(lines[i + 1])) {
                     drop = lines[i + 1].trim()
                 }
             }
@@ -204,6 +268,7 @@ object OrderDataExtractor {
                     !trimmed.startsWith("₹") &&
                     !trimmed.startsWith("$") &&
                     !trimmed.contains("₹") &&
+                    !matchesBlocklist(trimmed) &&
                     !SPEED_REGEX.matcher(trimmed).find() &&
                     !PICKUP_REGEX.matcher(trimmed).find() &&
                     !DROP_REGEX.matcher(trimmed).find() &&
@@ -223,19 +288,37 @@ object OrderDataExtractor {
             }
         }
 
-        // BUG 2: If address cannot be detected, save raw text from accessibility node instead of generic placeholder
+        // Fallback with strict blocklist filter
         if (pickup == null) {
-            pickup = lines.map { it.trim() }.firstOrNull { it.isNotBlank() && !it.contains("₹") && !it.matches(Regex("^[0-9.]+$")) }
-                ?: lines.firstOrNull { it.isNotBlank() }
+            pickup = lines.map { it.trim() }.firstOrNull {
+                it.isNotBlank() && !it.contains("₹") && !it.matches(Regex("^[0-9.]+$")) && !matchesBlocklist(it)
+            }
         }
         if (drop == null) {
-            drop = lines.map { it.trim() }.filter { it != pickup }.firstOrNull { it.isNotBlank() && !it.contains("₹") && !it.matches(Regex("^[0-9.]+$")) }
-                ?: lines.drop(1).firstOrNull { it.isNotBlank() }
-                ?: pickup
+            drop = lines.map { it.trim() }.filter { it != pickup }.firstOrNull {
+                it.isNotBlank() && !it.contains("₹") && !it.matches(Regex("^[0-9.]+$")) && !matchesBlocklist(it)
+            }
         }
 
-        val area = drop?.split(",")?.firstOrNull()?.trim() ?: drop?.take(20)?.trim() ?: "City Center"
-        return Triple(pickup, drop, area)
+        // Requirement 2: If extracted address matches any blocklist word → save as "Address unavailable" instead
+        val safePickup = if (pickup.isNullOrBlank() || matchesBlocklist(pickup)) {
+            "Address unavailable"
+        } else {
+            pickup
+        }
+
+        val safeDrop = if (drop.isNullOrBlank() || matchesBlocklist(drop)) {
+            "Address unavailable"
+        } else {
+            drop
+        }
+
+        val area = if (safeDrop != "Address unavailable") {
+            safeDrop.split(",").firstOrNull()?.trim() ?: safeDrop.take(20).trim()
+        } else {
+            "Main City Area"
+        }
+        return Triple(safePickup, safeDrop, area)
     }
 
     fun detectVehicleType(text: String, defaultVehicle: VehicleType): VehicleType {

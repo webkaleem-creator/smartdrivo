@@ -1,7 +1,9 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +28,8 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -48,9 +52,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -69,6 +75,7 @@ import com.example.data.PreferencesManager
 import com.example.model.AreaGroup
 import com.example.model.AreaType
 import com.example.ui.theme.BluePrimary
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -80,8 +87,22 @@ fun AreaManagerScreen(
     repository: FirebaseRepository,
     onBack: () -> Unit
 ) {
+    val storedGoTo by prefs.goToAreas.collectAsState()
+    val storedNoGo by prefs.noGoAreas.collectAsState()
+
     var goToGroups by remember { mutableStateOf(prefs.goToAreas.value) }
     var noGoGroups by remember { mutableStateOf(prefs.noGoAreas.value) }
+
+    LaunchedEffect(storedGoTo) {
+        if (goToGroups != storedGoTo) {
+            goToGroups = storedGoTo
+        }
+    }
+    LaunchedEffect(storedNoGo) {
+        if (noGoGroups != storedNoGo) {
+            noGoGroups = storedNoGo
+        }
+    }
 
     var goToGroupNameInput by remember { mutableStateOf("") }
     var noGoGroupNameInput by remember { mutableStateOf("") }
@@ -89,6 +110,7 @@ fun AreaManagerScreen(
     val focusManager = LocalFocusManager.current
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    var isInfoExpanded by remember { mutableStateOf(false) }
 
     fun addGoToGroup() {
         val trimmed = goToGroupNameInput.trim()
@@ -106,7 +128,13 @@ fun AreaManagerScreen(
                 )
                 val updated = goToGroups + newGroup
                 goToGroups = updated
-                prefs.saveAreaGroups(updated, noGoGroups)
+                coroutineScope.launch(Dispatchers.IO) {
+                    prefs.saveAreaGroups(updated, noGoGroups)
+                    repository.syncAreas(updated + noGoGroups)
+                }
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("Added '$trimmed' to Go-To groups")
+                }
             } else {
                 coroutineScope.launch {
                     snackbarHostState.showSnackbar("'$trimmed' group already exists")
@@ -131,7 +159,13 @@ fun AreaManagerScreen(
                 )
                 val updated = noGoGroups + newGroup
                 noGoGroups = updated
-                prefs.saveAreaGroups(goToGroups, updated)
+                coroutineScope.launch(Dispatchers.IO) {
+                    prefs.saveAreaGroups(goToGroups, updated)
+                    repository.syncAreas(goToGroups + updated)
+                }
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("Added '$trimmed' to No-Go groups")
+                }
             } else {
                 coroutineScope.launch {
                     snackbarHostState.showSnackbar("'$trimmed' group already exists")
@@ -140,16 +174,17 @@ fun AreaManagerScreen(
         }
     }
 
-    val saveButtonText by remember(goToGroups.size, noGoGroups.size) {
-        derivedStateOf { "Save Area Groups (${goToGroups.size} Go-To • ${noGoGroups.size} No-Go)" }
-    }
+    val saveButtonText = "Save Area Groups (${goToGroups.size} Go-To • ${noGoGroups.size} No-Go)"
 
     fun saveAllGroups() {
         focusManager.clearFocus()
-        prefs.saveAreaGroups(goToGroups, noGoGroups)
+        coroutineScope.launch(Dispatchers.IO) {
+            prefs.saveAreaGroups(goToGroups, noGoGroups)
+            repository.syncAreas(goToGroups + noGoGroups)
+        }
         coroutineScope.launch {
-            val goToStr = "${goToGroups.size} Go-To groups"
-            val noGoStr = "${noGoGroups.size} No-Go groups"
+            val goToStr = "${goToGroups.size} Go-To"
+            val noGoStr = "${noGoGroups.size} No-Go"
             snackbarHostState.showSnackbar("✓ Saved: $goToStr • $noGoStr")
         }
     }
@@ -163,12 +198,12 @@ fun AreaManagerScreen(
                         Text(
                             text = "Area Rules Manager",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp,
+                            fontSize = 16.sp,
                             color = Color(0xFF1E293B)
                         )
                         Text(
                             text = "Area Groups with Per-Group Filters",
-                            fontSize = 14.sp,
+                            fontSize = 11.sp,
                             color = Color(0xFF64748B)
                         )
                     }
@@ -196,25 +231,25 @@ fun AreaManagerScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(14.dp)
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
                     ) {
                         Button(
                             onClick = { saveAllGroups() },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(50.dp),
+                                .height(42.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = BluePrimary,
                                 contentColor = Color.White
                             ),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = saveButtonText,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
@@ -227,65 +262,94 @@ fun AreaManagerScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            item(key = "top_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(4.dp)) }
+            item(key = "top_spacer") { Spacer(modifier = Modifier.height(2.dp)) }
 
-            // Rules Overview Banner
-            item(key = "rules_banner", contentType = "banner") {
+            // Rules Overview Banner (Collapsible - Collapsed by default)
+            item(key = "rules_overview") {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(10.dp),
                     border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.Top
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp)
                     ) {
-                        Box(
+                        Row(
                             modifier = Modifier
-                                .size(38.dp)
-                                .background(Color(0xFFE0F2FE), RoundedCornerShape(10.dp)),
-                            contentAlignment = Alignment.Center
+                                .fillMaxWidth()
+                                .clickable { isInfoExpanded = !isInfoExpanded },
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                Icons.Default.Info,
-                                contentDescription = null,
-                                tint = Color(0xFF0284C7),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .background(Color(0xFFE0F2FE), RoundedCornerShape(6.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = Color(0xFF0284C7),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "Unlimited Area Groups",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                color = Color(0xFF0F172A)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "• Create unlimited area groups with custom names.\n• Each group has individual ON/OFF toggle and optional per-group fare/distance filters.\n• Go-To: Accept only from these areas. No-Go: Auto-reject these areas.",
                                 fontSize = 14.sp,
-                                color = Color(0xFF475569),
-                                lineHeight = 20.sp
+                                color = Color(0xFF0F172A),
+                                modifier = Modifier.weight(1f)
                             )
+                            Icon(
+                                imageVector = if (isInfoExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = if (isInfoExpanded) "Collapse" else "Expand",
+                                tint = Color(0xFF64748B),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        AnimatedVisibility(visible = isInfoExpanded) {
+                            Column(modifier = Modifier.padding(top = 6.dp)) {
+                                Text(
+                                    text = "• Create unlimited area groups with custom names.",
+                                    fontSize = 10.sp,
+                                    color = Color(0xFF475569),
+                                    lineHeight = 14.sp
+                                )
+                                Text(
+                                    text = "• Each group has individual ON/OFF toggle and optional per-group fare/distance filters.",
+                                    fontSize = 10.sp,
+                                    color = Color(0xFF475569),
+                                    lineHeight = 14.sp
+                                )
+                                Text(
+                                    text = "• Go-To: Accept only from these areas. No-Go: Auto-reject these areas.",
+                                    fontSize = 10.sp,
+                                    color = Color(0xFF475569),
+                                    lineHeight = 14.sp
+                                )
+                            }
                         }
                     }
                 }
             }
 
             // SECTION 1: GO-TO GROUPS (Green)
-            item(key = "section_goto_groups", contentType = "area_section") {
+            item(key = "goto_section") {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.5.dp, GoToGreenBorder),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, GoToGreenBorder),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
+                    Column(modifier = Modifier.padding(10.dp)) {
                         // Section Header
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -293,33 +357,33 @@ fun AreaManagerScreen(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(38.dp)
-                                    .background(GoToGreenBg, RoundedCornerShape(10.dp)),
+                                    .size(28.dp)
+                                    .background(GoToGreenBg, RoundedCornerShape(6.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     Icons.Default.Place,
                                     contentDescription = null,
                                     tint = GoToGreenPrimary,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "Go-To Area Groups",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
+                                    fontSize = 14.sp,
                                     color = GoToGreenDark
                                 )
                                 Text(
                                     text = "Accept only if pickup is in these area groups",
-                                    fontSize = 14.sp,
+                                    fontSize = 11.sp,
                                     color = Color(0xFF64748B)
                                 )
                             }
                             Surface(
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 color = GoToGreenBg,
                                 border = BorderStroke(1.dp, GoToGreenBorder)
                             ) {
@@ -327,13 +391,13 @@ fun AreaManagerScreen(
                                     text = "${goToGroups.size} Groups",
                                     color = GoToGreenDark,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    fontSize = 10.sp,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
                         // Add Group Input Row
                         Row(
@@ -346,13 +410,16 @@ fun AreaManagerScreen(
                                 placeholder = {
                                     Text(
                                         "Enter group name (e.g. Downtown)",
-                                        fontSize = 14.sp,
+                                        fontSize = 11.sp,
                                         color = Color(0xFF94A3B8)
                                     )
                                 },
                                 singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(42.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                                 keyboardActions = KeyboardActions(onDone = {
                                     addGoToGroup()
@@ -364,88 +431,87 @@ fun AreaManagerScreen(
                                     cursorColor = GoToGreenPrimary
                                 )
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Button(
                                 onClick = {
                                     addGoToGroup()
                                     focusManager.clearFocus()
                                 },
-                                shape = RoundedCornerShape(10.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = GoToGreenPrimary,
                                     contentColor = Color.White
                                 ),
-                                modifier = Modifier.height(50.dp)
+                                modifier = Modifier.height(42.dp)
                             ) {
-                                Icon(Icons.Default.Add, contentDescription = "Add", modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Add, contentDescription = "Add", modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Add Group", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("+ Add Group", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                             }
                         }
 
                         if (goToGroups.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 goToGroups.forEach { group ->
-                                    AreaGroupCard(
-                                        group = group,
-                                        onToggle = {
-                                            val updated = goToGroups.map { g ->
-                                                if (g.id == group.id) g.copy(isEnabled = !g.isEnabled) else g
+                                    key(group.id) {
+                                        AreaGroupCard(
+                                            group = group,
+                                            onToggle = {
+                                                val updated = goToGroups.map { g ->
+                                                    if (g.id == group.id) g.copy(isEnabled = !g.isEnabled) else g
+                                                }
+                                                goToGroups = updated
+                                                coroutineScope.launch(Dispatchers.IO) {
+                                                    prefs.saveAreaGroups(updated, noGoGroups)
+                                                }
+                                            },
+                                            onFiltersToggle = {
+                                                val updated = goToGroups.map { g ->
+                                                    if (g.id == group.id) g.copy(filtersEnabled = !g.filtersEnabled) else g
+                                                }
+                                                goToGroups = updated
+                                                coroutineScope.launch(Dispatchers.IO) {
+                                                    prefs.saveAreaGroups(updated, noGoGroups)
+                                                }
+                                            },
+                                            onMinFareChange = { newValue ->
+                                                val updated = goToGroups.map { g ->
+                                                    if (g.id == group.id) g.copy(minFare = newValue) else g
+                                                }
+                                                goToGroups = updated
+                                                coroutineScope.launch(Dispatchers.IO) {
+                                                    prefs.saveAreaGroups(updated, noGoGroups)
+                                                }
+                                            },
+                                            onMaxPickupChange = { newValue ->
+                                                val updated = goToGroups.map { g ->
+                                                    if (g.id == group.id) g.copy(maxPickupKm = newValue) else g
+                                                }
+                                                goToGroups = updated
+                                                coroutineScope.launch(Dispatchers.IO) {
+                                                    prefs.saveAreaGroups(updated, noGoGroups)
+                                                }
+                                            },
+                                            onMaxDropChange = { newValue ->
+                                                val updated = goToGroups.map { g ->
+                                                    if (g.id == group.id) g.copy(maxDropKm = newValue) else g
+                                                }
+                                                goToGroups = updated
+                                                coroutineScope.launch(Dispatchers.IO) {
+                                                    prefs.saveAreaGroups(updated, noGoGroups)
+                                                }
+                                            },
+                                            onDelete = {
+                                                val updated = goToGroups.filterNot { it.id == group.id }
+                                                goToGroups = updated
+                                                coroutineScope.launch(Dispatchers.IO) {
+                                                    prefs.saveAreaGroups(updated, noGoGroups)
+                                                }
                                             }
-                                            goToGroups = updated
-                                            prefs.saveAreaGroups(updated, noGoGroups)
-                                        },
-                                        onFiltersToggle = {
-                                            val updated = goToGroups.map { g ->
-                                                if (g.id == group.id) g.copy(filtersEnabled = !g.filtersEnabled) else g
-                                            }
-                                            goToGroups = updated
-                                            prefs.saveAreaGroups(updated, noGoGroups)
-                                        },
-                                        onMinFareChange = { newValue ->
-                                            val updated = goToGroups.map { g ->
-                                                if (g.id == group.id) g.copy(minFare = newValue) else g
-                                            }
-                                            goToGroups = updated
-                                            prefs.saveAreaGroups(updated, noGoGroups)
-                                        },
-                                        onMaxPickupChange = { newValue ->
-                                            val updated = goToGroups.map { g ->
-                                                if (g.id == group.id) g.copy(maxPickupKm = newValue) else g
-                                            }
-                                            goToGroups = updated
-                                            prefs.saveAreaGroups(updated, noGoGroups)
-                                        },
-                                        onMaxDropChange = { newValue ->
-                                            val updated = goToGroups.map { g ->
-                                                if (g.id == group.id) g.copy(maxDropKm = newValue) else g
-                                            }
-                                            goToGroups = updated
-                                            prefs.saveAreaGroups(updated, noGoGroups)
-                                        },
-                                        onDelete = {
-                                            val updated = goToGroups.filterNot { it.id == group.id }
-                                            goToGroups = updated
-                                            prefs.saveAreaGroups(updated, noGoGroups)
-                                        }
-                                    )
+                                        )
+                                    }
                                 }
-                            }
-                        } else {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = Color(0xFFF8FAFC),
-                                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = "No Go-To groups yet. Create one to start filtering by area.",
-                                    fontSize = 14.sp,
-                                    color = Color(0xFF94A3B8),
-                                    modifier = Modifier.padding(12.dp)
-                                )
                             }
                         }
                     }
@@ -453,14 +519,14 @@ fun AreaManagerScreen(
             }
 
             // SECTION 2: NO-GO GROUPS (Red)
-            item(key = "section_nogo_groups", contentType = "area_section") {
+            item(key = "nogo_section") {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.5.dp, NoGoRedBorder),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, NoGoRedBorder),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
+                    Column(modifier = Modifier.padding(10.dp)) {
                         // Section Header
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -468,33 +534,33 @@ fun AreaManagerScreen(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(38.dp)
-                                    .background(NoGoRedBg, RoundedCornerShape(10.dp)),
+                                    .size(28.dp)
+                                    .background(NoGoRedBg, RoundedCornerShape(6.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     Icons.Default.Block,
                                     contentDescription = null,
                                     tint = NoGoRedPrimary,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "No-Go Area Groups",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
+                                    fontSize = 14.sp,
                                     color = NoGoRedDark
                                 )
                                 Text(
                                     text = "Auto-reject if pickup matches these area groups",
-                                    fontSize = 14.sp,
+                                    fontSize = 11.sp,
                                     color = Color(0xFF64748B)
                                 )
                             }
                             Surface(
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 color = NoGoRedBg,
                                 border = BorderStroke(1.dp, NoGoRedBorder)
                             ) {
@@ -502,13 +568,13 @@ fun AreaManagerScreen(
                                     text = "${noGoGroups.size} Groups",
                                     color = NoGoRedDark,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    fontSize = 10.sp,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
                         // Add Group Input Row
                         Row(
@@ -521,13 +587,16 @@ fun AreaManagerScreen(
                                 placeholder = {
                                     Text(
                                         "Enter group name (e.g. Unsafe)",
-                                        fontSize = 14.sp,
+                                        fontSize = 11.sp,
                                         color = Color(0xFF94A3B8)
                                     )
                                 },
                                 singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(42.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                                 keyboardActions = KeyboardActions(onDone = {
                                     addNoGoGroup()
@@ -539,95 +608,94 @@ fun AreaManagerScreen(
                                     cursorColor = NoGoRedPrimary
                                 )
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Button(
                                 onClick = {
                                     addNoGoGroup()
                                     focusManager.clearFocus()
                                 },
-                                shape = RoundedCornerShape(10.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = NoGoRedPrimary,
                                     contentColor = Color.White
                                 ),
-                                modifier = Modifier.height(50.dp)
+                                modifier = Modifier.height(42.dp)
                             ) {
-                                Icon(Icons.Default.Add, contentDescription = "Add", modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Add, contentDescription = "Add", modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Add Group", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("+ Add Group", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                             }
                         }
 
                         if (noGoGroups.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 noGoGroups.forEach { group ->
-                                    AreaGroupCard(
-                                        group = group,
-                                        onToggle = {
-                                            val updated = noGoGroups.map { g ->
-                                                if (g.id == group.id) g.copy(isEnabled = !g.isEnabled) else g
+                                    key(group.id) {
+                                        AreaGroupCard(
+                                            group = group,
+                                            onToggle = {
+                                                val updated = noGoGroups.map { g ->
+                                                    if (g.id == group.id) g.copy(isEnabled = !g.isEnabled) else g
+                                                }
+                                                noGoGroups = updated
+                                                coroutineScope.launch(Dispatchers.IO) {
+                                                    prefs.saveAreaGroups(goToGroups, updated)
+                                                }
+                                            },
+                                            onFiltersToggle = {
+                                                val updated = noGoGroups.map { g ->
+                                                    if (g.id == group.id) g.copy(filtersEnabled = !g.filtersEnabled) else g
+                                                }
+                                                noGoGroups = updated
+                                                coroutineScope.launch(Dispatchers.IO) {
+                                                    prefs.saveAreaGroups(goToGroups, updated)
+                                                }
+                                            },
+                                            onMinFareChange = { newValue ->
+                                                val updated = noGoGroups.map { g ->
+                                                    if (g.id == group.id) g.copy(minFare = newValue) else g
+                                                }
+                                                noGoGroups = updated
+                                                coroutineScope.launch(Dispatchers.IO) {
+                                                    prefs.saveAreaGroups(goToGroups, updated)
+                                                }
+                                            },
+                                            onMaxPickupChange = { newValue ->
+                                                val updated = noGoGroups.map { g ->
+                                                    if (g.id == group.id) g.copy(maxPickupKm = newValue) else g
+                                                }
+                                                noGoGroups = updated
+                                                coroutineScope.launch(Dispatchers.IO) {
+                                                    prefs.saveAreaGroups(goToGroups, updated)
+                                                }
+                                            },
+                                            onMaxDropChange = { newValue ->
+                                                val updated = noGoGroups.map { g ->
+                                                    if (g.id == group.id) g.copy(maxDropKm = newValue) else g
+                                                }
+                                                noGoGroups = updated
+                                                coroutineScope.launch(Dispatchers.IO) {
+                                                    prefs.saveAreaGroups(goToGroups, updated)
+                                                }
+                                            },
+                                            onDelete = {
+                                                val updated = noGoGroups.filterNot { it.id == group.id }
+                                                noGoGroups = updated
+                                                coroutineScope.launch(Dispatchers.IO) {
+                                                    prefs.saveAreaGroups(goToGroups, updated)
+                                                }
                                             }
-                                            noGoGroups = updated
-                                            prefs.saveAreaGroups(goToGroups, updated)
-                                        },
-                                        onFiltersToggle = {
-                                            val updated = noGoGroups.map { g ->
-                                                if (g.id == group.id) g.copy(filtersEnabled = !g.filtersEnabled) else g
-                                            }
-                                            noGoGroups = updated
-                                            prefs.saveAreaGroups(goToGroups, updated)
-                                        },
-                                        onMinFareChange = { newValue ->
-                                            val updated = noGoGroups.map { g ->
-                                                if (g.id == group.id) g.copy(minFare = newValue) else g
-                                            }
-                                            noGoGroups = updated
-                                            prefs.saveAreaGroups(goToGroups, updated)
-                                        },
-                                        onMaxPickupChange = { newValue ->
-                                            val updated = noGoGroups.map { g ->
-                                                if (g.id == group.id) g.copy(maxPickupKm = newValue) else g
-                                            }
-                                            noGoGroups = updated
-                                            prefs.saveAreaGroups(goToGroups, updated)
-                                        },
-                                        onMaxDropChange = { newValue ->
-                                            val updated = noGoGroups.map { g ->
-                                                if (g.id == group.id) g.copy(maxDropKm = newValue) else g
-                                            }
-                                            noGoGroups = updated
-                                            prefs.saveAreaGroups(goToGroups, updated)
-                                        },
-                                        onDelete = {
-                                            val updated = noGoGroups.filterNot { it.id == group.id }
-                                            noGoGroups = updated
-                                            prefs.saveAreaGroups(goToGroups, updated)
-                                        }
-                                    )
+                                        )
+                                    }
                                 }
-                            }
-                        } else {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = Color(0xFFF8FAFC),
-                                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = "No No-Go groups yet. Create one to block specific areas.",
-                                    fontSize = 14.sp,
-                                    color = Color(0xFF94A3B8),
-                                    modifier = Modifier.padding(12.dp)
-                                )
                             }
                         }
                     }
                 }
             }
 
-            item(key = "bottom_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(24.dp)) }
+            item(key = "bottom_spacer") { Spacer(modifier = Modifier.height(24.dp)) }
         }
     }
 }
@@ -663,11 +731,11 @@ fun AreaGroupCard(
 
     Card(
         colors = CardDefaults.cardColors(containerColor = bgColor),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(10.dp),
         border = BorderStroke(1.dp, borderColor),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             // Group Header with Toggle
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -678,7 +746,7 @@ fun AreaGroupCard(
                     Text(
                         text = group.name,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
+                        fontSize = 14.sp,
                         color = darkColor
                     )
                 }
@@ -696,13 +764,13 @@ fun AreaGroupCard(
                     Spacer(modifier = Modifier.width(4.dp))
                     IconButton(
                         onClick = onDelete,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
                             Icons.Default.Close,
                             contentDescription = "Delete group",
                             tint = darkColor.copy(alpha = 0.7f),
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
@@ -720,7 +788,7 @@ fun AreaGroupCard(
                 ) {
                     Text(
                         text = "Custom Filters",
-                        fontSize = 14.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = darkColor
                     )
@@ -739,17 +807,17 @@ fun AreaGroupCard(
                 // Filters Section (shown only if enabled)
                 if (group.filtersEnabled) {
                     Column(
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color.White.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
-                            .padding(12.dp)
+                            .background(Color.White.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                            .padding(8.dp)
                     ) {
                         // Min Fare
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
                                 text = "Min Fare (₹)",
-                                fontSize = 14.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = darkColor
                             )
@@ -761,13 +829,13 @@ fun AreaGroupCard(
                                         input.toFloatOrNull()?.let { onMinFareChange(it) }
                                     }
                                 },
-                                placeholder = { Text("50", fontSize = 14.sp) },
+                                placeholder = { Text("50", fontSize = 11.sp) },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(48.dp),
+                                    .height(42.dp),
                                 shape = RoundedCornerShape(8.dp),
-                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp),
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = primaryColor,
                                     unfocusedBorderColor = borderColor
@@ -776,10 +844,10 @@ fun AreaGroupCard(
                         }
 
                         // Max Pickup KM
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
                                 text = "Max Pickup (km)",
-                                fontSize = 14.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = darkColor
                             )
@@ -791,13 +859,13 @@ fun AreaGroupCard(
                                         input.toFloatOrNull()?.let { onMaxPickupChange(it) }
                                     }
                                 },
-                                placeholder = { Text("3.0", fontSize = 14.sp) },
+                                placeholder = { Text("3.0", fontSize = 11.sp) },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(48.dp),
+                                    .height(42.dp),
                                 shape = RoundedCornerShape(8.dp),
-                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp),
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = primaryColor,
                                     unfocusedBorderColor = borderColor

@@ -21,7 +21,6 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import androidx.core.content.ContextCompat
-import androidx.compose.runtime.Immutable
 import com.example.data.FirebaseRepository
 import com.example.data.PreferencesManager
 import com.example.engine.AreaRulesEngine
@@ -29,6 +28,7 @@ import com.example.engine.DecisionResult
 import com.example.engine.OlaAdapter
 import com.example.engine.OrderDataExtractor
 import com.example.engine.RapidoAdapter
+import com.example.engine.RapidoPopupValidation
 import com.example.engine.UberAdapter
 import com.example.model.AreaGroup
 import com.example.model.ClickStrategy
@@ -58,6 +58,8 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     private lateinit var prefs: PreferencesManager
     private val preferencesManager: PreferencesManager get() = prefs
     private lateinit var repository: FirebaseRepository
+    private val rideHistoryRepository by lazy { com.example.data.db.RideHistoryRepository.getInstance(applicationContext) }
+    private val activeOrderRecordIds = java.util.Collections.synchronizedMap(mutableMapOf<com.example.model.Platform, String>())
     private val handler = Handler(Looper.getMainLooper())
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -120,7 +122,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
         fun isRapidoPackage(pkg: String): Boolean {
             val p = pkg.trim().lowercase()
-            return p.contains("com.rapido.passenger") || p.contains("com.rapido.rider") || p.contains("rapido")
+            return p == "com.rapido.passenger" || p.contains("com.rapido.passenger") || p.contains("com.rapido.rider") || p.contains("rapido")
         }
 
         fun isUberPackage(pkg: String): Boolean {
@@ -142,7 +144,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        prefs = PreferencesManager(applicationContext)
+        prefs = PreferencesManager.getInstance(applicationContext)
         repository = FirebaseRepository(applicationContext, prefs)
         isServiceRunning = true
         Log.i(TAG, "SmartDrivo Accessibility Service Connected")
@@ -179,6 +181,25 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             Log.e(TAG, "Error starting foreground service: ${e.message}")
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
             notificationManager?.notify(NotificationHelper.NOTIFICATION_ID, initialNotification)
+        }
+
+        // Configure accessibility serviceInfo to ensure TYPE_WINDOW_CONTENT_CHANGED & TYPE_WINDOW_STATE_CHANGED are delivered
+        try {
+            val info = serviceInfo ?: android.accessibilityservice.AccessibilityServiceInfo()
+            info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
+                    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
+                    AccessibilityEvent.TYPE_VIEW_CLICKED or
+                    AccessibilityEvent.TYPE_VIEW_FOCUSED or
+                    AccessibilityEvent.TYPE_WINDOWS_CHANGED
+            info.feedbackType = android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_GENERIC
+            info.flags = info.flags or
+                    android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                    android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            info.packageNames = null // Listen to all apps without blocking Rapido (com.rapido.passenger)
+            serviceInfo = info
+            Log.i(TAG, "AccessibilityServiceInfo configured with TYPE_WINDOW_CONTENT_CHANGED & TYPE_WINDOW_STATE_CHANGED")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error configuring serviceInfo: ${e.message}")
         }
 
         // 4. Update notification text dynamically based on Auto-Accept setting
@@ -322,13 +343,25 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         return "${candidate.platform}_${fare}_${pickDist}_${dropDist}_${pickup}"
     }
 
-    @Immutable
     data class DirectRideFilterSettings(
         val minFare: Float,
         val maxFare: Float,
         val maxPickupKm: Float,
-        val maxDropKm: Float
+        val maxDropKm: Float,
+        val filterMode: String = "both"
     )
+
+    private fun getDirectPreferencesString(sp: SharedPreferences, keys: List<String>, defaultVal: String): String {
+        for (key in keys) {
+            if (sp.contains(key)) {
+                try {
+                    val str = sp.getString(key, null)
+                    if (!str.isNullOrBlank()) return str
+                } catch (_: Exception) {}
+            }
+        }
+        return defaultVal
+    }
 
     private fun getDirectPreferencesFloat(sp: SharedPreferences, keys: List<String>, defaultVal: Float): Float {
         for (key in keys) {
@@ -357,7 +390,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
     /**
      * Reads settings directly from SharedPreferences using context.getSharedPreferences("smartdrivo_prefs", Context.MODE_PRIVATE).
-     * Reads minFare, maxFare, maxPickupKm, maxDropKm fresh every time.
+     * Reads minFare, maxFare, maxPickupKm, maxDropKm, and filterMode fresh every time.
      * Does NOT use PreferencesManager class or any cached variable.
      */
     private fun readDirectSettingsFresh(): DirectRideFilterSettings {
@@ -374,22 +407,65 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             listOf("setting_max_drop_dist_km", "setting_max_drop_km", "max_drop_dist_km", "max_drop_distance_km", "max_drop_km", "maxDropKm", "maxDropDistanceKm"),
             7.5f
         )
+        val rawMode = getDirectPreferencesString(sp, listOf("filter_mode", "setting_filter_mode", "filterMode"), "both")
+        val normalizedFilterMode = when {
+            rawMode.contains("fare", ignoreCase = true) && !rawMode.contains("distance", ignoreCase = true) -> "fare_only"
+            rawMode.contains("distance", ignoreCase = true) && !rawMode.contains("fare", ignoreCase = true) -> "distance_only"
+            else -> "both"
+        }
         return DirectRideFilterSettings(
             minFare = minFare,
             maxFare = maxFare,
             maxPickupKm = maxPickupKm,
-            maxDropKm = maxDropKm
+            maxDropKm = maxDropKm,
+            filterMode = normalizedFilterMode
         )
     }
 
+    data class DirectFilterResult(
+        val status: OrderStatus,
+        val reason: String
+    )
+
     /**
      * Fresh direct filter check without using PreferencesManager class or any cached variable:
-     * - If pickup distance > maxPickupKm -> REJECT ride
-     * - If fare < minFare or fare > maxFare -> REJECT ride
-     * - If drop distance > maxDropKm -> REJECT ride
+     * - If No-Go area matched → OrderStatus.REJECTED
+     * - All other filter failures (fare, pickup km, drop km) → OrderStatus.IGNORED
+     * - All filters passed → OrderStatus.ACCEPTED
+     *
+     * Respects Filter Mode:
+     * - If filterMode == "fare_only" -> skip pickup and drop distance checks completely
+     * - If filterMode == "distance_only" -> skip fare checks completely
+     * - If filterMode == "both" -> check both fare and distance filters
      */
-    private fun evaluateDirectRideFilters(candidate: RideCandidate): DecisionResult.Reject? {
+    private fun evaluateDirectRideFilters(candidate: RideCandidate): DirectFilterResult {
+        // 1. Check No-Go Areas first: If No-Go area matched → OrderStatus.REJECTED
+        if (prefs.isNoGoEnabled) {
+            val noGoAreas = prefs.loadNoGoAreas().filter { it.isEnabled }
+            if (noGoAreas.isNotEmpty()) {
+                val pickupText = candidate.pickupAddress.orEmpty().trim().lowercase()
+                val dropText = "${candidate.dropAddress.orEmpty()} ${candidate.dropArea.orEmpty()}".trim().lowercase()
+                for (noGo in noGoAreas) {
+                    val targets = (listOf(noGo.name) + noGo.keywords).map { it.trim() }.filter { it.isNotBlank() }
+                    for (target in targets) {
+                        val lowerTarget = target.lowercase()
+                        if (pickupText.isNotBlank() && pickupText.contains(lowerTarget)) {
+                            val reason = "No-Go Area Filter: Pickup location matches No-Go area '$target'"
+                            Log.w(TAG, "❌ [Direct Filter REJECT] $reason")
+                            return DirectFilterResult(OrderStatus.REJECTED, reason)
+                        }
+                        if (dropText.isNotBlank() && dropText.contains(lowerTarget)) {
+                            val reason = "No-Go Area Filter: Drop location matches No-Go area '$target'"
+                            Log.w(TAG, "❌ [Direct Filter REJECT] $reason")
+                            return DirectFilterResult(OrderStatus.REJECTED, reason)
+                        }
+                    }
+                }
+            }
+        }
+
         val direct = readDirectSettingsFresh()
+        val filterMode = direct.filterMode
         val pickup = candidate.pickupDistKm
         val fare = candidate.fare
         val drop = candidate.dropDistKm
@@ -397,39 +473,49 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         Log.i(
             TAG,
             "⚡ Direct SharedPreferences Evaluation: " +
-            "[Filters: minFare=₹${direct.minFare}, maxFare=₹${direct.maxFare}, maxPickup=${direct.maxPickupKm}km, maxDrop=${direct.maxDropKm}km] vs " +
+            "[filterMode=$filterMode, minFare=₹${direct.minFare}, maxFare=₹${direct.maxFare}, maxPickup=${direct.maxPickupKm}km, maxDrop=${direct.maxDropKm}km] vs " +
             "[Candidate: fare=₹$fare, pickup=${pickup}km, drop=${drop}km]"
         )
 
-        // 1. Pickup distance check: If pickup distance > maxPickupKm -> REJECT ride
-        if (pickup != null && direct.maxPickupKm > 0f && pickup > direct.maxPickupKm) {
-            val reason = "Pickup distance (${pickup}km) exceeds max limit (${direct.maxPickupKm}km)"
-            Log.w(TAG, "❌ [Direct Filter REJECT] $reason")
-            return DecisionResult.Reject(reason)
-        }
+        val checkDistance = filterMode == "distance_only" || filterMode == "both"
+        val checkFare = filterMode == "fare_only" || filterMode == "both"
 
-        // 2. Drop distance check: If drop distance > maxDropKm -> REJECT ride
-        if (drop != null && direct.maxDropKm > 0f && drop > direct.maxDropKm) {
-            val reason = "Drop distance (${drop}km) exceeds max limit (${direct.maxDropKm}km)"
-            Log.w(TAG, "❌ [Direct Filter REJECT] $reason")
-            return DecisionResult.Reject(reason)
-        }
-
-        // 3. Fare check: If fare < minFare or fare > maxFare -> REJECT ride
-        if (fare != null && fare > 0f) {
-            if (direct.minFare > 0f && fare < direct.minFare) {
-                val reason = "Fare ₹${fare.toInt()} is below min fare ₹${direct.minFare.toInt()}"
-                Log.w(TAG, "❌ [Direct Filter REJECT] $reason")
-                return DecisionResult.Reject(reason)
+        // 2. Distance checks (pickup and drop): Only evaluated when checkDistance is true (distance_only or both)
+        // All other filter failures (fare, pickup km, drop km) → OrderStatus.IGNORED
+        if (checkDistance) {
+            // Pickup distance check: If pickup distance > maxPickupKm -> IGNORED
+            if (pickup != null && direct.maxPickupKm > 0f && pickup > direct.maxPickupKm) {
+                val reason = "Pickup distance (${pickup}km) exceeds max limit (${direct.maxPickupKm}km)"
+                Log.w(TAG, "⏭️ [Direct Filter IGNORED] $reason")
+                return DirectFilterResult(OrderStatus.IGNORED, reason)
             }
-            if (direct.maxFare > 0f && fare > direct.maxFare) {
-                val reason = "Fare ₹${fare.toInt()} exceeds max fare ₹${direct.maxFare.toInt()}"
-                Log.w(TAG, "❌ [Direct Filter REJECT] $reason")
-                return DecisionResult.Reject(reason)
+
+            // Drop distance check: If drop distance > maxDropKm -> IGNORED
+            if (drop != null && direct.maxDropKm > 0f && drop > direct.maxDropKm) {
+                val reason = "Drop distance (${drop}km) exceeds max limit (${direct.maxDropKm}km)"
+                Log.w(TAG, "⏭️ [Direct Filter IGNORED] $reason")
+                return DirectFilterResult(OrderStatus.IGNORED, reason)
             }
         }
 
-        return null
+        // 3. Fare check: Only evaluated when checkFare is true (fare_only or both)
+        if (checkFare) {
+            if (fare != null && fare > 0f) {
+                if (direct.minFare > 0f && fare < direct.minFare) {
+                    val reason = "Fare ₹${fare.toInt()} is below min fare ₹${direct.minFare.toInt()}"
+                    Log.w(TAG, "⏭️ [Direct Filter IGNORED] $reason")
+                    return DirectFilterResult(OrderStatus.IGNORED, reason)
+                }
+                if (direct.maxFare > 0f && fare > direct.maxFare) {
+                    val reason = "Fare ₹${fare.toInt()} exceeds max fare ₹${direct.maxFare.toInt()}"
+                    Log.w(TAG, "⏭️ [Direct Filter IGNORED] $reason")
+                    return DirectFilterResult(OrderStatus.IGNORED, reason)
+                }
+            }
+        }
+
+        // All filters passed → OrderStatus.ACCEPTED
+        return DirectFilterResult(OrderStatus.ACCEPTED, "All direct filters passed")
     }
 
     /**
@@ -477,121 +563,121 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
 
-        val eventPkg = event.packageName?.toString().orEmpty().trim().lowercase()
+        // 1. Process TYPE_WINDOW_CONTENT_CHANGED (2048) and TYPE_WINDOW_STATE_CHANGED (32)
+        // Ignore only notification events
+        if (event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
+            return
+        }
 
-        // Detailed logging when accessibility event received from com.rapido.passenger
-        if (eventPkg == "com.rapido.passenger" || isRapidoPackage(eventPkg)) {
+        val eventPkg = event.packageName?.toString().orEmpty().trim().lowercase()
+        val activeRootPkg = rootInActiveWindow?.packageName?.toString().orEmpty().trim().lowercase()
+
+        // 2. Remove restrictive packageName checks - explicitly allow "com.rapido.passenger"
+        val isRapido = eventPkg == "com.rapido.passenger" ||
+                isRapidoPackage(eventPkg) ||
+                activeRootPkg == "com.rapido.passenger" ||
+                isRapidoPackage(activeRootPkg)
+        val isUber = isUberPackage(eventPkg) || isUberPackage(activeRootPkg)
+        val isOla = isOlaPackage(eventPkg) || isOlaPackage(activeRootPkg)
+
+        if (!isRapido && !isUber && !isOla) {
+            return
+        }
+
+        // 3. Add requested log line at the start of Rapido processing
+        if (isRapido) {
+            Log.d("SmartDrivo", "Rapido event received: ${event.eventType}")
             val eventTypeStr = try { AccessibilityEvent.eventTypeToString(event.eventType) } catch (_: Exception) { "${event.eventType}" }
             Log.i(
                 TAG,
-                "📥 [Rapido] Accessibility event received from $eventPkg | " +
-                    "Type: $eventTypeStr | " +
+                "📥 [Rapido] Accessibility event received: eventPkg='$eventPkg', activePkg='$activeRootPkg' | " +
+                    "Type: $eventTypeStr (${event.eventType}) | " +
                     "Class: ${event.className} | " +
                     "Text: ${event.text} | " +
                     "Desc: ${event.contentDescription} | " +
-                    "AutoAcceptEnabled: ${preferencesManager.isAutoAcceptEnabled} | " +
-                    "ClickInProgress: $isClickInProgress"
+                    "AutoAcceptEnabled: ${preferencesManager.isAutoAcceptEnabled}"
             )
-            if (!preferencesManager.isAutoAcceptEnabled) {
-                Log.w(TAG, "⚠️ [Rapido] Skipping event from $eventPkg: Auto-accept is DISABLED in settings")
-                return
-            }
-            if (isClickInProgress) {
-                Log.w(TAG, "⚠️ [Rapido] Skipping event from $eventPkg: Click is currently in progress")
-                return
-            }
-            if (System.currentTimeMillis() < clickBlockedUntilTimestamp) {
-                val remaining = clickBlockedUntilTimestamp - System.currentTimeMillis()
-                Log.w(TAG, "⚠️ [Rapido] Skipping event from $eventPkg: Rate limit cooldown active (${remaining}ms remaining)")
-                return
-            }
+            // DO NOT return early if auto-accept is disabled:
+            // All incoming Rapido orders must be processed and logged to history.
         } else {
             if (!preferencesManager.isAutoAcceptEnabled) return
             if (isClickInProgress) return
             if (System.currentTimeMillis() < clickBlockedUntilTimestamp) return
         }
 
-        // Only process: com.rapido.passenger, com.ubercab, ola.cabs. Block others.
-        if (!isAllowedPackage(eventPkg)) {
-            return
-        }
+        val targetPkg = if (isRapido) {
+            if (eventPkg == "com.rapido.passenger" || isRapidoPackage(eventPkg)) eventPkg else "com.rapido.passenger"
+        } else eventPkg
 
         val eventSource = try { event.source } catch (e: Exception) { null }
 
         // Move accessibility service logic to Dispatchers.IO background thread
         serviceScope.launch(Dispatchers.IO) {
-            processAccessibilityEvent(eventPkg, eventSource)
+            processAccessibilityEvent(targetPkg, eventSource, event.eventType)
         }
     }
 
-    private fun processAccessibilityEvent(eventPkg: String, eventSource: AccessibilityNodeInfo?) {
-        if (!preferencesManager.isAutoAcceptEnabled) return
-        if (isClickInProgress) return
-        if (System.currentTimeMillis() < clickBlockedUntilTimestamp) return
-
+    private fun processAccessibilityEvent(
+        eventPkg: String,
+        eventSource: AccessibilityNodeInfo?,
+        eventType: Int = 0
+    ) {
         // 1. Check Uber window or event for com.ubercab
         val isUberPkg = isUberPackage(eventPkg)
-        val uberWin = try {
-            windows?.firstOrNull { 
-                val pkg = it.root?.packageName?.toString().orEmpty()
-                isUberPackage(pkg)
-            }
-        } catch (e: Exception) {
-            null
-        }
-
-        if (isUberPkg || uberWin != null) {
-            val root = uberWin?.root ?: eventSource ?: rootInActiveWindow
-            if (root != null) {
-                handleUberOrder(root, if (isUberPkg) eventPkg else "com.ubercab")
+        if (isUberPkg) {
+            if (!preferencesManager.isAutoAcceptEnabled) return
+            if (isClickInProgress) return
+            if (System.currentTimeMillis() < clickBlockedUntilTimestamp) return
+            val root = rootInActiveWindow ?: eventSource
+            val rootPkg = root?.packageName?.toString().orEmpty().trim().lowercase()
+            if (root != null && isUberPackage(rootPkg)) {
+                handleUberOrder(root, eventPkg)
                 return
             }
         }
 
-        // 2. Check Rapido window or event (com.rapido.passenger)
-        val isRapidoPkg = isRapidoPackage(eventPkg)
-        val win = try {
-            windows?.firstOrNull { 
-                val pkg = it.root?.packageName?.toString().orEmpty()
-                isRapidoPackage(pkg)
+        // 2. Check Rapido: Allow processing when Rapido sends events even if partially in background
+        val isRapidoPkg = eventPkg == "com.rapido.passenger" || isRapidoPackage(eventPkg)
+        if (isRapidoPkg) {
+            Log.d("SmartDrivo", "Rapido event received: $eventType")
+            val activeRoot = rootInActiveWindow
+            val sourceRoot = getTopRootNode(eventSource)
+
+            // Requirement 3: Check if root contains "Today's Earnings" or "ON DUTY" or "Blue Performance" -> HOME SCREEN, skip completely
+            if (RapidoAdapter.isRapidoHomeScreen(sourceRoot) || RapidoAdapter.isRapidoHomeScreen(activeRoot)) {
+                Log.d(TAG, "🏠 Rapido home screen detected in event ('Today's Earnings' / 'ON DUTY' / 'Blue Performance'). Skipping completely.")
+                return
             }
-        } catch (e: Exception) {
-            null
-        }
-        if (win != null || isRapidoPkg) {
-            Log.i(TAG, "🔎 [Rapido] Processing accessibility event for $eventPkg (isRapidoPkg=$isRapidoPkg, winFound=${win != null})")
-            val root = win?.root ?: eventSource ?: rootInActiveWindow
-            if (root != null) {
-                // Fix 3: Stop clicking on Rapido home/map screen entirely.
-                // Only process when Accept button node exists and ₹ exists. If both not found, do nothing and wait.
-                val isVisible = isRapidoOrderScreenVisible(root)
-                if (!isVisible) {
-                    Log.d(TAG, "ℹ️ [Rapido] Screen not recognized as order card yet (requires ₹ and km nodes). Root package=${root.packageName}")
+
+            // Find the node tree containing a genuine Rapido order popup
+            val candidateRoot = when {
+                sourceRoot != null && RapidoAdapter.validateRapidoOrderPopup(sourceRoot).isValid -> sourceRoot
+                activeRoot != null && RapidoAdapter.validateRapidoOrderPopup(activeRoot).isValid -> activeRoot
+                else -> null
+            }
+
+            if (candidateRoot != null) {
+                val validation = RapidoAdapter.validateRapidoOrderPopup(candidateRoot)
+                if (validation.isValid) {
+                    Log.i(
+                        TAG,
+                        "🎯 [Rapido] Genuine order popup detected: fare=₹${validation.fare}, pickupKm=${validation.pickupDistKm}, nearby=${validation.hasNearby}"
+                    )
+                    handleRapidoOrder(candidateRoot, validation)
                     return
                 }
-                Log.i(TAG, "🎯 [Rapido] Order card screen confirmed for $eventPkg! Forwarding to handleRapidoOrder.")
-                handleRapidoOrder(root)
-                return
             } else {
-                Log.w(TAG, "⚠️ [Rapido] Event from $eventPkg received but root node could not be resolved from window or eventSource")
+                Log.d(TAG, "ℹ️ [Rapido] Event from $eventPkg does not contain a genuine order popup with fare, pickup distance, and Accept button. Skipping.")
             }
         }
 
         // 3. Check Ola window or event for ola.cabs / com.olacabs.oladriver
         val isOlaPkg = isOlaPackage(eventPkg)
-        val olaWin = try {
-            windows?.firstOrNull { 
-                val pkg = it.root?.packageName?.toString().orEmpty()
-                isOlaPackage(pkg)
-            }
-        } catch (e: Exception) {
-            null
-        }
-        if ((isOlaPkg || olaWin != null) && preferencesManager.isAutoAcceptEnabled) {
-            val root = olaWin?.root ?: eventSource ?: rootInActiveWindow
-            if (root != null) {
-                val detectedPkg = if (isOlaPkg) eventPkg else (olaWin?.root?.packageName?.toString() ?: "com.olacabs.oladriver")
-                handleOlaOrder(root, detectedPkg)
+        if (isOlaPkg && preferencesManager.isAutoAcceptEnabled) {
+            val root = rootInActiveWindow ?: eventSource
+            val rootPkg = root?.packageName?.toString().orEmpty().trim().lowercase()
+            if (root != null && isOlaPackage(rootPkg)) {
+                handleOlaOrder(root, eventPkg)
                 return
             }
         }
@@ -727,12 +813,29 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                 defaultVehicle = prefs.userProfile.value.vehicleType
             )
 
+            // PART B/E: Detection-First Insert: IMMEDIATELY create one History record with PROCESSING status in Room
+            val recordId = onOrderDetectedFast(candidate)
+            Log.i(TAG, "⚡ Uber order detected & inserted to Room [PROCESSING]: Fare=₹${candidate.fare}, pickup=${candidate.pickupAddress}")
+
             // Direct SharedPreferences Filter Evaluation before evaluating ANY ride
-            val directReject = evaluateDirectRideFilters(candidate)
-            if (directReject != null) {
-                Log.i(TAG, "Uber ride rejected by direct filter: ${directReject.reason}")
-                attemptRejectOrder(root, Platform.UBER, candidate, directReject.reason, pkgName)
-                return
+            val directResult = evaluateDirectRideFilters(candidate)
+            when (directResult.status) {
+                OrderStatus.REJECTED -> {
+                    Log.i(TAG, "Uber ride rejected by direct filter: ${directResult.reason}")
+                    onOrderDecisionFast(recordId, candidate, OrderStatus.REJECTED, "REJECT_CRITERIA_MET", directResult.reason)
+                    attemptRejectOrder(root, Platform.UBER, candidate, directResult.reason, pkgName)
+                    return
+                }
+                OrderStatus.IGNORED -> {
+                    Log.i(TAG, "Uber ride ignored by direct filter: ${directResult.reason}")
+                    onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED, "CRITERIA_NOT_MET", directResult.reason)
+                    resetProcessing()
+                    return
+                }
+                OrderStatus.ACCEPTED -> {
+                    // Direct filters passed, continue evaluation
+                }
+                else -> { /* no-op */ }
             }
 
             // Fix 2: Vibrate only once per order using lastVibratedOrderId
@@ -781,8 +884,15 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             )
 
             if (decision is DecisionResult.Reject) {
-                Log.i(TAG, "Uber ride rejected by filter: ${decision.reason}")
-                attemptRejectOrder(root, Platform.UBER, candidate, decision.reason, pkgName)
+                val isNoGo = decision.reason.contains("No-Go", ignoreCase = true)
+                if (isNoGo) {
+                    Log.i(TAG, "Uber ride rejected by filter: ${decision.reason}")
+                    attemptRejectOrder(root, Platform.UBER, candidate, decision.reason, pkgName)
+                } else {
+                    Log.i(TAG, "Uber ride ignored by filter: ${decision.reason}")
+                    logOrderEvent(candidate, OrderStatus.IGNORED, decision.reason)
+                    resetProcessing()
+                }
                 return
             }
             if (decision is DecisionResult.Ignore) {
@@ -816,10 +926,15 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
      * 3. If fails: tap parent node
      */
     private fun executeUberAutoAccept(root: AccessibilityNodeInfo, candidate: RideCandidate) {
-        val directReject = evaluateDirectRideFilters(candidate)
-        if (directReject != null) {
-            Log.w(TAG, "Aborting executeUberAutoAccept: ${directReject.reason}")
-            attemptRejectOrder(root, Platform.UBER, candidate, directReject.reason, "com.ubercab")
+        val directResult = evaluateDirectRideFilters(candidate)
+        if (directResult.status == OrderStatus.REJECTED) {
+            Log.w(TAG, "Aborting executeUberAutoAccept: ${directResult.reason}")
+            attemptRejectOrder(root, Platform.UBER, candidate, directResult.reason, "com.ubercab")
+            return
+        } else if (directResult.status == OrderStatus.IGNORED) {
+            Log.w(TAG, "Aborting executeUberAutoAccept: ${directResult.reason}")
+            logOrderEvent(candidate, OrderStatus.IGNORED, directResult.reason)
+            resetProcessing()
             return
         }
 
@@ -1183,13 +1298,31 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                 defaultVehicle = prefs.userProfile.value.vehicleType
             )
 
+            // PART B/E: Detection-First Insert: IMMEDIATELY create one History record with PROCESSING status in Room
+            val recordId = onOrderDetectedFast(candidate)
+            Log.i(TAG, "⚡ Ola order detected & inserted to Room [PROCESSING]: Fare=₹${candidate.fare}, pickup=${candidate.pickupAddress}")
+
             // Direct SharedPreferences Filter Evaluation before evaluating ANY ride
-            val directReject = evaluateDirectRideFilters(candidate)
-            if (directReject != null) {
-                Log.i(TAG, "Ola ride rejected by direct filter: ${directReject.reason}")
-                attemptRejectOrder(root, Platform.OLA, candidate, directReject.reason, pkgName)
-                setOlaState(OlaState.IDLE)
-                return
+            val directResult = evaluateDirectRideFilters(candidate)
+            when (directResult.status) {
+                OrderStatus.REJECTED -> {
+                    Log.i(TAG, "Ola ride rejected by direct filter: ${directResult.reason}")
+                    onOrderDecisionFast(recordId, candidate, OrderStatus.REJECTED, "REJECT_CRITERIA_MET", directResult.reason)
+                    attemptRejectOrder(root, Platform.OLA, candidate, directResult.reason, pkgName)
+                    setOlaState(OlaState.IDLE)
+                    return
+                }
+                OrderStatus.IGNORED -> {
+                    Log.i(TAG, "Ola ride ignored by direct filter: ${directResult.reason}")
+                    onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED, "CRITERIA_NOT_MET", directResult.reason)
+                    resetProcessing()
+                    setOlaState(OlaState.IDLE)
+                    return
+                }
+                OrderStatus.ACCEPTED -> {
+                    // Direct filters passed, continue evaluation
+                }
+                else -> { /* no-op */ }
             }
 
             // Skip duplicate orders
@@ -1252,8 +1385,15 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             )
 
             if (decision is DecisionResult.Reject) {
-                Log.i(TAG, "Ola ride rejected by filter: ${decision.reason}")
-                attemptRejectOrder(root, Platform.OLA, candidate, decision.reason, pkgName)
+                val isNoGo = decision.reason.contains("No-Go", ignoreCase = true)
+                if (isNoGo) {
+                    Log.i(TAG, "Ola ride rejected by filter: ${decision.reason}")
+                    attemptRejectOrder(root, Platform.OLA, candidate, decision.reason, pkgName)
+                } else {
+                    Log.i(TAG, "Ola ride ignored by filter: ${decision.reason}")
+                    logOrderEvent(candidate.copy(platform = Platform.OLA), OrderStatus.IGNORED, decision.reason)
+                    resetProcessing()
+                }
                 setOlaState(OlaState.IDLE)
                 return
             }
@@ -1295,10 +1435,16 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         candidate: RideCandidate,
         acceptNode: AccessibilityNodeInfo
     ) {
-        val directReject = evaluateDirectRideFilters(candidate)
-        if (directReject != null) {
-            Log.w(TAG, "Aborting executeOlaAutoAccept: ${directReject.reason}")
-            attemptRejectOrder(root, Platform.OLA, candidate, directReject.reason, "com.olacabs.oladriver")
+        val directResult = evaluateDirectRideFilters(candidate)
+        if (directResult.status == OrderStatus.REJECTED) {
+            Log.w(TAG, "Aborting executeOlaAutoAccept: ${directResult.reason}")
+            attemptRejectOrder(root, Platform.OLA, candidate, directResult.reason, "com.olacabs.oladriver")
+            setOlaState(OlaState.IDLE)
+            return
+        } else if (directResult.status == OrderStatus.IGNORED) {
+            Log.w(TAG, "Aborting executeOlaAutoAccept: ${directResult.reason}")
+            logOrderEvent(candidate.copy(platform = Platform.OLA), OrderStatus.IGNORED, directResult.reason)
+            resetProcessing()
             setOlaState(OlaState.IDLE)
             return
         }
@@ -1605,6 +1751,26 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         processedRapidoBookingIds[bookingId] = System.currentTimeMillis()
     }
 
+    private val processedRapidoOrderIds = java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<String, Long>(100, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?): Boolean {
+                return size > 300
+            }
+        }
+    )
+
+    private fun isDuplicateRapidoOrderId(orderId: String): Boolean {
+        if (orderId.isBlank()) return false
+        val now = System.currentTimeMillis()
+        val lastSeen = processedRapidoOrderIds[orderId]
+        return lastSeen != null && (now - lastSeen < 180_000L)
+    }
+
+    private fun recordRapidoOrderId(orderId: String) {
+        if (orderId.isBlank()) return
+        processedRapidoOrderIds[orderId] = System.currentTimeMillis()
+    }
+
 
     // 2. Rapido distance regexes
     // Pickup: (?:pickup|pick\s*up|away)[\s:]*([0-9]+(?:\.[0-9]+)?)\s*(?:km)?
@@ -1628,10 +1794,24 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
      * - Drop address: text under second km node (skipping "Auto", "Services", "Nearby")
      */
     private fun extractRapidoCandidate(root: AccessibilityNodeInfo, defaultVehicle: com.example.model.VehicleType): RideCandidate {
+        val rootPkg = root.packageName?.toString().orEmpty()
+        if (RapidoAdapter.isSmartDrivoPackage(rootPkg) || RapidoAdapter.isRapidoHomeScreen(root)) {
+            return RideCandidate(
+                fare = null,
+                pickupDistKm = null,
+                dropDistKm = null,
+                pickupAddress = "Address unavailable",
+                dropAddress = "Address unavailable",
+                dropArea = "Address unavailable",
+                platform = Platform.RAPIDO,
+                vehicleType = defaultVehicle
+            )
+        }
+
         val orderData = RapidoAdapter.extractOrderData(root)
 
         val textList = mutableListOf<String>()
-        collectAllNodeTexts(root, textList)
+        collectAllNodeTexts(root, textList, rootPkg)
         val fullText = textList.joinToString(" \n ")
 
         val detectedVehicle = OrderDataExtractor.detectVehicleType(fullText, defaultVehicle)
@@ -1639,7 +1819,6 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
         val fare = if (orderData.totalFare > 0f) orderData.totalFare else null
 
-        // BUG 2: If address cannot be detected, save raw text from accessibility node instead of generic placeholder
         val rawCandidates = textList.map { it.trim() }.filter {
             it.length >= 3 &&
             !it.contains("₹") &&
@@ -1648,18 +1827,31 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             !it.equals("accept", ignoreCase = true) &&
             !it.equals("nearby", ignoreCase = true) &&
             !it.equals("auto", ignoreCase = true) &&
-            !it.equals("services", ignoreCase = true)
+            !it.equals("services", ignoreCase = true) &&
+            !RapidoAdapter.matchesBlocklist(it) &&
+            !RapidoAdapter.isInvalidAddress(it)
         }
-        val pickupAddress = orderData.pickupAddress?.takeIf { it.isNotBlank() }
+        val rawPickup = orderData.pickupAddress?.takeIf { it.isNotBlank() }
             ?: rawCandidates.firstOrNull()
-            ?: textList.firstOrNull { it.isNotBlank() }
-            ?: ""
+            ?: "Address unavailable"
 
-        val dropAddress = orderData.dropAddress?.takeIf { it.isNotBlank() }
-            ?: rawCandidates.filter { it != pickupAddress }.firstOrNull()
+        val rawDrop = orderData.dropAddress?.takeIf { it.isNotBlank() }
+            ?: rawCandidates.filter { it != rawPickup }.firstOrNull()
             ?: rawCandidates.getOrNull(1)
-            ?: textList.drop(1).firstOrNull { it.isNotBlank() }
-            ?: pickupAddress
+            ?: rawPickup
+
+        // Requirement 2: If extracted address matches any blocklist word → save as "Address unavailable" instead
+        val pickupAddress = if (rawPickup.isBlank() || RapidoAdapter.matchesBlocklist(rawPickup) || RapidoAdapter.isInvalidAddress(rawPickup)) {
+            "Address unavailable"
+        } else {
+            rawPickup
+        }
+
+        val dropAddress = if (rawDrop.isBlank() || RapidoAdapter.matchesBlocklist(rawDrop) || RapidoAdapter.isInvalidAddress(rawDrop)) {
+            "Address unavailable"
+        } else {
+            rawDrop
+        }
 
         return RideCandidate(
             fare = fare,
@@ -1677,16 +1869,36 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         )
     }
 
-    private fun collectAllNodeTexts(node: AccessibilityNodeInfo?, outList: MutableList<String>) {
-        if (node == null) return
-        node.text?.toString()?.trim()?.let { if (it.isNotEmpty()) outList.add(it) }
-        node.contentDescription?.toString()?.trim()?.let { if (it.isNotEmpty()) outList.add(it) }
+    private fun collectAllNodeTexts(
+        node: AccessibilityNodeInfo?,
+        outList: MutableList<String>,
+        inheritedPkg: String? = null,
+        depth: Int = 0
+    ) {
+        if (node == null || depth > 15 || outList.size > 80) return
+        val nodePkg = node.packageName?.toString()
+        val effectivePkg = nodePkg ?: inheritedPkg
+
+        // Strict requirement: Never extract from SmartDrivo UI
+        if (RapidoAdapter.isSmartDrivoPackage(effectivePkg)) {
+            return
+        }
+
+        val text = node.text?.toString()?.trim()
+        val desc = node.contentDescription?.toString()?.trim()
+        val content = when {
+            !text.isNullOrEmpty() -> text
+            !desc.isNullOrEmpty() -> desc
+            else -> null
+        }
+        if (!content.isNullOrEmpty()) {
+            outList.add(content)
+        }
 
         for (i in 0 until node.childCount) {
             val child = node.getChild(i)
             if (child != null) {
-                collectAllNodeTexts(child, outList)
-                child.recycle()
+                collectAllNodeTexts(child, outList, effectivePkg, depth + 1)
             }
         }
     }
@@ -1713,23 +1925,139 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Fix 1: ONLY click a node where:
-     * - node.text == "Accept" OR
-     * - node.contentDescription == "Accept"
-     * Never click nodes with text: "View", "Services", "Go To", "Home", "Credit", "Orders", "Surge"
+     * Requirement 3: Checks if a node represents an order card, ride details, fare, distance, address, or general layout.
+     * Do NOT click on the order card, ride details, or any other area.
      */
-    private fun isRapidoAcceptNode(node: AccessibilityNodeInfo?): Boolean {
+    private fun isOrderCardOrDetailsNode(node: AccessibilityNodeInfo?): Boolean {
         if (node == null) return false
-        if (isRapidoForbiddenNode(node)) return false
+        val id = node.viewIdResourceName?.lowercase() ?: ""
+        val text = node.text?.toString() ?: ""
+        val desc = node.contentDescription?.toString() ?: ""
+        val combined = "$text $desc".lowercase()
 
-        val text = node.text?.toString()?.trim()
-        val desc = node.contentDescription?.toString()?.trim()
+        // Check forbidden view IDs that indicate card, container, details or sheet
+        val forbiddenIdPatterns = listOf(
+            "card", "details", "container", "layout_order", "ride_details",
+            "order_details", "bottom_sheet", "sheet", "root", "content",
+            "trip_details", "order_card", "layout_card", "pickup", "drop",
+            "address", "fare", "distance"
+        )
+        if (forbiddenIdPatterns.any { id.contains(it) && !id.contains("btn") && !id.contains("button") }) {
+            return true
+        }
 
-        return (text != null && text.equals("Accept", ignoreCase = true)) ||
-               (desc != null && desc.equals("Accept", ignoreCase = true))
+        // If node text contains fare ("₹") or distance ("km") or location terms, it's card/details, NOT the accept button
+        if (combined.contains("₹") ||
+            combined.contains(" km") ||
+            combined.contains("pickup") ||
+            combined.contains("drop") ||
+            combined.contains("destination") ||
+            combined.contains("fare") ||
+            combined.contains("estimate") ||
+            combined.contains("passengers") ||
+            combined.contains("customer")
+        ) {
+            return true
+        }
+
+        // Check dimensions: If node is excessively large, it's a card/screen container, not a button
+        try {
+            val bounds = Rect()
+            node.getBoundsInScreen(bounds)
+            val displayMetrics = resources.displayMetrics
+            val screenHeight = displayMetrics.heightPixels
+            val screenWidth = displayMetrics.widthPixels
+            if (screenHeight > 0 && bounds.height() > screenHeight * 0.40) {
+                return true
+            }
+            if (screenWidth > 0 && bounds.width() > screenWidth * 0.90 && bounds.height() > 300) {
+                return true
+            }
+        } catch (_: Exception) {
+            // Ignore bounds check if unavailable
+        }
+
+        return false
     }
 
-    private fun findRapidoAcceptNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+    /**
+     * Checks if a parent container is strictly a button container (not a card or full view).
+     */
+    private fun isStrictButtonContainer(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        if (!node.isClickable) return false
+        if (isOrderCardOrDetailsNode(node)) return false
+
+        val id = node.viewIdResourceName?.lowercase() ?: ""
+        val cls = node.className?.toString()?.lowercase() ?: ""
+
+        if (cls.contains("scroll") || cls.contains("recycler") || cls.contains("list") || cls.contains("cardview")) {
+            return false
+        }
+
+        try {
+            val bounds = Rect()
+            node.getBoundsInScreen(bounds)
+            if (bounds.height() > 300 || bounds.width() > 1000) {
+                return false
+            }
+        } catch (_: Exception) {
+            // ignore
+        }
+
+        if (id.contains("btn") || id.contains("button") || id.contains("accept")) {
+            return true
+        }
+        if (cls.contains("button")) {
+            return true
+        }
+
+        return false
+    }
+
+    /**
+     * Requirement 2: Strict target check - only click node where text contains "Accept" or "ACCEPT" exactly.
+     * Do NOT click on the order card, ride details, or any other area.
+     */
+    private fun isStrictAcceptNode(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        if (isRapidoForbiddenNode(node)) return false
+        if (isOrderCardOrDetailsNode(node)) return false
+
+        val text = node.text?.toString()?.trim() ?: ""
+        val desc = node.contentDescription?.toString()?.trim() ?: ""
+
+        // Exact requirement: only click node where text contains "Accept" or "ACCEPT" exactly
+        val hasAcceptText = text.contains("Accept") || text.contains("ACCEPT")
+        val hasAcceptDesc = desc.contains("Accept") || desc.contains("ACCEPT")
+
+        if (!hasAcceptText && !hasAcceptDesc) {
+            return false
+        }
+
+        // Must NOT be negative action
+        if (text.contains("Don't", ignoreCase = true) ||
+            text.contains("Decline", ignoreCase = true) ||
+            text.contains("Reject", ignoreCase = true) ||
+            text.contains("Cancel", ignoreCase = true)
+        ) {
+            return false
+        }
+        if (desc.contains("Don't", ignoreCase = true) ||
+            desc.contains("Decline", ignoreCase = true) ||
+            desc.contains("Reject", ignoreCase = true) ||
+            desc.contains("Cancel", ignoreCase = true)
+        ) {
+            return false
+        }
+
+        return true
+    }
+
+    /**
+     * Searches the hierarchy for a node matching the strict Accept button criteria.
+     */
+    private fun findStrictRapidoAcceptNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         if (root == null) return null
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
@@ -1738,8 +2066,26 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             val node = queue.removeFirst()
             count++
 
-            if (isRapidoAcceptNode(node)) {
+            // Check if node itself satisfies strict accept
+            if (isStrictAcceptNode(node)) {
                 return node
+            }
+
+            // Check if this node is a button whose direct child has strict accept text
+            if (node.isClickable && isStrictButtonContainer(node)) {
+                for (i in 0 until node.childCount) {
+                    val child = node.getChild(i)
+                    if (child != null) {
+                        val cText = child.text?.toString()?.trim() ?: ""
+                        val cDesc = child.contentDescription?.toString()?.trim() ?: ""
+                        val hasAccept = cText.contains("Accept") || cText.contains("ACCEPT") ||
+                            cDesc.contains("Accept") || cDesc.contains("ACCEPT")
+                        child.recycle()
+                        if (hasAccept) {
+                            return node
+                        }
+                    }
+                }
             }
 
             for (i in 0 until node.childCount) {
@@ -1750,17 +2096,39 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * FIX 1 - Order Card Detection:
-     * When order card detected (node with "₹" + distance "km" both found in screen,
-     * or when an Accept / ACCEPT text node is visible).
+     * Requirement 5: Add a check: if Rapido app is not showing an order popup, do not trigger any click.
+     * An order popup MUST contain:
+     * 1. Fare currency (₹)
+     * 2. Distance (km)
+     * 3. Specific "Accept" or "ACCEPT" button on screen
      */
-    private fun isRapidoOrderScreenVisible(root: AccessibilityNodeInfo?): Boolean {
+    /**
+     * Requirement 2: Only click Accept if Rapido order popup nodes are visible.
+     * Requirement 4: Check if the event nodes contain fare + accept button.
+     */
+    private fun isRapidoOrderPopupShowing(root: AccessibilityNodeInfo?): Boolean {
         if (root == null) return false
-        if (RapidoAdapter.findAcceptTextNode(root) != null) return true
-        var hasRupeeNode = false
-        var hasKmNode = false
+        val pkg = root.packageName?.toString().orEmpty()
+        if (RapidoAdapter.isSmartDrivoPackage(pkg)) return false
+        if (RapidoAdapter.isRapidoHomeScreen(root)) return false
 
-        val kmRegex = Regex("[0-9.]+\\s*km", RegexOption.IGNORE_CASE)
+        return RapidoAdapter.validateRapidoOrderPopup(root).isValid
+    }
+
+    /**
+     * Requirement 4: Check if the event nodes contain fare + accept button
+     */
+    private fun hasRapidoOrderNodes(root: AccessibilityNodeInfo?): Boolean {
+        return isRapidoOrderPopupShowing(root)
+    }
+
+    private fun hasRapidoFareOrOrderData(root: AccessibilityNodeInfo?): Boolean {
+        return isRapidoOrderPopupShowing(root)
+    }
+
+    private fun containsFareNode(root: AccessibilityNodeInfo?): Boolean {
+        if (root == null) return false
+        if (RapidoAdapter.isRapidoHomeScreen(root)) return false
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
         var count = 0
@@ -1768,60 +2136,122 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             val node = queue.removeFirst()
             count++
 
-            val text = node.text?.toString()?.trim()
-            val desc = node.contentDescription?.toString()?.trim()
+            if (!RapidoAdapter.isNodeInsideEarningsContainer(node)) {
+                val text = node.text?.toString()?.trim() ?: ""
+                val desc = node.contentDescription?.toString()?.trim() ?: ""
 
-            if (!hasRupeeNode) {
-                if ((text != null && text.contains("₹")) || (desc != null && desc.contains("₹"))) {
-                    hasRupeeNode = true
+                if (text.contains("₹") || desc.contains("₹") ||
+                    text.contains("Rs.", ignoreCase = true) || desc.contains("Rs.", ignoreCase = true) ||
+                    RapidoAdapter.RUPEE_AMOUNT_REGEX.matcher(text).find() ||
+                    RapidoAdapter.RUPEE_AMOUNT_REGEX.matcher(desc).find()
+                ) {
+                    return true
                 }
-            }
-
-            if (!hasKmNode) {
-                if ((text != null && (kmRegex.containsMatchIn(text) || text.contains("km", ignoreCase = true))) ||
-                    (desc != null && (kmRegex.containsMatchIn(desc) || desc.contains("km", ignoreCase = true)))) {
-                    hasKmNode = true
-                }
-            }
-
-            if (hasRupeeNode && hasKmNode) {
-                return true
             }
 
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { queue.add(it) }
             }
         }
-
-        return hasRupeeNode && hasKmNode
+        return false
     }
 
-    private fun handleRapidoOrder(root: AccessibilityNodeInfo?) {
+    private fun getTopRootNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        var curr = node ?: return null
+        try {
+            while (curr.parent != null) {
+                curr = curr.parent ?: break
+            }
+        } catch (_: Exception) {}
+        return curr
+    }
+
+    private fun isRapidoAcceptNode(node: AccessibilityNodeInfo?): Boolean {
+        return isStrictAcceptNode(node)
+    }
+
+    private fun findRapidoAcceptNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        return findStrictRapidoAcceptNode(root)
+    }
+
+    /**
+     * FIX 1 - Order Card Detection:
+     * When order card detected (node with "₹" + distance "km" both found in screen).
+     */
+    private fun isRapidoOrderScreenVisible(root: AccessibilityNodeInfo?): Boolean {
+        return isRapidoOrderPopupShowing(root)
+    }
+
+    private fun handleRapidoOrder(root: AccessibilityNodeInfo?, preValidation: RapidoPopupValidation? = null) {
         if (root == null) return
 
-        // FIX 1: Verify order card detected (node with ₹ and km both found in screen)
-        if (!isRapidoOrderScreenVisible(root)) {
-            Log.d(TAG, "Rapido order screen not visible (requires ₹ and km). Waiting...")
+        val rootPkg = root.packageName?.toString().orEmpty()
+        if (RapidoAdapter.isSmartDrivoPackage(rootPkg)) {
+            Log.d(TAG, "Ignoring handleRapidoOrder on SmartDrivo UI package: $rootPkg")
             return
         }
 
+        // Requirement 3: Add a check: if the root node contains "Today's Earnings" or "ON DUTY" or "Blue Performance" -> HOME SCREEN, skip completely
+        if (RapidoAdapter.isRapidoHomeScreen(root)) {
+            Log.i(TAG, "🏠 Rapido HOME SCREEN detected ('Today's Earnings' / 'ON DUTY' / 'Blue Performance'). Skipping completely.")
+            return
+        }
+
+        // Requirement 1 & 2: Only process Rapido data when a REAL ORDER POPUP is visible:
+        // Must have ALL together:
+        // - Fare amount not inside "Today's Earnings" or "Earnings" container
+        // - Pickup distance in km OR "Nearby"
+        // - "Accept" or "ACCEPT" button visible on screen
+        // If any of these are missing -> do NOT log to history, do NOT process
+        val validation = preValidation ?: RapidoAdapter.validateRapidoOrderPopup(root)
+        if (!validation.isValid) {
+            Log.d(TAG, "❌ Rapido order popup missing required elements: ${validation.failureReason}. Do NOT log to history, do NOT process.")
+            return
+        }
+
+        // Fast direct candidate extraction (under 50ms)
+        val rawCandidate = extractRapidoCandidate(
+            root = root,
+            defaultVehicle = prefs.userProfile.value.vehicleType
+        )
+
+        val finalFare = validation.fare ?: rawCandidate.fare
+        if (finalFare == null || finalFare <= 0f) {
+            Log.d(TAG, "❌ Rapido candidate has no valid fare outside earnings. Do NOT log to history, do NOT process.")
+            return
+        }
+
+        val candidate = rawCandidate.copy(
+            fare = finalFare,
+            pickupDistKm = rawCandidate.pickupDistKm ?: validation.pickupDistKm
+        )
+
+        // Skip duplicate orders using bookingId / order identifier check
+        val bookingId = candidate.bookingId
+        val orderId = getOrderIdentifier(candidate)
+        if (isDuplicateRapidoBookingId(bookingId) || isDuplicateRapidoOrderId(orderId)) {
+            Log.i(TAG, "⏭️ Duplicate Rapido order skipped (bookingId: $bookingId, orderId: $orderId)")
+            resetProcessing()
+            return
+        }
+
+        // Record order ID immediately so we don't process it repeatedly
+        if (!bookingId.isNullOrBlank()) recordRapidoBookingId(bookingId)
+        recordRapidoOrderId(orderId)
+
+        // PART B/E: Detection-First Insert: IMMEDIATELY create one History record with PROCESSING status in Room
+        val recordId = onOrderDetectedFast(candidate)
+        Log.i(TAG, "⚡ Rapido order detected & inserted to Room [PROCESSING]: Fare=₹${candidate.fare}, pickup=${candidate.pickupAddress}")
+
+        // If auto-accept is OFF, update record as IGNORED
         if (!preferencesManager.isAutoAcceptEnabled) {
-            // FIX 3: If toggle was OFF when order appeared, mark order as "IGNORED" not "REJECTED"
-            try {
-                val candidate = extractRapidoCandidate(root, prefs.userProfile.value.vehicleType)
-                val bookingId = candidate.bookingId
-                if (!bookingId.isNullOrBlank() && isDuplicateRapidoBookingId(bookingId)) {
-                    resetProcessing()
-                    return
-                }
-                if (!bookingId.isNullOrBlank()) {
-                    recordRapidoBookingId(bookingId)
-                }
-                logOrderEvent(candidate, OrderStatus.IGNORED, "Auto-accept toggle is OFF")
-                Log.i(TAG, "Rapido order appeared while toggle is OFF -> Logged as IGNORED")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error logging ignored Rapido order when toggle is OFF", e)
-            }
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.IGNORED,
+                reasonCode = "TOGGLE_DISABLED",
+                reasonText = "Auto-accept toggle is OFF"
+            )
             resetProcessing()
             return
         }
@@ -1831,16 +2261,33 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         val userProfile = prefs.userProfile.value
 
         // Check if user is approved and active
-        if (!userProfile.isPlanValid && !userProfile.isAdmin) return
-        if (!settings.rapidoEnabled) return
+        if (!userProfile.isPlanValid && !userProfile.isAdmin) {
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.IGNORED,
+                reasonCode = "NO_ACTIVE_PLAN",
+                reasonText = "No active plan - auto-accept inactive"
+            )
+            Log.i(TAG, "📋 Rapido order logged as IGNORED: No active plan")
+            resetProcessing()
+            return
+        }
 
-        // Debounce repeated events (minimum 150ms max)
+        if (!settings.rapidoEnabled) {
+            logOrderEvent(candidate, OrderStatus.IGNORED, "Rapido disabled in settings")
+            Log.i(TAG, "📋 Rapido order logged as IGNORED: Rapido platform disabled in settings")
+            resetProcessing()
+            return
+        }
+
+        // Debounce repeated events (maximum 100ms)
         val now = System.currentTimeMillis()
-        if (now - lastHandledTimestamp < 150L || isProcessing) return
+        if (now - lastHandledTimestamp < 100L || isProcessing) return
 
         isProcessing = true
         handler.removeCallbacks(processingTimeoutRunnable)
-        handler.postDelayed(processingTimeoutRunnable, 15000L) // Allow time for retry loops
+        handler.postDelayed(processingTimeoutRunnable, 2000L) // 2000ms max timeout watchdog
         lastHandledTimestamp = System.currentTimeMillis()
 
         try {
@@ -1848,12 +2295,6 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             Log.d("SmartDrivo", "Found Rapido order screen! Scanning...")
 
             handleRapidoDebug(root)
-
-            // Extract candidate with Rapido-specific rules
-            val candidate = extractRapidoCandidate(
-                root = root,
-                defaultVehicle = prefs.userProfile.value.vehicleType
-            )
 
             // BUG 1 - Filters not working for Rapido:
             // - Rapido sends orders with fare=null and pickup="Nearby" - app is accepting these without checking filters
@@ -1885,22 +2326,23 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             }
 
             // Direct SharedPreferences Filter Evaluation before evaluating ANY ride
-            val directReject = evaluateDirectRideFilters(candidate)
-            if (directReject != null) {
-                Log.i(TAG, "Rapido ride rejected by direct filter: ${directReject.reason}")
-                attemptRejectOrder(root, Platform.RAPIDO, candidate, directReject.reason, pkg)
-                return
-            }
-
-            // 4. Skip duplicate orders using bookingId check
-            val bookingId = candidate.bookingId
-            if (!bookingId.isNullOrBlank() && isDuplicateRapidoBookingId(bookingId)) {
-                Log.i(TAG, "⏭️ Duplicate Rapido order skipped (bookingId: $bookingId)")
-                resetProcessing()
-                return
-            }
-            if (!bookingId.isNullOrBlank()) {
-                recordRapidoBookingId(bookingId)
+            val directResult = evaluateDirectRideFilters(candidate)
+            when (directResult.status) {
+                OrderStatus.REJECTED -> {
+                    Log.i(TAG, "Rapido ride rejected by direct filter: ${directResult.reason}")
+                    attemptRejectOrder(root, Platform.RAPIDO, candidate, directResult.reason, pkg)
+                    return
+                }
+                OrderStatus.IGNORED -> {
+                    Log.i(TAG, "Rapido ride ignored by direct filter: ${directResult.reason}")
+                    logOrderEvent(candidate, OrderStatus.IGNORED, directResult.reason)
+                    resetProcessing()
+                    return
+                }
+                OrderStatus.ACCEPTED -> {
+                    // Direct filters passed, continue evaluation
+                }
+                else -> { /* no-op */ }
             }
 
             // Fix 2: Vibrate only once per order using lastVibratedOrderId
@@ -1914,6 +2356,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
             if (!isVehicleAllowed) {
                 Log.d(TAG, "Vehicle type ${candidate.vehicleType} disabled in settings")
+                logOrderEvent(candidate, OrderStatus.REJECTED, "Vehicle ${candidate.vehicleType} disabled in settings")
                 resetProcessing()
                 return
             }
@@ -1949,8 +2392,15 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             )
 
             if (decision is DecisionResult.Reject) {
-                Log.i(TAG, "Rapido ride rejected by filter: ${decision.reason}")
-                attemptRejectOrder(root, Platform.RAPIDO, candidate, decision.reason, pkg)
+                val isNoGo = decision.reason.contains("No-Go", ignoreCase = true)
+                if (isNoGo) {
+                    Log.i(TAG, "Rapido ride rejected by filter: ${decision.reason}")
+                    attemptRejectOrder(root, Platform.RAPIDO, candidate, decision.reason, pkg)
+                } else {
+                    Log.i(TAG, "Rapido ride ignored by filter: ${decision.reason}")
+                    logOrderEvent(candidate, OrderStatus.IGNORED, decision.reason)
+                    resetProcessing()
+                }
                 return
             }
             if (decision is DecisionResult.Ignore) {
@@ -1961,7 +2411,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             }
 
             // Execute Rapido auto-accept strictly targeting Accept button
-            executeRapidoAutoAccept(candidate)
+            executeRapidoAutoAccept(candidate, root)
         } catch (e: Exception) {
             Log.e(TAG, "Error in handleRapidoOrder", e)
             resetProcessing()
@@ -1970,18 +2420,19 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
     private var lastRapidoAttemptTime: Long = 0L
 
-    private fun bringRapidoToForeground(targetPkg: String? = null) {
-        RapidoAdapter.bringRapidoToForeground(applicationContext, targetPkg)
-    }
-
     /**
-     * ═══ RAPIDO AUTO-ACCEPT ═══
-     * 1. Bring Rapido to foreground before click
-     * 2. Find node "Accept"/"ACCEPT" → ACTION_CLICK
-     * 3. Retry 3x, 100ms delay
-     * 4. Verify order screen gone in 2s
+     * Rapido Auto-Accept:
+     * 1. Do NOT click anywhere on Rapido app except the specific "Accept" button.
+     * 2. Add strict target check - only click node where text contains "Accept" or "ACCEPT" exactly.
+     * 3. Do NOT click on the order card, ride details, or any other area.
+     * 4. If "Accept" button not found, do nothing - do not click randomly.
+     * 5. Add a check: if Rapido app is not showing an order popup, do not trigger any click.
      */
-    private fun executeRapidoAutoAccept(candidate: RideCandidate, attemptNumber: Int = 1) {
+    private fun executeRapidoAutoAccept(
+        candidate: RideCandidate,
+        orderRoot: AccessibilityNodeInfo? = null,
+        attemptNumber: Int = 1
+    ) {
         if (candidate.fare == null || candidate.fare <= 0f || candidate.pickupDistKm == null || candidate.pickupDistKm <= 0f) {
             Log.w(TAG, "Aborting executeRapidoAutoAccept: fare (${candidate.fare}) or pickup distance (${candidate.pickupDistKm}) invalid/unavailable")
             resetProcessing()
@@ -1989,7 +2440,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         }
 
         val directReject = evaluateDirectRideFilters(candidate)
-        if (directReject != null) {
+        if (directReject.status != OrderStatus.ACCEPTED) {
             Log.w(TAG, "Aborting executeRapidoAutoAccept: ${directReject.reason}")
             resetProcessing()
             return
@@ -2001,200 +2452,195 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         }
 
         val now = System.currentTimeMillis()
-        if (attemptNumber == 1 && (now - lastRapidoAttemptTime < 1000L)) {
-            Log.w(TAG, "Rapido auto-accept debounced (${now - lastRapidoAttemptTime}ms since last attempt)")
+        // Cooldown: 200ms max between attempts
+        if (attemptNumber == 1 && (now - lastRapidoAttemptTime < 200L)) {
+            Log.w(TAG, "Rapido auto-accept skipped: 200ms cooldown active (${now - lastRapidoAttemptTime}ms since last attempt)")
             resetProcessing()
             return
         }
         lastRapidoAttemptTime = now
 
-        serviceScope.launch(Dispatchers.Main) {
-            try {
-                // 1. Bring Rapido to foreground before click
-                Log.i(TAG, "🚀 [Rapido] Bringing Rapido to foreground before click...")
-                bringRapidoToForeground()
-                delay(60L) // Small pause for window focus / transition
+        if (!canExecuteClick()) {
+            Log.w(TAG, "Rapido auto-accept skipped: click in progress or rate limit active")
+            resetProcessing()
+            return
+        }
 
-                var clicked = false
-                var lastFoundNode: AccessibilityNodeInfo? = null
+        if (attemptNumber > 5) {
+            Log.w(TAG, "Reached max 5 attempts for Rapido auto-accept without order screen closing")
+            resetProcessing()
+            return
+        }
 
-                // 2. Retry 3x, 100ms delay: Find node "Accept"/"ACCEPT" → ACTION_CLICK
-                for (retry in 1..3) {
-                    val root = getRapidoRootNode() ?: rootInActiveWindow
-                    if (root != null) {
-                        val acceptNode = RapidoAdapter.findAcceptTextNode(root)
-                            ?: RapidoAdapter.findAcceptNode(root)
+        // Requirement 2: Only click Accept if Rapido order popup nodes are visible
+        // Requirement 4: Check if the event nodes contain fare + accept button
+        val rapidoRoot = getRapidoOrderRootNode(orderRoot)
+        if (rapidoRoot == null || (!hasRapidoOrderNodes(rapidoRoot) && !isRapidoOrderPopupShowing(rapidoRoot))) {
+            Log.i(TAG, "Rapido order popup nodes are not visible (fare and Accept button required). No click triggered.")
+            resetProcessing()
+            return
+        }
 
-                        if (acceptNode != null) {
-                            lastFoundNode = acceptNode
+        // Requirement 2: Strict target check - only click node where text contains "Accept" or "ACCEPT" exactly
+        val acceptNode = findStrictRapidoAcceptNode(rapidoRoot)
+        if (acceptNode == null) {
+            // Requirement 4: If "Accept" button not found, do nothing - do not click randomly
+            Log.w(
+                TAG,
+                "❌ [Rapido] Accept button with text 'Accept' or 'ACCEPT' NOT found on screen (attempt #$attemptNumber)! " +
+                    "Doing nothing - will NOT click randomly."
+            )
+            resetProcessing()
+            return
+        }
 
-                            // Try ACTION_CLICK on node itself
-                            clicked = acceptNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                            Log.i(
-                                TAG,
-                                "👆 [Rapido] Attempt $retry/3: ACTION_CLICK on acceptNode (id='${acceptNode.viewIdResourceName}', " +
-                                    "text='${acceptNode.text}', desc='${acceptNode.contentDescription}', isClickable=${acceptNode.isClickable}) -> Result: $clicked"
-                            )
+        // Requirement 1 & 3: Do NOT click anywhere on Rapido app except the specific "Accept" button.
+        // Do NOT click on the order card, ride details, or any other area.
+        if (isOrderCardOrDetailsNode(acceptNode)) {
+            Log.w(TAG, "❌ [Rapido] Detected node is an order card or ride details container! Refusing to click.")
+            resetProcessing()
+            return
+        }
 
-                            // If not clicked, try clickable parent
-                            if (!clicked) {
-                                var parent = acceptNode.parent
-                                var depth = 0
-                                while (parent != null && !clicked && depth < 5) {
-                                    clicked = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                                    Log.i(
-                                        TAG,
-                                        "👆 [Rapido] Attempt $retry/3: ACTION_CLICK on parent (id='${parent.viewIdResourceName}', " +
-                                            "isClickable=${parent.isClickable}) -> Result: $clicked"
-                                    )
-                                    val next = parent.parent
-                                    parent = next
-                                    depth++
-                                }
-                            }
+        // Safety check: Don't click if foreground is SmartDrivo UI
+        val activeBeforeClick = rootInActiveWindow
+        val activePkgBeforeClick = activeBeforeClick?.packageName?.toString().orEmpty().trim().lowercase()
+        if (RapidoAdapter.isSmartDrivoPackage(activePkgBeforeClick)) {
+            Log.w(TAG, "❌ [Rapido] SmartDrivo UI is in active window ($activePkgBeforeClick). Refusing to click.")
+            resetProcessing()
+            return
+        }
 
-                            // If still not clicked, try resolveClickableTarget
-                            if (!clicked) {
-                                val target = RapidoAdapter.resolveClickableTarget(acceptNode)
-                                if (target !== acceptNode) {
-                                    clicked = target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                                    Log.i(TAG, "👆 [Rapido] Attempt $retry/3: ACTION_CLICK on resolveClickableTarget -> Result: $clicked")
-                                }
-                            }
-                        } else {
-                            Log.w(TAG, "⚠️ [Rapido] Attempt $retry/3: Node 'Accept'/'ACCEPT' not found on screen yet")
-                        }
-                    }
+        Log.i(
+            TAG,
+            "✅ [Rapido] Strict Accept button FOUND | " +
+                "ID: ${acceptNode.viewIdResourceName} | " +
+                "Text: '${acceptNode.text}' | " +
+                "ContentDesc: '${acceptNode.contentDescription}' | " +
+                "Clickable: ${acceptNode.isClickable}"
+        )
 
-                    if (clicked) {
-                        Log.i(TAG, "✅ [Rapido] ACTION_CLICK succeeded on attempt $retry/3")
-                        break
-                    }
+        notifyClickInitiated()
 
-                    if (retry < 3) {
-                        delay(100L) // 100ms delay between retries
-                    }
-                }
+        var clicked = false
+        // Primary: performAction(ACTION_CLICK) directly on accept node
+        if (acceptNode.isClickable) {
+            clicked = acceptNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            Log.i(TAG, "👆 [Rapido] Click performed: acceptNode.performAction(ACTION_CLICK) -> Result: $clicked")
+        }
 
-                // Fallback: If ACTION_CLICK on all 3 attempts returned false, try simulateTapGesture at node center
-                if (!clicked) {
-                    val nodeToTap = lastFoundNode ?: getRapidoRootNode()?.let { RapidoAdapter.findAcceptTextNode(it) ?: RapidoAdapter.findAcceptNode(it) }
-                    if (nodeToTap != null) {
-                        val bounds = Rect()
-                        nodeToTap.getBoundsInScreen(bounds)
-                        if (bounds.width() > 0 && bounds.height() > 0) {
-                            val cx = bounds.centerX().toFloat()
-                            val cy = bounds.centerY().toFloat()
-                            Log.i(TAG, "👆 [Rapido Fallback] Simulating tap gesture at Accept node center: ($cx, $cy), bounds=$bounds")
-                            simulateTapGesture(cx, cy, isInternalFallback = true)
-                            clicked = true
-                        }
-                    }
-                }
+        // Secondary: If not clickable directly, only click immediate parent if it is a strict button container (never card/container)
+        if (!clicked) {
+            val parent = acceptNode.parent
+            if (parent != null && parent.isClickable && isStrictButtonContainer(parent)) {
+                clicked = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                Log.i(TAG, "👆 [Rapido] Click performed: parent.performAction(ACTION_CLICK) on strict button -> Result: $clicked")
+            }
+        }
 
-                if (clicked) {
-                    notifyClickInitiated()
-                    NotificationHelper.updateNotification(
-                        context = applicationContext,
-                        title = "SmartDrivo Active",
-                        text = "🎉 Order Accepted! Monitoring next..."
-                    )
-                    logOrderEvent(
-                        candidate = candidate,
-                        status = OrderStatus.ACCEPTED,
-                        reason = "Auto-accepted: Clicked Accept/ACCEPT button",
-                        clickTimeMs = System.currentTimeMillis(),
-                        timesClicked = 1
-                    )
-                    showAcceptedOrderOverlay(candidate)
-                } else {
-                    Log.w(TAG, "❌ [Rapido] Failed to click Accept button after 3 retries")
-                }
-
-                // Verify screen transition after 2s
-                delay(2000L)
-                val currentRoot = getRapidoRootNode()
-                val isOrderStillVisible = currentRoot != null && isRapidoOrderScreenVisible(currentRoot)
-                if (!isOrderStillVisible) {
-                    Log.i(TAG, "🎉 Rapido order screen closed = ACCEPTED")
-                } else {
-                    Log.i(TAG, "Rapido order screen still visible after 2s")
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error during executeRapidoAutoAccept: ${e.message}", e)
-            } finally {
+        // Tertiary: If performAction failed, gesture tap STRICTLY at center of the Accept button bounds
+        if (!clicked) {
+            val bounds = Rect()
+            acceptNode.getBoundsInScreen(bounds)
+            if (bounds.width() > 0 && bounds.height() > 0 && !isOrderCardOrDetailsNode(acceptNode)) {
+                val cx = bounds.centerX().toFloat()
+                val cy = bounds.centerY().toFloat()
+                Log.i(TAG, "👆 [Rapido] Click performed: Gesture tap strictly at Accept button center ($cx, $cy), screenBounds=$bounds")
+                simulateTapGesture(cx, cy, isInternalFallback = true)
+            } else {
+                Log.w(TAG, "❌ [Rapido] Accept button bounds invalid ($bounds) - doing nothing, no random click")
                 resetProcessing()
+                return
+            }
+        }
+
+        // ═══ STEP 4 - Verify: order popup gone in 200ms = ACCEPTED. Cooldown: 200ms max between attempts ═══
+        serviceScope.launch(Dispatchers.IO) {
+            delay(200L) // reduced from 2000ms to 200ms max
+            val currentRoot = getRapidoOrderRootNode(orderRoot)
+            val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoot) || isRapidoOrderPopupShowing(currentRoot))
+
+            if (!isOrderStillVisible) {
+                // Order popup gone in 200ms = ACCEPTED
+                Log.i(TAG, "🎉 STEP 4: Rapido order popup gone in 200ms = ACCEPTED (Attempt #$attemptNumber)")
+                NotificationHelper.updateNotification(
+                    context = applicationContext,
+                    title = "SmartDrivo Active",
+                    text = "🎉 Order Accepted! Monitoring next..."
+                )
+                logOrderEvent(
+                    candidate = candidate,
+                    status = OrderStatus.ACCEPTED,
+                    reason = "Auto-accepted (attempt #$attemptNumber)",
+                    clickTimeMs = System.currentTimeMillis(),
+                    timesClicked = attemptNumber
+                )
+                showAcceptedOrderOverlay(candidate)
+                resetProcessing()
+            } else {
+                Log.i(TAG, "Rapido order popup still visible after 200ms. Retrying...")
+                if (attemptNumber < 5) {
+                    delay(200L) // reduced from 1000ms to 200ms max
+                    executeRapidoAutoAccept(candidate, currentRoot, attemptNumber + 1)
+                } else {
+                    Log.w(TAG, "Reached max attempts for Rapido auto-accept verification.")
+                    resetProcessing()
+                }
             }
         }
     }
 
-    private fun getRapidoRootNode(): AccessibilityNodeInfo? {
-        val currentWindows = windows
-        if (!currentWindows.isNullOrEmpty()) {
-            for (win in currentWindows) {
-                val root = win.root ?: continue
-                val pkg = root.packageName?.toString().orEmpty()
-                if (isRapidoPackage(pkg)) {
-                    return root
-                }
-            }
-        }
+    private fun getRapidoOrderRootNode(fallbackNode: AccessibilityNodeInfo? = null): AccessibilityNodeInfo? {
         val active = rootInActiveWindow
-        if (active != null) {
-            val pkg = active.packageName?.toString().orEmpty()
-            if (isRapidoPackage(pkg)) {
-                return active
-            }
+        if (active != null && hasRapidoOrderNodes(active)) {
+            return active
         }
-        return null
+        val topFallback = getTopRootNode(fallbackNode)
+        if (topFallback != null && hasRapidoOrderNodes(topFallback)) {
+            return topFallback
+        }
+        if (active != null && (isRapidoPackage(active.packageName?.toString().orEmpty()) || isRapidoOrderScreenVisible(active))) {
+            return active
+        }
+        return topFallback ?: active ?: fallbackNode
+    }
+
+    private fun getRapidoRootNode(fallbackNode: AccessibilityNodeInfo? = null): AccessibilityNodeInfo? {
+        return getRapidoOrderRootNode(fallbackNode)
     }
 
     /**
-     * Checks whether any Rapido window is currently visible
+     * Checks whether Rapido is currently visible as the active foreground window
      */
     private fun isRapidoWindowVisible(): Boolean {
-        return try {
-            val currentWindows = windows
-            if (!currentWindows.isNullOrEmpty()) {
-                currentWindows.any { win ->
-                    val pkg = win.root?.packageName?.toString().orEmpty()
-                    isRapidoPackage(pkg)
-                }
-            } else {
-                val rootPkg = rootInActiveWindow?.packageName?.toString().orEmpty()
-                isRapidoPackage(rootPkg)
-            }
-        } catch (e: Exception) {
-            false
-        }
+        val active = rootInActiveWindow ?: return false
+        val pkg = active.packageName?.toString().orEmpty().trim().lowercase()
+        return isRapidoPackage(pkg)
     }
 
     /**
-     * 3. EXACT recursive click function:
+     * Strict recursive click function for Accept buttons:
+     * Only clicks if node text contains "Accept" or "ACCEPT" and is not an order card.
      */
     fun clickAcceptButton(node: AccessibilityNodeInfo?): Boolean {
         if (node == null) return false
+        if (isOrderCardOrDetailsNode(node)) return false
+
         val nodeText = node.text?.toString() ?: ""
         val nodeDesc = node.contentDescription?.toString() ?: ""
 
-        // Check this exact button text
-        if (nodeText.equals("Accept", ignoreCase = true) ||
-            nodeText.equals("ACCEPT", ignoreCase = true) ||
-            nodeDesc.contains("accept", ignoreCase = true)) {
+        val hasAccept = nodeText.contains("Accept") || nodeText.contains("ACCEPT") ||
+                        nodeDesc.contains("Accept") || nodeDesc.contains("ACCEPT")
 
+        if (hasAccept && !nodeText.contains("Don't", ignoreCase = true) && !nodeDesc.contains("Don't", ignoreCase = true)) {
             // Try direct click first
-            if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                return true
+            if (node.isClickable) {
+                return node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             }
-            // Try parent click (yellow button might have text as child)
+            // Try parent click only if it is a strict button container (never card/container)
             val parent = node.parent
-            if (parent != null && parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                return true
-            }
-            // Try grandparent
-            val grandParent = parent?.parent
-            if (grandParent != null && grandParent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                return true
+            if (parent != null && parent.isClickable && isStrictButtonContainer(parent)) {
+                return parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             }
         }
         // Recurse through children
@@ -2400,11 +2846,23 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             )
 
             // Direct SharedPreferences Filter Evaluation before evaluating ANY ride
-            val directReject = evaluateDirectRideFilters(candidate)
-            if (directReject != null) {
-                Log.i(TAG, "Order rejected by direct filter: ${directReject.reason}")
-                attemptRejectOrder(root, platform, candidate, directReject.reason, pkgName)
-                return
+            val directResult = evaluateDirectRideFilters(candidate)
+            when (directResult.status) {
+                OrderStatus.REJECTED -> {
+                    Log.i(TAG, "Order rejected by direct filter: ${directResult.reason}")
+                    attemptRejectOrder(root, platform, candidate, directResult.reason, pkgName)
+                    return
+                }
+                OrderStatus.IGNORED -> {
+                    Log.i(TAG, "Order ignored by direct filter: ${directResult.reason}")
+                    logOrderEvent(candidate, OrderStatus.IGNORED, directResult.reason)
+                    resetProcessing()
+                    return
+                }
+                OrderStatus.ACCEPTED -> {
+                    // Direct filters passed, continue evaluation
+                }
+                else -> { /* no-op */ }
             }
 
             // Fix 2: Vibrate only once per order using lastVibratedOrderId
@@ -2425,12 +2883,18 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             }
 
             val directSettings = readDirectSettingsFresh()
+            val effectiveFilterMode = when (directSettings.filterMode) {
+                "fare_only" -> com.example.model.FilterMode.FARE_ONLY
+                "distance_only" -> com.example.model.FilterMode.DISTANCE_ONLY
+                else -> com.example.model.FilterMode.BOTH
+            }
             val effectiveSettings = settings.copy(
                 minFare = directSettings.minFare,
                 maxFare = directSettings.maxFare,
                 maxPickupDistanceKm = directSettings.maxPickupKm,
                 maxDropDistanceKm = directSettings.maxDropKm,
-                maxDropKm = directSettings.maxDropKm
+                maxDropKm = directSettings.maxDropKm,
+                filterMode = effectiveFilterMode
             )
 
             Log.i(
@@ -2467,7 +2931,13 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                     attemptAcceptOrder(root, platform, candidate, pkgName)
                 }
                 is DecisionResult.Reject -> {
-                    attemptRejectOrder(root, platform, candidate, decision.reason, pkgName)
+                    val isNoGo = decision.reason.contains("No-Go", ignoreCase = true)
+                    if (isNoGo) {
+                        attemptRejectOrder(root, platform, candidate, decision.reason, pkgName)
+                    } else {
+                        logOrderEvent(candidate, OrderStatus.IGNORED, decision.reason)
+                        resetProcessing()
+                    }
                 }
                 is DecisionResult.Ignore -> {
                     logOrderEvent(candidate, OrderStatus.IGNORED, decision.reason)
@@ -2486,10 +2956,15 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         candidate: RideCandidate,
         pkgName: String
     ) {
-        val directReject = evaluateDirectRideFilters(candidate)
-        if (directReject != null) {
-            Log.w(TAG, "Aborting attemptAcceptOrder: ${directReject.reason}")
-            attemptRejectOrder(root, platform, candidate, directReject.reason, pkgName)
+        val directResult = evaluateDirectRideFilters(candidate)
+        if (directResult.status == OrderStatus.REJECTED) {
+            Log.w(TAG, "Aborting attemptAcceptOrder: ${directResult.reason}")
+            attemptRejectOrder(root, platform, candidate, directResult.reason, pkgName)
+            return
+        } else if (directResult.status == OrderStatus.IGNORED) {
+            Log.w(TAG, "Aborting attemptAcceptOrder: ${directResult.reason}")
+            logOrderEvent(candidate, OrderStatus.IGNORED, directResult.reason)
+            resetProcessing()
             return
         }
 
@@ -2498,10 +2973,10 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
         val acceptNode = when (platform) {
             Platform.RAPIDO -> {
-                if (!isRapidoOrderScreenVisible(root)) {
-                    Log.d(TAG, "Rapido order screen not visible (requires ₹ and km). Waiting...")
+                if (!isRapidoOrderPopupShowing(root)) {
+                    Log.d(TAG, "Rapido order popup not visible (requires ₹, km, and 'Accept'/'ACCEPT' button). Waiting...")
                 } else {
-                    executeRapidoAutoAccept(candidate)
+                    executeRapidoAutoAccept(candidate, root)
                 }
                 return
             }
@@ -2549,7 +3024,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
             // Try specific Rapido Captain India auto-accept strategy
             if (platform == Platform.RAPIDO) {
-                executeRapidoAutoAccept(candidate)
+                executeRapidoAutoAccept(candidate, root)
                 return@Runnable
             }
 
@@ -2629,58 +3104,36 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
      */
     /**
      * Rapido Accept helper:
-     * STEP 1: Find Accept node by Resource ID
-     * STEP 2: Click found node (performAction(ACTION_CLICK), if fails gesture tap at node center)
-     * STEP 3: Fallback if no ID found: Gesture tap at X=67% width, Y=87% height
+     * Only clicks the specific "Accept" button. Never clicks the order card, ride details, or coordinate fallback.
      */
     private fun findAndClickRapidoOrder(root: AccessibilityNodeInfo): Boolean {
-        if (!isRapidoOrderScreenVisible(root)) return false
+        if (!isRapidoOrderPopupShowing(root)) return false
         if (!canExecuteClick()) return false
-        bringRapidoToForeground()
+
+        val acceptNode = findStrictRapidoAcceptNode(root) ?: return false
+        if (isOrderCardOrDetailsNode(acceptNode)) return false
+
         notifyClickInitiated()
 
-        val acceptNode = RapidoAdapter.findAcceptTextNode(root)
-            ?: RapidoAdapter.findAcceptNode(root)
-            ?: RapidoAdapter.findAcceptNodeByResourceId(root)
-        if (acceptNode != null) {
-            val target = RapidoAdapter.resolveClickableTarget(acceptNode)
-            var clicked = target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            if (!clicked && target !== acceptNode) {
-                clicked = acceptNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        var clicked = false
+        if (acceptNode.isClickable) {
+            clicked = acceptNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        }
+        if (!clicked) {
+            val parent = acceptNode.parent
+            if (parent != null && parent.isClickable && isStrictButtonContainer(parent)) {
+                clicked = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             }
-            if (!clicked) {
-                var parent = acceptNode.parent
-                var depth = 0
-                while (parent != null && !clicked && depth < 5) {
-                    clicked = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                    parent = parent.parent
-                    depth++
-                }
-            }
-            if (!clicked) {
-                val bounds = Rect()
-                target.getBoundsInScreen(bounds)
-                if (bounds.width() == 0 || bounds.height() == 0) {
-                    acceptNode.getBoundsInScreen(bounds)
-                }
-                if (bounds.width() > 0 && bounds.height() > 0) {
-                    simulateTapGesture(bounds.centerX().toFloat(), bounds.centerY().toFloat(), isInternalFallback = true)
-                    return true
-                }
-            } else {
+        }
+        if (!clicked) {
+            val bounds = Rect()
+            acceptNode.getBoundsInScreen(bounds)
+            if (bounds.width() > 0 && bounds.height() > 0 && !isOrderCardOrDetailsNode(acceptNode)) {
+                simulateTapGesture(bounds.centerX().toFloat(), bounds.centerY().toFloat(), isInternalFallback = true)
                 return true
             }
         }
-
-        val bounds = Rect()
-        root.getBoundsInScreen(bounds)
-        val rootWidth = if (bounds.width() > 0) bounds.width().toFloat() else resources.displayMetrics.widthPixels.toFloat()
-        val rootHeight = if (bounds.height() > 0) bounds.height().toFloat() else resources.displayMetrics.heightPixels.toFloat()
-        val tapX = bounds.left.toFloat() + rootWidth * 0.67f
-        val tapY = bounds.top.toFloat() + rootHeight * 0.87f
-
-        simulateTapGesture(tapX, tapY, isInternalFallback = true)
-        return true
+        return clicked
     }
 
     private fun searchAndClick(
@@ -2834,16 +3287,23 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         reason: String,
         pkgName: String
     ) {
-        // FIX 3: If toggle was OFF when order appeared, mark order as "IGNORED" not "REJECTED"
+        // REJECTED -> ONLY when order matches a No-Go area.
+        // All other filter failures / toggle OFF -> OrderStatus.IGNORED
+        val isNoGo = reason.contains("No-Go", ignoreCase = true) ||
+            reason.contains("nogo", ignoreCase = true) ||
+            reason.contains("No Go", ignoreCase = true)
+
         val status = if (!preferencesManager.isAutoAcceptEnabled) {
             OrderStatus.IGNORED
-        } else {
+        } else if (isNoGo) {
             OrderStatus.REJECTED
+        } else {
+            OrderStatus.IGNORED
         }
         val logReason = if (!preferencesManager.isAutoAcceptEnabled) "Auto-accept toggle is OFF" else reason
 
         val rejectNode = when (platform) {
-            Platform.RAPIDO -> RapidoAdapter.findRejectNode(root, pkgName)
+            Platform.RAPIDO -> null // Rapido: only click Accept button when popup visible; never click reject or background nodes
             Platform.UBER -> null // Uber offers expire or dismissed
             Platform.OLA -> OlaAdapter.findRejectNode(root)
         }
@@ -3032,6 +3492,134 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         return if (matches.isNotEmpty()) matches.joinToString(", ") else "Criteria matched"
     }
 
+    private fun mapReasonToCode(status: OrderStatus, reason: String): String {
+        val lower = reason.lowercase(Locale.ROOT)
+        return when (status) {
+            OrderStatus.ACCEPTED -> when {
+                lower.contains("go to") || lower.contains("goto") -> "GOTO_MATCHED"
+                lower.contains("filter") || lower.contains("matched") -> "FILTERS_MATCHED"
+                else -> "FILTERS_MATCHED"
+            }
+            OrderStatus.REJECTED -> when {
+                lower.contains("no-go") || lower.contains("nogo") -> "NOGO_MATCHED"
+                lower.contains("vehicle") -> "VEHICLE_DISABLED"
+                else -> "REJECT_CRITERIA_MET"
+            }
+            OrderStatus.IGNORED -> when {
+                lower.contains("toggle") -> "TOGGLE_DISABLED"
+                lower.contains("plan") -> "NO_ACTIVE_PLAN"
+                lower.contains("pickup") && (lower.contains("exceed") || lower.contains("range")) -> "PICKUP_OUT_OF_RANGE"
+                lower.contains("drop") && (lower.contains("exceed") || lower.contains("range")) -> "DROP_OUT_OF_RANGE"
+                lower.contains("fare") && (lower.contains("below") || lower.contains("min")) -> "FARE_TOO_LOW"
+                lower.contains("fare") && lower.contains("unavailable") -> "FARE_UNAVAILABLE"
+                lower.contains("rate") || lower.contains("km") -> "RATE_PER_KM_LOW"
+                lower.contains("disabled") -> "PLATFORM_DISABLED"
+                else -> "CRITERIA_NOT_MET"
+            }
+            OrderStatus.FAILED -> "ACTION_FAILED"
+            OrderStatus.SKIPPED -> "ORDER_SKIPPED"
+            OrderStatus.MISSED -> "ORDER_MISSED"
+            OrderStatus.PROCESSING -> "PROCESSING"
+        }
+    }
+
+    private fun onOrderDetectedFast(candidate: RideCandidate): String {
+        val tempId = candidate.bookingId?.ifBlank { null } ?: rideHistoryRepository.generateFingerprint(candidate)
+        activeOrderRecordIds[candidate.platform] = tempId
+
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val entity = rideHistoryRepository.onOrderDetected(
+                    candidate = candidate,
+                    initialReasonCode = "PROCESSING",
+                    initialReasonText = "Evaluating ride filters..."
+                )
+                activeOrderRecordIds[candidate.platform] = entity.id
+                prefs.notifyOrderHistoryChanged()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in onOrderDetectedFast", e)
+            }
+        }
+        return tempId
+    }
+
+    private fun onOrderDecisionFast(
+        recordId: String,
+        candidate: RideCandidate,
+        status: OrderStatus,
+        reasonCode: String,
+        reasonText: String,
+        matchedGoTo: String = "",
+        matchedNoGo: String = ""
+    ) {
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val updated = rideHistoryRepository.onOrderDecision(
+                    id = recordId,
+                    status = status,
+                    reasonCode = reasonCode,
+                    reasonText = reasonText,
+                    matchedGoTo = matchedGoTo,
+                    matchedNoGo = matchedNoGo
+                )
+                if (updated != null) {
+                    repository.recordOrderHistory(updated.toOrderHistoryItem())
+                }
+                prefs.notifyOrderHistoryChanged()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in onOrderDecisionFast", e)
+            }
+        }
+    }
+
+    private fun onOrderActionAttemptFast(recordId: String) {
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                rideHistoryRepository.onOrderActionAttempt(recordId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in onOrderActionAttemptFast", e)
+            }
+        }
+    }
+
+    private fun onOrderActionCompletedFast(
+        recordId: String,
+        candidate: RideCandidate,
+        status: OrderStatus,
+        reasonCode: String,
+        reasonText: String,
+        actionSucceeded: Boolean,
+        timesClicked: Int = 1
+    ) {
+        val now = System.currentTimeMillis()
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val updated = rideHistoryRepository.onOrderActionCompleted(
+                    id = recordId,
+                    status = status,
+                    reasonCode = reasonCode,
+                    reasonText = reasonText,
+                    actionSucceeded = actionSucceeded,
+                    timesClicked = timesClicked
+                )
+                if (updated != null) {
+                    repository.recordOrderHistory(updated.toOrderHistoryItem())
+                }
+                if (status == OrderStatus.ACCEPTED) {
+                    val platformName = if (candidate.platform == Platform.RAPIDO) "Rapido" else candidate.platform.displayName
+                    prefs.saveAcceptedOrder(
+                        platform = platformName,
+                        timestamp = now,
+                        fareAmount = candidate.fare ?: 0f
+                    )
+                }
+                prefs.notifyOrderHistoryChanged()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in onOrderActionCompletedFast", e)
+            }
+        }
+    }
+
     private fun logOrderEvent(
         candidate: RideCandidate,
         status: OrderStatus,
@@ -3040,12 +3628,6 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         timesClicked: Int = 1
     ) {
         val now = System.currentTimeMillis()
-        val dateStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(now))
-        val timeStr = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(now))
-
-        val detectionTime = if (candidate.detectionTimeMs > 0L) candidate.detectionTimeMs else (now - 145L)
-        val finalClickTime = if (clickTimeMs > 0L) clickTimeMs else now
-
         val effectiveReason = when (status) {
             OrderStatus.ACCEPTED -> {
                 if (reason.isNotBlank() && reason.contains("matched", ignoreCase = true) && !reason.contains("No-Go", ignoreCase = true) && !reason.equals("Fare & distance criteria matched", ignoreCase = true)) {
@@ -3064,54 +3646,70 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             }
             OrderStatus.REJECTED -> reason
             OrderStatus.MISSED -> reason
+            OrderStatus.FAILED -> reason
+            OrderStatus.SKIPPED -> reason
+            OrderStatus.PROCESSING -> "Evaluating ride filters..."
         }
 
-        val item = OrderHistoryItem(
-            id = UUID.randomUUID().toString(),
-            timestamp = now,
-            dateStr = dateStr,
-            timeStr = timeStr,
-            status = status,
-            platform = candidate.platform,
-            vehicleType = candidate.vehicleType,
-            pickupDistKm = candidate.pickupDistKm ?: 0f,
-            dropDistKm = candidate.dropDistKm ?: 0f,
-            pickupAddress = candidate.pickupAddress ?: "Pickup Location",
-            dropAddress = candidate.dropAddress ?: "Drop Location",
-            dropArea = candidate.dropArea ?: "City Area",
-            amount = candidate.fare ?: 0f,
-            bookingId = candidate.bookingId ?: "BK-${System.currentTimeMillis().toString().takeLast(6)}",
-            detectionTimeMs = detectionTime,
-            clickTimeMs = finalClickTime,
-            baseFare = candidate.baseFare ?: (candidate.fare ?: 0f),
-            tipAmount = candidate.tipAmount ?: 0f,
-            timesClicked = timesClicked,
-            reason = effectiveReason
-        )
+        val reasonCode = mapReasonToCode(status, effectiveReason)
+        val activeId = activeOrderRecordIds[candidate.platform]
 
-        // Directly update stats in PreferencesManager
-        prefs.addOrderHistory(item)
-        repository.recordOrderHistory(item)
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                // If record was already created on detection, update it. Otherwise create then update.
+                val record = if (activeId != null) {
+                    rideHistoryRepository.getById(activeId) ?: rideHistoryRepository.onOrderDetected(candidate, "PROCESSING", "Evaluating...")
+                } else {
+                    rideHistoryRepository.onOrderDetected(candidate, "PROCESSING", "Evaluating...")
+                }
 
-        if (status == OrderStatus.ACCEPTED) {
-            val platformName = if (candidate.platform == Platform.RAPIDO) "Rapido" else candidate.platform.displayName
-            prefs.saveAcceptedOrder(
-                platform = platformName,
-                timestamp = now,
-                fareAmount = candidate.fare ?: 0f
-            )
-            Log.i(TAG, "Stats updated in PreferencesManager: totalAccepted=${prefs.totalAccepted}, platform=$platformName, timestamp=$now, fare=${candidate.fare ?: 0f}")
+                if (status == OrderStatus.ACCEPTED) {
+                    rideHistoryRepository.onOrderDecision(record.id, OrderStatus.ACCEPTED, reasonCode, effectiveReason)
+                    rideHistoryRepository.onOrderActionAttempt(record.id)
+                    val completed = rideHistoryRepository.onOrderActionCompleted(
+                        id = record.id,
+                        status = OrderStatus.ACCEPTED,
+                        reasonCode = reasonCode,
+                        reasonText = effectiveReason,
+                        actionSucceeded = true,
+                        timesClicked = timesClicked
+                    )
+                    if (completed != null) {
+                        repository.recordOrderHistory(completed.toOrderHistoryItem())
+                    }
+                    val platformName = if (candidate.platform == Platform.RAPIDO) "Rapido" else candidate.platform.displayName
+                    prefs.saveAcceptedOrder(
+                        platform = platformName,
+                        timestamp = now,
+                        fareAmount = candidate.fare ?: 0f
+                    )
+                } else {
+                    val updated = rideHistoryRepository.onOrderDecision(
+                        id = record.id,
+                        status = status,
+                        reasonCode = reasonCode,
+                        reasonText = effectiveReason
+                    )
+                    if (updated != null) {
+                        repository.recordOrderHistory(updated.toOrderHistoryItem())
+                    }
+                }
+                prefs.notifyOrderHistoryChanged()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error logging order event", e)
+            }
         }
     }
 
     private fun collectAllNodeText(node: AccessibilityNodeInfo?, outList: MutableList<String>) {
-        if (node == null) return
+        if (node == null || outList.size > 80) return
         node.text?.toString()?.let { outList.add(it) }
         node.contentDescription?.toString()?.let { outList.add(it) }
         for (i in 0 until node.childCount) {
             val c = node.getChild(i)
-            collectAllNodeText(c, outList)
-            c?.recycle()
+            if (c != null) {
+                collectAllNodeText(c, outList)
+            }
         }
     }
 

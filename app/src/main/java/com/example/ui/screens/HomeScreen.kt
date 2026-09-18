@@ -27,10 +27,9 @@ import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CurrencyRupee
-import androidx.compose.material.icons.filled.DirectionsBike
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.ElectricBolt
-import androidx.compose.material.icons.filled.ElectricRickshaw
+import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.NearMe
@@ -45,8 +44,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -67,7 +64,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -95,9 +91,9 @@ import com.example.model.FilterMode
 import com.example.model.OrderHistoryItem
 import com.example.model.OrderStatus
 import com.example.model.Platform
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.viewmodel.RideHistoryViewModel
 import com.example.service.FloatingOverlayService
 import com.example.service.SmartDrivoAccessibilityService
 import com.example.ui.components.SmartDrivoLogo
@@ -111,7 +107,6 @@ import com.example.ui.theme.CardBackground
 import com.example.ui.theme.CardBorderDefault
 import com.example.ui.theme.LightBackground
 import com.example.ui.theme.LightSurface
-import com.example.ui.theme.PlatformRapido
 import com.example.ui.theme.StatusActiveGreen
 import com.example.ui.theme.StatusActiveGreenBg
 import com.example.ui.theme.StatusActiveGreenBorder
@@ -129,21 +124,12 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
-@Immutable
-private data class SimRideData(
-    val pickupDistKm: Float,
-    val dropDistKm: Float,
-    val fare: Float,
-    val pickupAddress: String,
-    val dropAddress: String,
-    val dropArea: String
-)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     prefs: PreferencesManager,
     repository: FirebaseRepository,
+    historyViewModel: RideHistoryViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
     onNavigateToSettings: () -> Unit,
     onNavigateToHistory: () -> Unit,
     onNavigateToProfile: () -> Unit,
@@ -154,6 +140,10 @@ fun HomeScreen(
     val settings by prefs.appSettings.collectAsState()
     val userProfile by prefs.userProfile.collectAsState()
     val orderHistory by prefs.orderHistory.collectAsState()
+    val historyEntities by historyViewModel.history.collectAsStateWithLifecycle()
+    val latestHistoryOrder = remember(historyEntities) {
+        historyEntities.firstOrNull()?.toOrderHistoryItem()
+    }
     val lastAccepted by prefs.lastAcceptedRide.collectAsState()
     val goToAreas by prefs.goToAreas.collectAsState()
     val noGoAreas by prefs.noGoAreas.collectAsState()
@@ -280,9 +270,7 @@ fun HomeScreen(
     }
 
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            prefs.loadStats()
-        }
+        prefs.loadStats()
     }
 
     // Calculate real-time stats for today
@@ -294,10 +282,23 @@ fun HomeScreen(
         derivedStateOf { todayOrders.count { it.status == OrderStatus.ACCEPTED } }
     }
     val rejectedCount by remember(todayOrders) {
-        derivedStateOf { todayOrders.count { it.status == OrderStatus.REJECTED } }
+        derivedStateOf {
+            todayOrders.count {
+                it.reason.contains("No-Go", ignoreCase = true) ||
+                it.reason.contains("nogo", ignoreCase = true) ||
+                it.reason.contains("No Go", ignoreCase = true)
+            }
+        }
     }
     val ignoredCount by remember(todayOrders) {
-        derivedStateOf { todayOrders.count { it.status == OrderStatus.IGNORED } }
+        derivedStateOf {
+            todayOrders.count {
+                it.status != OrderStatus.ACCEPTED &&
+                !(it.reason.contains("No-Go", ignoreCase = true) ||
+                  it.reason.contains("nogo", ignoreCase = true) ||
+                  it.reason.contains("No Go", ignoreCase = true))
+            }
+        }
     }
     val earningsAssisted by remember(todayOrders) {
         derivedStateOf {
@@ -307,45 +308,6 @@ fun HomeScreen(
                 .toInt()
         }
     }
-
-    val isMembershipActive by remember(userProfile.isPlanValid, userProfile.isAdmin) {
-        derivedStateOf { userProfile.isPlanValid || userProfile.isAdmin }
-    }
-    val membershipStatusText by remember(isMembershipActive) {
-        derivedStateOf { if (isMembershipActive) "● Membership Active" else "○ Membership Inactive" }
-    }
-    val membershipStatusColor by remember(isMembershipActive) {
-        derivedStateOf { if (isMembershipActive) StatusActiveGreen else StatusInactiveRed }
-    }
-
-    val isAutoAcceptActive by remember(settings.isAutoAcceptActive) {
-        derivedStateOf { settings.isAutoAcceptActive }
-    }
-    val autoAcceptContainerColor by remember(isAutoAcceptActive) {
-        derivedStateOf { if (isAutoAcceptActive) StatusActiveGreenBg else StatusInactiveRedBg }
-    }
-    val autoAcceptBorderColor by remember(isAutoAcceptActive) {
-        derivedStateOf { if (isAutoAcceptActive) StatusActiveGreenBorder else StatusInactiveRedBorder }
-    }
-    val autoAcceptIconTint by remember(isAutoAcceptActive) {
-        derivedStateOf { if (isAutoAcceptActive) StatusActiveGreen else StatusInactiveRed }
-    }
-    val autoAcceptIconBg by remember(isAutoAcceptActive) {
-        derivedStateOf { if (isAutoAcceptActive) Color(0xFFDCFCE7) else Color(0xFFFFEBEE) }
-    }
-    val autoAcceptStatusSubtitle by remember(isAutoAcceptActive) {
-        derivedStateOf {
-            if (isAutoAcceptActive) "ACTIVE — Instant click & filter enabled"
-            else "INACTIVE — Auto click is paused"
-        }
-    }
-
-    val rapidoActive by remember(settings.rapidoEnabled) { derivedStateOf { settings.rapidoEnabled } }
-    val uberActive by remember(settings.uberEnabled) { derivedStateOf { settings.uberEnabled } }
-    val olaActive by remember(settings.olaEnabled) { derivedStateOf { settings.olaEnabled } }
-    val autoActive by remember(settings.autoEnabled) { derivedStateOf { settings.autoEnabled } }
-    val bikeActive by remember(settings.bikeEnabled) { derivedStateOf { settings.bikeEnabled } }
-    val carActive by remember(settings.carEnabled) { derivedStateOf { settings.carEnabled } }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -363,9 +325,9 @@ fun HomeScreen(
                                 color = TextDarkPrimary
                             )
                             Text(
-                                text = membershipStatusText,
+                                text = if (userProfile.isPlanValid || userProfile.isAdmin) "● Membership Active" else "○ Membership Inactive",
                                 fontSize = 14.sp,
-                                color = membershipStatusColor
+                                color = if (userProfile.isPlanValid || userProfile.isAdmin) StatusActiveGreen else StatusInactiveRed
                             )
                         }
                     }
@@ -394,11 +356,11 @@ fun HomeScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            item(key = "top_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(4.dp)) }
+            item { Spacer(modifier = Modifier.height(4.dp)) }
 
             // Accessibility Service Warning (Colorful Warning Card)
             if (!isAccessibilityGranted) {
-                item(key = "accessibility_warning", contentType = "warning_card") {
+                item {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = StatusWarningYellowBg),
                         shape = RoundedCornerShape(16.dp),
@@ -450,7 +412,7 @@ fun HomeScreen(
                     }
                 }
             } else if (!isOverlayGranted) {
-                item(key = "overlay_warning", contentType = "warning_card") {
+                item {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = BlueContainer),
                         shape = RoundedCornerShape(16.dp),
@@ -503,21 +465,38 @@ fun HomeScreen(
                 }
             }
 
+            // Automation Health Status Card
+            item {
+                AutomationHealthCard(
+                    isAccessibilityActive = isAccessibilityGranted,
+                    isOverlayActive = isOverlayGranted,
+                    isAutoAcceptActive = settings.isAutoAcceptActive,
+                    onClickAccessibility = {
+                        prefs.isPendingAutoAcceptActivation = true
+                        showAccessibilityDialog = true
+                    },
+                    onClickOverlay = {
+                        prefs.isPendingAutoAcceptActivation = true
+                        showOverlayDialog = true
+                    }
+                )
+            }
+
             // 2. AUTO-ACCEPT ORDERS toggle card (MOVED TO TOP)
-            item(key = "auto_accept_toggle", contentType = "main_toggle_card") {
+            item {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            handleToggleAutoAccept(!isAutoAcceptActive)
+                            handleToggleAutoAccept(!settings.isAutoAcceptActive)
                         },
                     colors = CardDefaults.cardColors(
-                        containerColor = autoAcceptContainerColor
+                        containerColor = if (settings.isAutoAcceptActive) StatusActiveGreenBg else StatusInactiveRedBg
                     ),
                     shape = RoundedCornerShape(16.dp),
                     border = BorderStroke(
                         1.5.dp,
-                        autoAcceptBorderColor
+                        if (settings.isAutoAcceptActive) StatusActiveGreenBorder else StatusInactiveRedBorder
                     )
                 ) {
                     Row(
@@ -535,7 +514,7 @@ fun HomeScreen(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .background(
-                                        autoAcceptIconBg,
+                                        if (settings.isAutoAcceptActive) Color(0xFFDCFCE7) else Color(0xFFFFEBEE),
                                         RoundedCornerShape(10.dp)
                                     ),
                                 contentAlignment = Alignment.Center
@@ -543,7 +522,7 @@ fun HomeScreen(
                                 Icon(
                                     Icons.Default.ElectricBolt,
                                     contentDescription = null,
-                                    tint = autoAcceptIconTint,
+                                    tint = if (settings.isAutoAcceptActive) StatusActiveGreen else StatusInactiveRed,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -557,7 +536,10 @@ fun HomeScreen(
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = autoAcceptStatusSubtitle,
+                                    text = if (settings.isAutoAcceptActive)
+                                        "ACTIVE — Instant click & filter enabled"
+                                    else
+                                        "INACTIVE — Auto click is paused",
                                     fontSize = 14.sp,
                                     color = TextDarkSecondary
                                 )
@@ -565,7 +547,7 @@ fun HomeScreen(
                         }
 
                         Switch(
-                            checked = isAutoAcceptActive,
+                            checked = settings.isAutoAcceptActive,
                             onCheckedChange = { shouldEnable ->
                                 handleToggleAutoAccept(shouldEnable)
                             },
@@ -581,7 +563,7 @@ fun HomeScreen(
             }
 
             // 3. Filter Mode buttons + Fare Criteria card + Distance Criteria card
-            item(key = "filter_settings", contentType = "filter_settings_card") {
+            item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
@@ -880,81 +862,6 @@ fun HomeScreen(
                             }
                         }
 
-                        // Active Area Filters Summary Card
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onNavigateToAreaManager() },
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (activeAreaFilterCount > 0) Color(0xFFF0FDF4) else Color(0xFFFAFAFA)
-                            ),
-                            shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(1.dp, if (activeAreaFilterCount > 0) Color(0xFF86EFAC) else CardBorderDefault)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(38.dp)
-                                            .background(
-                                                if (activeAreaFilterCount > 0) Color(0xFFDCFCE7) else Color(0xFFEEEEEE),
-                                                RoundedCornerShape(10.dp)
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Place,
-                                            contentDescription = null,
-                                            tint = if (activeAreaFilterCount > 0) Color(0xFF16A34A) else Color.Gray,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
-                                        Text(
-                                            text = "Area Filter: $activeAreaFilterCount Active",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 16.sp,
-                                            color = if (activeAreaFilterCount > 0) TextDarkPrimary else Color.Gray
-                                        )
-                                        Text(
-                                            text = if (activeAreaFilterCount > 0)
-                                                "${goToAreas.size} Go-To • ${noGoAreas.size} No-Go"
-                                            else
-                                                "Tap to configure Go-To & No-Go areas",
-                                            fontSize = 14.sp,
-                                            color = if (activeAreaFilterCount > 0) Color(0xFF15803D) else TextDarkSecondary
-                                        )
-                                    }
-                                }
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = if (activeAreaFilterCount > 0) "$activeAreaFilterCount ACTIVE" else "OFF",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = if (activeAreaFilterCount > 0) Color(0xFF16A34A) else Color.Gray
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(
-                                        Icons.Default.ChevronRight,
-                                        contentDescription = null,
-                                        tint = Color.Gray,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
                         // Save Settings Button
                         Button(
                             onClick = {
@@ -976,7 +883,7 @@ fun HomeScreen(
                                     snackbarHostState.showSnackbar("Saved ✓")
                                 }
                             },
-                            enabled = hasUnsavedChanges,
+                            enabled = true,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(50.dp)
@@ -984,9 +891,7 @@ fun HomeScreen(
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = BluePrimary,
-                                contentColor = Color.White,
-                                disabledContainerColor = Color(0xFFE0E0E0),
-                                disabledContentColor = Color(0xFF9E9E9E)
+                                contentColor = Color.White
                             )
                         ) {
                             Icon(
@@ -1005,211 +910,8 @@ fun HomeScreen(
                 }
             }
 
-            // 4. DRIVER PLATFORMS section (Rapido, Uber, Ola)
-            item(key = "driver_platforms", contentType = "platforms_card") {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = CardBackground),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, CardBorderDefault)
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .background(BlueContainer, RoundedCornerShape(10.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.Layers,
-                                    contentDescription = null,
-                                    tint = BluePrimary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Driver Platforms",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextDarkPrimary
-                                )
-                                Text(
-                                    text = "Select partner apps to monitor",
-                                    fontSize = 14.sp,
-                                    color = TextDarkSecondary
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            FilterChip(
-                                selected = rapidoActive,
-                                onClick = { prefs.saveAppSettings(settings.copy(rapidoEnabled = !rapidoActive)) },
-                                label = { Text("Rapido ✓", fontSize = 14.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = PlatformRapido,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = Color.White,
-                                    labelColor = TextDarkPrimary
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
-                                    selected = rapidoActive,
-                                    borderColor = PlatformRapido,
-                                    selectedBorderColor = PlatformRapido
-                                )
-                            )
-                            FilterChip(
-                                selected = uberActive,
-                                onClick = { prefs.saveAppSettings(settings.copy(uberEnabled = !uberActive)) },
-                                label = { Text("Uber ✓", fontSize = 14.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Color(0xFF212121),
-                                    selectedLabelColor = Color.White,
-                                    containerColor = Color.White,
-                                    labelColor = TextDarkPrimary
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
-                                    selected = uberActive,
-                                    borderColor = Color(0xFF757575),
-                                    selectedBorderColor = Color(0xFF212121)
-                                )
-                            )
-                            FilterChip(
-                                selected = olaActive,
-                                onClick = { prefs.saveAppSettings(settings.copy(olaEnabled = !olaActive)) },
-                                label = { Text("Ola ✓", fontSize = 14.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = StatusActiveGreen,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = Color.White,
-                                    labelColor = TextDarkPrimary
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
-                                    selected = olaActive,
-                                    borderColor = StatusActiveGreen,
-                                    selectedBorderColor = StatusActiveGreen
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 5. VEHICLE FILTERS section (Auto, Bike, Car)
-            item(key = "vehicle_filters", contentType = "vehicles_card") {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = CardBackground),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, CardBorderDefault)
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .background(BlueContainer, RoundedCornerShape(10.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.DirectionsCar,
-                                    contentDescription = null,
-                                    tint = BlueSecondary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Vehicle Filters",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextDarkPrimary
-                                )
-                                Text(
-                                    text = "Filter rides by vehicle category",
-                                    fontSize = 14.sp,
-                                    color = TextDarkSecondary
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            FilterChip(
-                                selected = autoActive,
-                                onClick = { prefs.saveAppSettings(settings.copy(autoEnabled = !autoActive)) },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Default.ElectricRickshaw,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                },
-                                label = { Text("Auto", fontSize = 14.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = BlueSecondary,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = Color.White,
-                                    labelColor = TextDarkPrimary
-                                )
-                            )
-                            FilterChip(
-                                selected = bikeActive,
-                                onClick = { prefs.saveAppSettings(settings.copy(bikeEnabled = !bikeActive)) },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Default.DirectionsBike,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                },
-                                label = { Text("Bike", fontSize = 14.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = BlueSecondary,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = Color.White,
-                                    labelColor = TextDarkPrimary
-                                )
-                            )
-                            FilterChip(
-                                selected = carActive,
-                                onClick = { prefs.saveAppSettings(settings.copy(carEnabled = !carActive)) },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Default.DirectionsCar,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                },
-                                label = { Text("Car", fontSize = 14.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = BlueSecondary,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = Color.White,
-                                    labelColor = TextDarkPrimary
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 6. Today's Performance Stats
-            item(key = "today_performance_stats", contentType = "stats_card") {
+            // 4. Today's Performance Stats
+            item {
                 Text(
                     text = "Today's Performance",
                     fontSize = 20.sp,
@@ -1274,7 +976,7 @@ fun HomeScreen(
 
             // Last Accepted Ride Info Card
             if (lastAccepted != null) {
-                item(key = "last_accepted_ride", contentType = "last_accepted_card") {
+                item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = StatusActiveGreenBg),
@@ -1319,8 +1021,116 @@ fun HomeScreen(
                 }
             }
 
+            // Last Order Card from Room History (Reactive & Instant, Part K)
+            if (latestHistoryOrder != null) {
+                item {
+                    val statusColor = when (latestHistoryOrder.status) {
+                        OrderStatus.PROCESSING -> Color(0xFFE65100)
+                        OrderStatus.ACCEPTED -> StatusActiveGreen
+                        OrderStatus.REJECTED -> StatusInactiveRed
+                        OrderStatus.IGNORED -> StatusWarningYellow
+                        OrderStatus.FAILED -> Color(0xFFC62828)
+                        OrderStatus.SKIPPED -> Color(0xFF512DA8)
+                        OrderStatus.MISSED -> Color.Gray
+                    }
+                    val statusBg = when (latestHistoryOrder.status) {
+                        OrderStatus.PROCESSING -> Color(0xFFFFF8E1)
+                        OrderStatus.ACCEPTED -> StatusActiveGreenBg
+                        OrderStatus.REJECTED -> StatusInactiveRedBg
+                        OrderStatus.IGNORED -> StatusWarningYellowBg
+                        OrderStatus.FAILED -> Color(0xFFFFEBEE)
+                        OrderStatus.SKIPPED -> Color(0xFFEDE7F6)
+                        OrderStatus.MISSED -> Color(0xFFEEEEEE)
+                    }
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onNavigateToHistory() },
+                        colors = CardDefaults.cardColors(containerColor = CardBackground),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.5.dp, statusColor.copy(alpha = 0.5f))
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .background(
+                                                when (latestHistoryOrder.platform) {
+                                                    Platform.RAPIDO -> Color(0xFFFFF9C4)
+                                                    Platform.UBER -> Color(0xFFEEEEEE)
+                                                    Platform.OLA -> StatusActiveGreenBg
+                                                },
+                                                RoundedCornerShape(4.dp)
+                                            )
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = latestHistoryOrder.platform.displayName,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = when (latestHistoryOrder.platform) {
+                                                Platform.RAPIDO -> Color(0xFFF57F17)
+                                                Platform.UBER -> Color(0xFF212121)
+                                                Platform.OLA -> StatusActiveGreen
+                                            }
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .background(statusBg, RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = latestHistoryOrder.status.name,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = statusColor
+                                        )
+                                    }
+                                }
+
+                                Text(
+                                    text = latestHistoryOrder.timeStr,
+                                    fontSize = 13.sp,
+                                    color = TextDarkSecondary
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Text(
+                                text = if (latestHistoryOrder.amount > 0f) "₹${latestHistoryOrder.amount.toInt()}  →  ${latestHistoryOrder.dropArea.ifEmpty { "Drop Point" }}" else latestHistoryOrder.dropArea.ifEmpty { "Order detected" },
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextDarkPrimary
+                            )
+
+                            if (latestHistoryOrder.reason.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = latestHistoryOrder.reason,
+                                    fontSize = 12.sp,
+                                    color = TextDarkSecondary,
+                                    maxLines = 2
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // 7. Area Rules Engine card
-            item(key = "area_rules_engine", contentType = "area_rules_card") {
+            item {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1388,31 +1198,7 @@ fun HomeScreen(
                 }
             }
 
-            // 8. Test Ride Simulation button (keep at very bottom)
-            item(key = "test_simulation_button", contentType = "simulation_button") {
-                Button(
-                    onClick = { showSimulateDialog = true },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = BluePrimary,
-                        contentColor = Color.White
-                    )
-                ) {
-                    Icon(
-                        Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Test Ride Auto-Accept Simulation",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                }
+            item {
                 Spacer(modifier = Modifier.height(16.dp))
             }
         }
@@ -1535,6 +1321,14 @@ fun HomeScreen(
                         val dateStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
 
                         val now = System.currentTimeMillis()
+                        data class SimRideData(
+                            val pickupDistKm: Float,
+                            val dropDistKm: Float,
+                            val fare: Float,
+                            val pickupAddress: String,
+                            val dropAddress: String,
+                            val dropArea: String
+                        )
 
                         val simData = when (simPlatform) {
                             Platform.RAPIDO -> SimRideData(
@@ -1815,6 +1609,150 @@ private fun StatCard(
             Text(value, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = color)
             Spacer(modifier = Modifier.height(4.dp))
             Text(title, fontSize = 14.sp, color = TextDarkSecondary)
+        }
+    }
+}
+
+@Composable
+private fun AutomationHealthCard(
+    isAccessibilityActive: Boolean,
+    isOverlayActive: Boolean,
+    isAutoAcceptActive: Boolean,
+    onClickAccessibility: () -> Unit,
+    onClickOverlay: () -> Unit
+) {
+    val allHealthy = isAccessibilityActive && isOverlayActive && isAutoAcceptActive
+    val bg = if (allHealthy) Color(0xFFF0FDF4) else Color(0xFFFFFBEB)
+    val borderCol = if (allHealthy) Color(0xFFBBF7D0) else Color(0xFFFDE68A)
+    val titleCol = if (allHealthy) Color(0xFF15803D) else Color(0xFFB45309)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = bg),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, borderCol)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .background(
+                                if (allHealthy) Color(0xFFDCFCE7) else Color(0xFFFEF3C7),
+                                RoundedCornerShape(8.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.HealthAndSafety,
+                            contentDescription = null,
+                            tint = if (allHealthy) StatusActiveGreen else Color(0xFFD97706),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Automation Health",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = titleCol
+                        )
+                        Text(
+                            text = if (allHealthy) "All systems ready & monitoring" else "Action required for full automation",
+                            fontSize = 12.sp,
+                            color = TextDarkSecondary
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (allHealthy) Color(0xFFDCFCE7) else Color(0xFFFEF3C7),
+                    border = BorderStroke(1.dp, if (allHealthy) Color(0xFF86EFAC) else Color(0xFFFCD34D))
+                ) {
+                    Text(
+                        text = if (allHealthy) "OPTIMAL" else "ATTENTION",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (allHealthy) Color(0xFF15803D) else Color(0xFFB45309),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+
+            // Status items
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                HealthStatusChip(
+                    label = "Accessibility",
+                    isActive = isAccessibilityActive,
+                    onClick = if (!isAccessibilityActive) onClickAccessibility else null,
+                    modifier = Modifier.weight(1f)
+                )
+                HealthStatusChip(
+                    label = "Overlay",
+                    isActive = isOverlayActive,
+                    onClick = if (!isOverlayActive) onClickOverlay else null,
+                    modifier = Modifier.weight(1f)
+                )
+                HealthStatusChip(
+                    label = "Auto-Accept",
+                    isActive = isAutoAcceptActive,
+                    onClick = null,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HealthStatusChip(
+    label: String,
+    isActive: Boolean,
+    onClick: (() -> Unit)?,
+    modifier: Modifier = Modifier
+) {
+    val activeColor = StatusActiveGreen
+    val inactiveColor = StatusInactiveRed
+    val activeBg = Color(0xFFDCFCE7)
+    val inactiveBg = Color(0xFFFEE2E2)
+
+    Surface(
+        onClick = { onClick?.invoke() },
+        enabled = onClick != null,
+        shape = RoundedCornerShape(8.dp),
+        color = if (isActive) activeBg else inactiveBg,
+        border = BorderStroke(1.dp, if (isActive) Color(0xFF86EFAC) else Color(0xFFFCA5A5)),
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = if (isActive) "● $label" else "○ $label",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isActive) activeColor else inactiveColor,
+                maxLines = 1
+            )
+            Text(
+                text = if (isActive) "Active" else if (onClick != null) "Enable" else "Off",
+                fontSize = 10.sp,
+                color = if (isActive) activeColor else inactiveColor
+            )
         }
     }
 }

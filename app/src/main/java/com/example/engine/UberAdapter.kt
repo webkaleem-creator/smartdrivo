@@ -6,10 +6,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 import com.example.model.Platform
 import com.example.model.RideCandidate
 import com.example.model.VehicleType
-import androidx.compose.runtime.Immutable
 import java.util.regex.Pattern
 
-@Immutable
 data class UberOrderData(
     val fare: Float? = null,
     val pickupKm: Float? = null,
@@ -21,7 +19,6 @@ data class UberOrderData(
     val vehicleType: VehicleType? = null
 )
 
-@Immutable
 data class UberNodeEntry(
     val text: String,
     val desc: String?,

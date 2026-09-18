@@ -15,7 +15,6 @@ import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
@@ -51,12 +50,49 @@ class FirebaseRepository(
         prefs.saveUserProfile(profile)
         scope.launch {
             try {
+                // Client updates MUST NOT write or overwrite privileged authority fields:
+                // isAdmin, isApproved, isActive, plan, planPrice, planExpireMillis
+                val safeClientMap = mapOf(
+                    "uid" to profile.uid,
+                    "name" to profile.name,
+                    "email" to profile.email,
+                    "phone" to profile.phone,
+                    "mobile" to profile.phone,
+                    "mobileNumber" to profile.phone,
+                    "city" to profile.city,
+                    "state" to profile.state,
+                    "vehicleType" to profile.vehicleType.name,
+                    "referralCode" to profile.referralCode,
+                    "updatedAt" to System.currentTimeMillis()
+                )
+                firestore?.collection("users")?.document(profile.uid)?.set(
+                    safeClientMap,
+                    SetOptions.merge()
+                )?.await()
+                onComplete?.invoke(true)
+            } catch (e: Exception) {
+                Log.e("FirebaseRepo", "Failed to sync user: ${e.message}")
+                onComplete?.invoke(false)
+            }
+        }
+    }
+
+    // Privileged update: used when verified admin updates users from AdminPanel
+    fun adminUpdateUserProfile(profile: UserProfile, onComplete: ((Boolean) -> Unit)? = null) {
+        val currentCaller = prefs.userProfile.value
+        if (!currentCaller.isAdmin) {
+            Log.e("FirebaseRepo", "Unauthorized attempt to write privileged fields")
+            onComplete?.invoke(false)
+            return
+        }
+        scope.launch {
+            try {
                 firestore?.collection("users")?.document(profile.uid)?.set(
                     mapOf(
+                        "uid" to profile.uid,
                         "name" to profile.name,
                         "email" to profile.email,
-                        "phone" to profile.effectiveMobile,
-                        "mobile" to profile.effectiveMobile,
+                        "phone" to profile.phone,
                         "city" to profile.city,
                         "state" to profile.state,
                         "vehicleType" to profile.vehicleType.name,
@@ -66,88 +102,86 @@ class FirebaseRepository(
                         "isApproved" to profile.isApproved,
                         "isAdmin" to profile.isAdmin,
                         "isActive" to profile.isActive,
-                        "referralCode" to profile.referralCode,
-                        "createdAt" to profile.createdAt
+                        "updatedAt" to System.currentTimeMillis()
                     ),
                     SetOptions.merge()
                 )?.await()
-                withContext(Dispatchers.Main) {
-                    onComplete?.invoke(true)
-                }
+                onComplete?.invoke(true)
             } catch (e: Exception) {
-                Log.e("FirebaseRepo", "Failed to sync user: ${e.message}")
-                withContext(Dispatchers.Main) {
-                    onComplete?.invoke(false)
-                }
+                Log.e("FirebaseRepo", "Admin user update failed: ${e.message}")
+                onComplete?.invoke(false)
             }
         }
     }
 
-    // --- Firestore Check for Google Login Flow ---
-    fun checkUserFirestoreProfile(
+    suspend fun fetchFirestoreUserProfile(uid: String, email: String = ""): UserProfile? {
+        val fs = firestore ?: return null
+        return try {
+            var doc = if (uid.isNotBlank()) fs.collection("users").document(uid).get().await() else null
+            if ((doc == null || !doc.exists()) && email.isNotBlank()) {
+                val query = fs.collection("users").whereEqualTo("email", email).limit(1).get().await()
+                if (!query.isEmpty) {
+                    doc = query.documents.first()
+                }
+            }
+            if (doc != null && doc.exists()) {
+                val phone = doc.getString("phone")
+                    ?: doc.getString("mobile")
+                    ?: doc.getString("mobileNumber")
+                    ?: ""
+                val city = doc.getString("city") ?: ""
+                val state = doc.getString("state") ?: ""
+                val name = doc.getString("name") ?: ""
+                val userEmail = doc.getString("email") ?: email
+                val plan = doc.getString("plan") ?: "NONE"
+                val planPrice = doc.getLong("planPrice")?.toInt() ?: 0
+                val planExpireMillis = doc.getLong("planExpireMillis") ?: 0L
+                val isApproved = doc.getBoolean("isApproved") ?: false
+                val isAdmin = doc.getBoolean("isAdmin") ?: false
+                val isActive = doc.getBoolean("isActive") ?: false
+                val referralCode = doc.getString("referralCode") ?: ""
+                val createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
+                val vehicleTypeStr = doc.getString("vehicleType") ?: "AUTO"
+                val vehicleType = try {
+                    com.example.model.VehicleType.valueOf(vehicleTypeStr)
+                } catch (_: Exception) {
+                    com.example.model.VehicleType.AUTO
+                }
+                UserProfile(
+                    uid = doc.id.ifEmpty { uid },
+                    name = name,
+                    email = userEmail,
+                    phone = phone,
+                    city = city,
+                    state = state,
+                    vehicleType = vehicleType,
+                    plan = plan,
+                    planPrice = planPrice,
+                    planExpireMillis = planExpireMillis,
+                    isApproved = isApproved,
+                    isAdmin = isAdmin,
+                    isActive = isActive,
+                    referralCode = referralCode,
+                    createdAt = createdAt
+                )
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.w("FirebaseRepo", "fetchFirestoreUserProfile failed: ${e.message}")
+            null
+        }
+    }
+
+    fun checkUserProfileFromFirestore(
         uid: String,
-        onResult: (profile: UserProfile?, isProfileIncomplete: Boolean, isMembershipActive: Boolean) -> Unit
+        email: String,
+        onResult: (UserProfile?) -> Unit
     ) {
         scope.launch {
-            try {
-                val doc = firestore?.collection("users")?.document(uid)?.get()?.await()
-                if (doc != null && doc.exists()) {
-                    val mobile = doc.getString("mobile") ?: doc.getString("phone") ?: ""
-                    val city = doc.getString("city") ?: ""
-                    val state = doc.getString("state") ?: ""
-                    val name = doc.getString("name") ?: ""
-                    val email = doc.getString("email") ?: ""
-                    val plan = doc.getString("plan") ?: "7DAYS"
-                    val planPrice = doc.getLong("planPrice")?.toInt() ?: 129
-                    val planExpireMillis = doc.getLong("planExpireMillis") ?: 0L
-                    val isApproved = doc.getBoolean("isApproved") ?: false
-                    val isAdmin = doc.getBoolean("isAdmin") ?: false
-                    val isActive = doc.getBoolean("isActive") ?: true
-                    val vehicleTypeStr = doc.getString("vehicleType") ?: "AUTO"
-                    val vehicleType = com.example.model.VehicleType.fromString(vehicleTypeStr)
-                    val referralCode = doc.getString("referralCode") ?: "SMART50"
-
-                    val profile = UserProfile(
-                        uid = uid,
-                        name = name,
-                        email = email,
-                        phone = mobile,
-                        vehicleType = vehicleType,
-                        plan = plan,
-                        planPrice = planPrice,
-                        planExpireMillis = planExpireMillis,
-                        isApproved = isApproved,
-                        isAdmin = isAdmin,
-                        isActive = isActive,
-                        referralCode = referralCode,
-                        mobile = mobile,
-                        city = city,
-                        state = state
-                    )
-                    prefs.saveUserProfile(profile)
-
-                    val isIncomplete = mobile.trim().isEmpty() || city.trim().isEmpty() || state.trim().isEmpty()
-                    val isMembershipActive = isAdmin || isApproved || (planExpireMillis > System.currentTimeMillis()) || com.example.auth.PhoneAuthManager.isAdminAccount(mobile) || com.example.auth.PhoneAuthManager.isAdminAccount(email)
-
-                    withContext(Dispatchers.Main) {
-                        onResult(profile, isIncomplete, isMembershipActive)
-                    }
-                } else {
-                    // Document does not exist yet -> incomplete profile
-                    withContext(Dispatchers.Main) {
-                        onResult(null, true, false)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("FirebaseRepo", "checkUserFirestoreProfile error: ${e.message}")
-                val localProfile = prefs.userProfile.value
-                val isIncomplete = localProfile.effectiveMobile.trim().isEmpty() ||
-                        localProfile.city.trim().isEmpty() ||
-                        localProfile.state.trim().isEmpty()
-                val isMembershipActive = localProfile.isPlanValid || localProfile.isAdmin
-                withContext(Dispatchers.Main) {
-                    onResult(localProfile, isIncomplete, isMembershipActive)
-                }
+            val profile = fetchFirestoreUserProfile(uid, email)
+            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                onResult(profile)
             }
         }
     }
@@ -210,15 +244,11 @@ class FirebaseRepository(
                         "approvedAt" to submission.approvedAt
                     )
                 )?.await()
-                withContext(Dispatchers.Main) {
-                    onComplete(true)
-                }
+                onComplete(true)
             } catch (e: Exception) {
                 Log.w("FirebaseRepo", "Payment submission firestore fallback: ${e.message}")
                 // Still notify success locally
-                withContext(Dispatchers.Main) {
-                    onComplete(true)
-                }
+                onComplete(true)
             }
         }
     }

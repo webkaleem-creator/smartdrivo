@@ -341,13 +341,13 @@
       <h2 class="panel-title"><i class="fa-solid fa-id-card" style="color: var(--accent);"></i> Driver Directory</h2>
       <p class="panel-desc">All onboarded auto & bike drivers currently registered on SmartDrivo.</p>
 
-      <!-- 1. Search Box: Search user by phone number or email -->
+      <!-- 1. Search Box: Search user by name, mobile, city, or state -->
       <div style="margin-bottom: 18px; display: flex; align-items: center; gap: 10px; max-width: 480px; position: relative;">
         <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--text-dim); font-size: 13px; pointer-events: none;"></i>
         <input 
           type="text" 
           id="driverSearchInput" 
-          placeholder="Search driver by phone number or email..." 
+          placeholder="Search driver by name, mobile, city, state..." 
           oninput="filterDrivers()"
           style="width: 100%; padding: 10px 36px 10px 38px; background: #0D0F13; border: 1px solid var(--border); border-radius: 8px; color: #FFF; font-size: 13px;"
         >
@@ -365,8 +365,10 @@
       <table id="driversTable">
         <thead>
           <tr>
-            <th>Driver Name</th>
-            <th>Phone / Email</th>
+            <th>User Name</th>
+            <th>Mobile Number</th>
+            <th>City</th>
+            <th>State</th>
             <th>Vehicle</th>
             <th>Active Plan</th>
             <th>Expiry</th>
@@ -376,11 +378,34 @@
         </thead>
         <tbody>
           <tr>
+            <td>
+              <strong>Kaleem</strong>
+              <span class="badge" style="background: rgba(37,99,235,0.2); color: #60A5FA; font-size: 10px; margin-left: 6px;">ADMIN</span>
+            </td>
+            <td>
+              <div><strong>+91 9949957404</strong></div>
+              <div style="font-size: 11px; color: var(--text-dim);">kaleem.admin@smartdrivo.com</div>
+            </td>
+            <td><span style="color: #F8FAFC; font-weight: 600;">Hyderabad</span></td>
+            <td><span style="color: #94A3B8;">Telangana</span></td>
+            <td><span class="badge" style="background:#172554; color:#60A5FA;">CAR</span></td>
+            <td>Lifetime Admin</td>
+            <td>Unlimited</td>
+            <td><span class="badge badge-approved status-badge"><i class="fa-solid fa-circle-check"></i> Active</span></td>
+            <td>
+              <button type="button" class="btn btn-danger btn-sm toggle-status-btn" data-status="active" onclick="toggleDriverStatus(this)" title="Click to Deactivate driver">
+                <i class="fa-solid fa-toggle-on"></i> Deactivate
+              </button>
+            </td>
+          </tr>
+          <tr>
             <td><strong>Ramesh Kumar</strong></td>
             <td>
-              <div>+91 9876543210</div>
+              <div><strong>+91 9876543210</strong></div>
               <div style="font-size: 11px; color: var(--text-dim);">ramesh.auto@gmail.com</div>
             </td>
+            <td><span style="color: #F8FAFC; font-weight: 600;">Hyderabad</span></td>
+            <td><span style="color: #94A3B8;">Telangana</span></td>
             <td><span class="badge" style="background:#2C2215; color:#F59E0B;">AUTO</span></td>
             <td>7 Days (₹129)</td>
             <td>17/09/2026</td>
@@ -394,9 +419,11 @@
           <tr>
             <td><strong>Suresh Sharma</strong></td>
             <td>
-              <div>+91 9123456780</div>
+              <div><strong>+91 9123456780</strong></div>
               <div style="font-size: 11px; color: var(--text-dim);">suresh.rider@gmail.com</div>
             </td>
+            <td><span style="color: #F8FAFC; font-weight: 600;">Bengaluru</span></td>
+            <td><span style="color: #94A3B8;">Karnataka</span></td>
             <td><span class="badge" style="background:#172554; color:#60A5FA;">BIKE</span></td>
             <td>1 Month (₹329)</td>
             <td>10/10/2026</td>
@@ -410,9 +437,11 @@
           <tr>
             <td><strong>Amit Verma</strong></td>
             <td>
-              <div>+91 9988776655</div>
+              <div><strong>+91 9988776655</strong></div>
               <div style="font-size: 11px; color: var(--text-dim);">amit.verma@smartdrivo.in</div>
             </td>
+            <td><span style="color: #F8FAFC; font-weight: 600;">Hyderabad</span></td>
+            <td><span style="color: #94A3B8;">Telangana</span></td>
             <td><span class="badge" style="background:#2C2215; color:#F59E0B;">AUTO</span></td>
             <td>15 Days (₹199)</td>
             <td>28/09/2026</td>
@@ -424,9 +453,9 @@
             </td>
           </tr>
           <tr id="noDriversRow" style="display: none;">
-            <td colspan="7" style="text-align: center; padding: 24px; color: var(--text-dim);">
+            <td colspan="9" style="text-align: center; padding: 24px; color: var(--text-dim);">
               <i class="fa-solid fa-user-slash" style="font-size: 20px; margin-bottom: 8px; display: block; opacity: 0.5;"></i>
-              No drivers found matching phone number or email.
+              No drivers found matching name, mobile, city, or state.
             </td>
           </tr>
         </tbody>
@@ -546,7 +575,7 @@
       }
     }
 
-    // 1. Search Box: Filter Registered Drivers by Phone Number or Email
+    // 1. Search Box: Filter Registered Drivers by Name, Mobile, City, or State
     function filterDrivers() {
       const input = document.getElementById('driverSearchInput');
       const query = input ? input.value.toLowerCase().trim() : '';
@@ -560,11 +589,13 @@
 
       rows.forEach(row => {
         if (row.id === 'noDriversRow') return;
-        // Search in Phone / Email column (cell index 1) as well as driver name (cell index 0)
-        const phoneEmail = row.cells[1] ? row.cells[1].textContent.toLowerCase() : '';
+        // Search in Driver Name (0), Mobile/Email (1), City (2), State (3)
         const driverName = row.cells[0] ? row.cells[0].textContent.toLowerCase() : '';
+        const phoneEmail = row.cells[1] ? row.cells[1].textContent.toLowerCase() : '';
+        const city = row.cells[2] ? row.cells[2].textContent.toLowerCase() : '';
+        const state = row.cells[3] ? row.cells[3].textContent.toLowerCase() : '';
 
-        if (!query || phoneEmail.includes(query) || driverName.includes(query)) {
+        if (!query || driverName.includes(query) || phoneEmail.includes(query) || city.includes(query) || state.includes(query)) {
           row.style.display = '';
           visibleCount++;
         } else {

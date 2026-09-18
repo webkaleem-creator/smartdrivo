@@ -72,7 +72,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -94,6 +93,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
@@ -103,6 +103,7 @@ import com.example.data.PreferencesManager
 import com.example.model.MembershipPlan
 import com.example.model.PaymentStatus
 import com.example.model.PaymentSubmission
+import com.example.ui.components.QrCodeView
 import com.example.ui.components.SmartDrivoLogo
 import com.example.ui.theme.AccentGreen
 import com.example.ui.theme.BluePrimary
@@ -118,7 +119,6 @@ private val LightGrayText = Color(0xFF94A3B8)
 private val CardNavy = Color(0xFF132238)
 private val BorderNavy = Color(0xFF1E324F)
 
-@Immutable
 private data class FeatureItem(
     val title: String,
     val description: String,
@@ -143,42 +143,13 @@ fun WelcomeScreen(
     val userProfile by prefs.userProfile.collectAsState()
     val upiId by prefs.upiId.collectAsState()
 
-    // Auth State
-    var phoneNumber by remember { mutableStateOf("") }
-    var otpCode by remember { mutableStateOf("") }
-    var verificationId by remember { mutableStateOf("") }
-    var isOtpSent by remember { mutableStateOf(false) }
-    var isPhoneLoading by remember { mutableStateOf(false) }
+    // Auth State - Google Sign-In Only
     var isGoogleLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var infoMessage by remember { mutableStateOf<String?>(null) }
 
-    // Resend countdown timer (30s)
-    var resendCountdown by remember { mutableIntStateOf(0) }
-    LaunchedEffect(resendCountdown) {
-        if (resendCountdown > 0) {
-            delay(1000L)
-            resendCountdown -= 1
-        }
-    }
-
-    var showGoogleAccountFallbackDialog by remember { mutableStateOf(false) }
-    var fallbackCustomEmail by remember { mutableStateOf("") }
-
     LaunchedEffect(Unit) {
         PhoneAuthManager.init(context)
-    }
-
-    val isTestNumber by remember(phoneNumber) {
-        derivedStateOf { PhoneAuthManager.isTestPhoneNumber(phoneNumber) }
-    }
-
-    val isPhoneValid by remember(phoneNumber) {
-        derivedStateOf { phoneNumber.length == 10 && phoneNumber.all { it.isDigit() } }
-    }
-
-    val isOtpValid by remember(otpCode) {
-        derivedStateOf { otpCode.length == 6 && otpCode.all { it.isDigit() } }
     }
 
     // Plans & Payment
@@ -206,19 +177,19 @@ fun WelcomeScreen(
     val features = remember {
         listOf(
             FeatureItem(
-                title = "High-Speed Auto-Accept",
+                title = "Auto-Accept Orders",
                 description = "Captures orders on Rapido, Uber & Ola in 0.1s before other drivers can tap.",
                 icon = Icons.Default.ElectricBolt,
                 badge = "0.1s Fast"
             ),
             FeatureItem(
                 title = "Minimum Fare Filter",
-                description = "Auto-skips low-paying trips. Only accepts high-value rides matching your target (₹80+).",
+                description = "Auto-skips low-paying trips. Accepts high-value rides matching your target (₹80+).",
                 icon = Icons.Default.TrendingUp,
-                badge = "High Profit"
+                badge = "High Fare"
             ),
             FeatureItem(
-                title = "Smart Area & No-Go Zones",
+                title = "Smart Area Zones",
                 description = "Target busy delivery corridors and block remote drop-off areas automatically.",
                 icon = Icons.Default.LocationOn,
                 badge = "Custom Areas"
@@ -236,8 +207,8 @@ fun WelcomeScreen(
                 badge = "100% Safe"
             ),
             FeatureItem(
-                title = "Live Performance Analytics",
-                description = "Track daily accepted orders, fuel savings, and earnings growth across all platforms.",
+                title = "Performance Analytics",
+                description = "Track daily accepted orders, fuel savings, and earnings growth across platforms.",
                 icon = Icons.Default.BarChart,
                 badge = "Insights"
             )
@@ -248,31 +219,13 @@ fun WelcomeScreen(
     val handleSuccessfulLogin: (String) -> Unit = { identifier ->
         prefs.isLoggedIn = true
         prefs.hasOpenedBefore = true
-        val isAdmin = PhoneAuthManager.isAdminAccount(identifier)
-        if (isAdmin) {
-            val adminProfile = userProfile.copy(
-                uid = if (userProfile.uid.isNotEmpty()) userProfile.uid else "admin_9949957404",
-                name = if (userProfile.name.isNotEmpty()) userProfile.name else "Admin Driver",
-                phone = if (identifier.contains("@")) userProfile.phone.ifEmpty { "+919949957404" } else identifier,
-                email = if (identifier.contains("@")) identifier else userProfile.email.ifEmpty { PhoneAuthManager.ADMIN_EMAIL },
-                plan = "LIFETIME_ADMIN",
-                planPrice = 0,
-                planExpireMillis = System.currentTimeMillis() + (3650L * 24 * 60 * 60 * 1000L),
-                isApproved = true,
-                isAdmin = true,
-                isActive = true
-            )
-            prefs.saveUserProfile(adminProfile)
+        val updated = if (identifier.contains("@")) {
+            userProfile.copy(email = identifier)
         } else {
-            val updated = if (identifier.contains("@")) {
-                userProfile.copy(email = identifier)
-            } else {
-                userProfile.copy(phone = identifier)
-            }
-            prefs.saveUserProfile(updated)
+            userProfile.copy(phone = identifier)
         }
+        prefs.saveUserProfile(updated)
         onLoginSuccess(identifier)
-        onNavigateToHome()
     }
 
     Box(
@@ -295,96 +248,32 @@ fun WelcomeScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 2. Title "Welcome to SmartDrivo": 26sp bold, white color
+            // 2. Title "Welcome to SmartDrivo": clean display typography
             Text(
                 text = "Welcome to SmartDrivo",
                 fontSize = 26.sp,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.SemiBold,
                 color = Color.White,
                 textAlign = TextAlign.Center
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 3. Subtitle: 15sp, light gray color
+            // 3. Subtitle: clean normal font
             Text(
                 text = "Automated Ride Assistant for Rapido, Uber & Ola",
-                fontSize = 15.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.Normal,
                 color = LightGrayText,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 12.dp)
             )
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-            // 4. One-Tap Admin / Test Login Quick Banner
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        phoneNumber = PhoneAuthManager.TEST_PHONE_RAW
-                        errorMessage = null
-                        infoMessage = "Admin phone selected! OTP is ${PhoneAuthManager.TEST_OTP_CODE}"
-                    },
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0E281E)),
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, LogoGreenCircle.copy(alpha = 0.5f))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .background(LogoGreenCircle.copy(alpha = 0.2f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Science,
-                                contentDescription = "Test Account",
-                                tint = LogoGreenCircle,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Admin & Test Account (One-Tap)",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = LogoGreenCircle
-                            )
-                            Text(
-                                text = "${PhoneAuthManager.TEST_PHONE_NUMBER} • OTP: ${PhoneAuthManager.TEST_OTP_CODE}",
-                                fontSize = 11.sp,
-                                color = Color(0xFFB0DBC1)
-                            )
-                        }
-                    }
-                    Text(
-                        text = "Auto-Fill",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = LogoGreenCircle,
-                        modifier = Modifier
-                            .background(LogoGreenCircle.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
 
-            Spacer(modifier = Modifier.height(20.dp))
 
-            // 5. Auth Card with Phone Number + Send OTP Button
+            // 4. Google Sign-In Card (Google Only Authentication)
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = CardNavy),
@@ -394,380 +283,44 @@ fun WelcomeScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(20.dp),
+                        .padding(22.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    if (!isOtpSent) {
-                        // Phone Number Input
-                        OutlinedTextField(
-                            value = phoneNumber,
-                            onValueChange = { input ->
-                                if (input.length <= 10 && input.all { it.isDigit() }) {
-                                    phoneNumber = input
-                                    errorMessage = null
-                                    infoMessage = null
-                                }
-                            },
-                            label = { Text("10-digit Mobile Number", fontSize = 13.sp) },
-                            placeholder = { Text("e.g. 9949957404", color = Color(0xFF64748B), fontSize = 13.sp) },
-                            prefix = {
-                                Text(
-                                    text = "+91  ",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp
-                                )
-                            },
-                            trailingIcon = {
-                                if (phoneNumber.isNotEmpty()) {
-                                    IconButton(onClick = { phoneNumber = "" }) {
-                                        Icon(
-                                            Icons.Default.Close,
-                                            contentDescription = "Clear",
-                                            tint = LightGrayText,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                            },
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Phone,
-                                imeAction = ImeAction.Done
-                            ),
-                            keyboardActions = KeyboardActions(
-                                onDone = { focusManager.clearFocus() }
-                            ),
-                            singleLine = true,
+                    Text(
+                        text = "Sign In with Google",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Sign in securely with Google to access auto-accept, fare filters, and smart area automation.",
+                        fontSize = 13.sp,
+                        color = LightGrayText,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 18.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    if (errorMessage != null) {
+                        Card(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color(0xFF0A1628),
-                                unfocusedContainerColor = Color(0xFF0A1628),
-                                focusedBorderColor = BrightBlue,
-                                unfocusedBorderColor = BorderNavy,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedLabelColor = BrightBlue,
-                                unfocusedLabelColor = LightGrayText,
-                                cursorColor = BrightBlue
-                            )
-                        )
-
-                        if (isTestNumber) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    tint = LogoGreenCircle,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Test bypass recognized: instant OTP 123456",
-                                    color = LogoGreenCircle,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
-
-                        if (infoMessage != null) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = infoMessage!!,
-                                color = LogoGreenCircle,
-                                fontSize = 12.sp,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-
-                        if (errorMessage != null) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Default.Warning,
-                                    contentDescription = null,
-                                    tint = Color(0xFFEF4444),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = errorMessage!!,
-                                    color = Color(0xFFEF4444),
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(18.dp))
-
-                        // Send OTP button: full width, bright blue (#1E88E5)
-                        Button(
-                            onClick = {
-                                focusManager.clearFocus()
-                                if (isPhoneValid) {
-                                    if (activity == null) {
-                                        errorMessage = "Activity context required"
-                                        return@Button
-                                    }
-                                    isPhoneLoading = true
-                                    errorMessage = null
-                                    infoMessage = null
-
-                                    PhoneAuthManager.sendOtp(
-                                        activity = activity,
-                                        phoneNumber = phoneNumber,
-                                        onCodeSent = { vId ->
-                                            isPhoneLoading = false
-                                            verificationId = vId
-                                            isOtpSent = true
-                                            resendCountdown = 30
-                                            if (isTestNumber) {
-                                                otpCode = PhoneAuthManager.TEST_OTP_CODE
-                                            }
-                                        },
-                                        onAutoVerified = { verifiedPhone ->
-                                            isPhoneLoading = false
-                                            handleSuccessfulLogin(verifiedPhone)
-                                        },
-                                        onError = { error ->
-                                            isPhoneLoading = false
-                                            errorMessage = error
-                                        }
-                                    )
-                                } else {
-                                    errorMessage = "Please enter a valid 10-digit mobile number"
-                                }
-                            },
-                            enabled = !isPhoneLoading && !isGoogleLoading,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = BrightBlue,
-                                contentColor = Color.White,
-                                disabledContainerColor = Color(0xFF1E324F),
-                                disabledContentColor = Color(0xFF64748B)
-                            ),
-                            shape = RoundedCornerShape(12.dp)
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF3B1219)),
+                            shape = RoundedCornerShape(8.dp)
                         ) {
-                            if (isPhoneLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    color = Color.White,
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = "Sending OTP...",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp,
-                                    color = Color.White
-                                )
-                            } else {
-                                Text(
-                                    text = "Send OTP",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
-                                    color = Color.White
-                                )
-                            }
-                        }
-                    } else {
-                        // OTP Verification View
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = null,
-                                tint = BrightBlue,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Enter 6-Digit OTP",
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontSize = 14.sp
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        OutlinedTextField(
-                            value = otpCode,
-                            onValueChange = { input ->
-                                if (input.length <= 6 && input.all { it.isDigit() }) {
-                                    otpCode = input
-                                    errorMessage = null
-                                }
-                            },
-                            placeholder = { Text("• • • • • •", color = Color(0xFF64748B), fontSize = 18.sp) },
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.NumberPassword,
-                                imeAction = ImeAction.Done
-                            ),
-                            keyboardActions = KeyboardActions(
-                                onDone = { focusManager.clearFocus() }
-                            ),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color(0xFF0A1628),
-                                unfocusedContainerColor = Color(0xFF0A1628),
-                                focusedBorderColor = BrightBlue,
-                                unfocusedBorderColor = BorderNavy,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            )
-                        )
-
-                        if (errorMessage != null) {
-                            Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 text = errorMessage!!,
-                                color = Color(0xFFEF4444),
+                                color = Color(0xFFFF6B6B),
                                 fontSize = 12.sp,
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.padding(10.dp)
                             )
                         }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // Verify Button
-                        Button(
-                            onClick = {
-                                focusManager.clearFocus()
-                                val cleanOtp = otpCode.trim()
-                                if (cleanOtp.length == 6) {
-                                    isPhoneLoading = true
-                                    errorMessage = null
-
-                                    PhoneAuthManager.verifyOtp(
-                                        phone = phoneNumber,
-                                        verificationId = verificationId,
-                                        otpCode = cleanOtp,
-                                        onSuccess = { verifiedPhone ->
-                                            isPhoneLoading = false
-                                            handleSuccessfulLogin(verifiedPhone)
-                                        },
-                                        onError = { err ->
-                                            isPhoneLoading = false
-                                            errorMessage = err
-                                        }
-                                    )
-                                } else {
-                                    errorMessage = "Please enter 6-digit OTP code"
-                                }
-                            },
-                            enabled = !isPhoneLoading,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = BrightBlue,
-                                contentColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            if (isPhoneLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    color = Color.White,
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Verifying...", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            } else {
-                                Text("Verify & Sign In", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            TextButton(
-                                onClick = {
-                                    isOtpSent = false
-                                    otpCode = ""
-                                    errorMessage = null
-                                }
-                            ) {
-                                Text("Change Number", color = LightGrayText, fontSize = 12.sp)
-                            }
-
-                            TextButton(
-                                onClick = {
-                                    if (resendCountdown <= 0 && activity != null) {
-                                        isPhoneLoading = true
-                                        errorMessage = null
-                                        PhoneAuthManager.sendOtp(
-                                            activity = activity,
-                                            phoneNumber = phoneNumber,
-                                            onCodeSent = { vId ->
-                                                isPhoneLoading = false
-                                                verificationId = vId
-                                                resendCountdown = 30
-                                                infoMessage = "New OTP sent!"
-                                            },
-                                            onAutoVerified = { verifiedPhone ->
-                                                isPhoneLoading = false
-                                                handleSuccessfulLogin(verifiedPhone)
-                                            },
-                                            onError = { error ->
-                                                isPhoneLoading = false
-                                                errorMessage = error
-                                            }
-                                        )
-                                    }
-                                },
-                                enabled = resendCountdown <= 0 && !isPhoneLoading
-                            ) {
-                                if (resendCountdown > 0) {
-                                    Text("Resend in ${resendCountdown}s", color = Color(0xFF64748B), fontSize = 12.sp)
-                                } else {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Refresh, contentDescription = null, tint = BrightBlue, modifier = Modifier.size(14.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Resend OTP", color = BrightBlue, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                    }
-                                }
-                            }
-                        }
+                        Spacer(modifier = Modifier.height(14.dp))
                     }
 
-                    // Divider with "OR"
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        HorizontalDivider(modifier = Modifier.weight(1f), color = BorderNavy)
-                        Text(
-                            text = "  OR  ",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF64748B)
-                        )
-                        HorizontalDivider(modifier = Modifier.weight(1f), color = BorderNavy)
-                    }
-
-                    // 6. Google Sign in button: full width, white background
+                    // Google Sign In button: full width, white background
                     Button(
                         onClick = {
                             isGoogleLoading = true
@@ -790,15 +343,15 @@ fun WelcomeScreen(
                                     },
                                     onFallbackPrompt = { _ ->
                                         isGoogleLoading = false
-                                        showGoogleAccountFallbackDialog = true
+                                        errorMessage = "Google Play Services was unavailable or cancelled. Please try again."
                                     }
                                 )
                             }
                         },
-                        enabled = !isGoogleLoading && !isPhoneLoading,
+                        enabled = !isGoogleLoading,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(50.dp),
+                            .height(52.dp),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color.White,
@@ -818,52 +371,36 @@ fun WelcomeScreen(
                             Text(
                                 text = "Connecting Google...",
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 14.sp,
+                                fontSize = 15.sp,
                                 color = Color(0xFF1F2937)
                             )
                         } else {
                             Image(
                                 painter = painterResource(id = R.drawable.ic_google_logo),
                                 contentDescription = "Google Logo",
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                             Spacer(modifier = Modifier.width(12.dp))
                             Text(
                                 text = "Sign in with Google",
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
                                 color = Color(0xFF1F2937)
                             )
                         }
                     }
-                }
-            }
 
-            Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-            // 7. Explore as Guest / Skip Link
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "First time here?",
-                    color = LightGrayText,
-                    fontSize = 14.sp
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                TextButton(onClick = onNavigateToHome) {
                     Text(
-                        text = "Explore as Guest →",
-                        color = BrightBlue,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        text = "🔒 Secured by Firebase Authentication",
+                        fontSize = 11.sp,
+                        color = Color(0xFF64748B)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Trust & Security Notice
             Row(
@@ -874,20 +411,20 @@ fun WelcomeScreen(
                     imageVector = Icons.Default.Security,
                     contentDescription = null,
                     tint = Color(0xFF64748B),
-                    modifier = Modifier.size(14.dp)
+                    modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "Secured by Firebase Authentication • Safe for Drivers",
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     color = Color(0xFF64748B),
                     textAlign = TextAlign.Center
                 )
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
-            // 8. Key Features Highlights
+            // 8. Key Features Highlights (Compact & responsive without badge overflow)
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = CardNavy),
@@ -895,8 +432,8 @@ fun WelcomeScreen(
                 border = BorderStroke(1.dp, BorderNavy)
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -904,20 +441,29 @@ fun WelcomeScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "⚡ Key SmartDrivo Features",
+                            text = "⚡ Key Features",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = Color.White,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
-                        Text(
-                            text = "Auto-Accept 0.1s",
-                            fontSize = 11.sp,
-                            color = LogoGreenCircle,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .background(LogoGreenCircle.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 8.dp, vertical = 2.5.dp)
+                        ) {
+                            Text(
+                                text = "Auto-Accept 0.1s",
+                                fontSize = 11.sp,
+                                color = LogoGreenCircle,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                        }
                     }
 
-                    HorizontalDivider(color = BorderNavy)
+                    HorizontalDivider(color = BorderNavy.copy(alpha = 0.7f))
 
                     features.forEachIndexed { index, feature ->
                         Row(
@@ -926,7 +472,7 @@ fun WelcomeScreen(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
+                                    .size(30.dp)
                                     .background(DarkNavyBackground, RoundedCornerShape(8.dp))
                                     .border(1.dp, BorderNavy, RoundedCornerShape(8.dp)),
                                 contentAlignment = Alignment.Center
@@ -935,37 +481,45 @@ fun WelcomeScreen(
                                     imageVector = feature.icon,
                                     contentDescription = null,
                                     tint = LogoGreenCircle,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
 
-                            Spacer(modifier = Modifier.width(12.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
 
                             Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
                                     Text(
                                         text = feature.title,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
                                     )
                                     if (feature.badge != null) {
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Box(
                                             modifier = Modifier
                                                 .background(LogoGreenCircle.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                                                .padding(horizontal = 6.dp, vertical = 1.5.dp)
                                         ) {
                                             Text(
                                                 text = feature.badge,
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = LogoGreenCircle
+                                                color = LogoGreenCircle,
+                                                maxLines = 1
                                             )
                                         }
                                     }
                                 }
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Spacer(modifier = Modifier.height(1.dp))
                                 Text(
                                     text = feature.description,
                                     fontSize = 11.sp,
@@ -976,13 +530,13 @@ fun WelcomeScreen(
                         }
 
                         if (index < features.size - 1) {
-                            HorizontalDivider(color = BorderNavy.copy(alpha = 0.5f))
+                            HorizontalDivider(color = BorderNavy.copy(alpha = 0.35f))
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // 9. Membership Plans Section
             Card(
@@ -1123,93 +677,5 @@ fun WelcomeScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
         }
-    }
-
-    // Google Sign-In Fallback Account Chooser Dialog
-    if (showGoogleAccountFallbackDialog) {
-        AlertDialog(
-            onDismissRequest = { showGoogleAccountFallbackDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Image(
-                        painter = painterResource(id = R.drawable.ic_google_logo),
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Select Google Account", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Choose an account to sign in with Google Firebase Auth:",
-                        fontSize = 12.sp,
-                        color = Color(0xFF94A3B8)
-                    )
-
-                    val demoAccounts = listOf(
-                        "driver.smartdrivo@gmail.com",
-                        "admin.drivo@gmail.com",
-                        "kkaleem7u@gmail.com"
-                    )
-
-                    demoAccounts.forEach { email ->
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    showGoogleAccountFallbackDialog = false
-                                    handleSuccessfulLogin(email)
-                                },
-                            shape = RoundedCornerShape(8.dp),
-                            color = CardNavy,
-                            border = BorderStroke(1.dp, BorderNavy)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Image(
-                                    painter = painterResource(id = R.drawable.ic_google_logo),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(email, fontSize = 13.sp, color = Color.White)
-                            }
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = fallbackCustomEmail,
-                        onValueChange = { fallbackCustomEmail = it },
-                        placeholder = { Text("Or type your Google email", fontSize = 12.sp) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val chosen = fallbackCustomEmail.trim().ifEmpty { "driver.smartdrivo@gmail.com" }
-                        showGoogleAccountFallbackDialog = false
-                        handleSuccessfulLogin(chosen)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = BrightBlue)
-                ) {
-                    Text("Continue", color = Color.White)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showGoogleAccountFallbackDialog = false }) {
-                    Text("Cancel", color = LightGrayText)
-                }
-            },
-            containerColor = CardNavy,
-            textContentColor = Color.White,
-            titleContentColor = Color.White
-        )
     }
 }

@@ -2,45 +2,72 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
+// Primary Brand Colors - Blue Theme (Flat, Clean)
+val BluePrimary = Color(0xFF1E88E5)        // Clean vibrant Blue (#1E88E5)
+val BlueDark = Color(0xFF1565C0)           // Darker Blue for active/accent
+val BlueLight = Color(0xFF42A5F5)          // Lighter Blue
+val BlueContainer = Color(0xFFE3F2FD)      // Light Blue pill/capsule background (#E3F2FD)
+val BlueBorder = Color(0xFF90CAF9)         // Light Blue border
 
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
+// Backgrounds & Surfaces (Light Gray Screen Background + Pure White Cards)
+val LightBackground = Color(0xFFF5F5F5)    // Light Gray screen background (#F5F5F5)
+val LightSurface = Color(0xFFFFFFFF)       // Crisp pure white surface (#FFFFFF)
+val CardBackground = Color(0xFFFFFFFF)     // Pure White card (#FFFFFF)
+val CardBorderDefault = Color(0xFFE2E8F0)  // Flat subtle border (#E2E8F0)
+val CardBorderFocus = Color(0xFF93C5FD)    // Subtle blue focus border
 
-// SmartDrivo Brand & Theme Colors
-val BluePrimary = Color(0xFF2563EB)
-val BlueSecondary = Color(0xFF1D4ED8)
-val BlueContainer = Color(0xFFEFF6FF)
-val BlueBorder = Color(0xFFBFDBFE)
+// Dark Typography for Light Backgrounds
+val TextDarkPrimary = Color(0xFF0F172A)    // High contrast slate (#0F172A)
+val TextDarkSecondary = Color(0xFF475569)  // Medium contrast slate (#475569)
+val TextDarkTertiary = Color(0xFF94A3B8)   // Muted contrast slate (#94A3B8)
 
-val CardBackground = Color(0xFFFFFFFF)
-val CardBorderDefault = Color(0xFFE2E8F0)
-val LightBackground = Color(0xFFF8FAFC)
-val LightSurface = Color(0xFFFFFFFF)
+// Status Colors (Flat, clean)
+val StatusActiveGreen = Color(0xFF10B981)
+val StatusActiveGreenBg = Color(0xFFECFDF5)
+val StatusActiveGreenBorder = Color(0xFFA7F3D0)
 
-val TextDarkPrimary = Color(0xFF0F172A)
-val TextDarkSecondary = Color(0xFF475569)
-val TextDarkTertiary = Color(0xFF94A3B8)
+val StatusInactiveRed = Color(0xFFEF4444)
+val StatusInactiveRedBg = Color(0xFFFEF2F2)
+val StatusInactiveRedBorder = Color(0xFFFECACA)
 
-val AccentGreen = Color(0xFF10B981)
-
-val StatusActiveGreen = Color(0xFF16A34A)
-val StatusActiveGreenBg = Color(0xFFDCFCE7)
-val StatusActiveGreenBorder = Color(0xFF86EFAC)
-
-val StatusInactiveRed = Color(0xFFDC2626)
-val StatusInactiveRedBg = Color(0xFFFEE2E2)
-val StatusInactiveRedBorder = Color(0xFFFCA5A5)
-
-val StatusWarningYellow = Color(0xFFD97706)
-val StatusWarningYellowBg = Color(0xFFFEF3C7)
+val StatusWarningYellow = Color(0xFFF59E0B)
+val StatusWarningYellowBg = Color(0xFFFFFBEB)
 val StatusWarningYellowBorder = Color(0xFFFDE68A)
 
+// Platform Colors
 val PlatformRapido = Color(0xFFF59E0B)
-val PlatformRapidoBg = Color(0xFFFEF3C7)
+val PlatformRapidoBg = Color(0xFFFFFBEB)
+val PlatformUber = Color(0xFF1E293B)
+val PlatformOla = Color(0xFF10B981)
 
-val PlatformUber = Color(0xFF000000)
-val PlatformOla = Color(0xFF22C55E)
+// Backward-compatibility Aliases (pointing to Blue theme)
+val OrangePrimary = BluePrimary
+val OrangeDark = BlueDark
+val OrangeLight = BlueLight
+val OrangeContainer = BlueContainer
+val OrangeBorder = BlueBorder
+
+val BlueSecondary = BluePrimary
+
+val AccentGreen = StatusActiveGreen
+val AccentRed = StatusInactiveRed
+val AccentYellow = StatusWarningYellow
+val AccentBlue = BluePrimary
+val AccentUber = PlatformUber
+val AccentOla = PlatformOla
+
+val DarkBackground = LightBackground
+val DarkSurface = LightSurface
+val DarkCard = CardBackground
+val DarkCardBorder = CardBorderDefault
+
+val TextPrimaryDark = TextDarkPrimary
+val TextSecondaryDark = TextDarkSecondary
+val TextTertiaryDark = TextDarkTertiary
+
+val LightCard = CardBackground
+val LightCardBorder = CardBorderDefault
+val TextPrimaryLight = TextDarkPrimary
+val TextSecondaryLight = TextDarkSecondary
+
+

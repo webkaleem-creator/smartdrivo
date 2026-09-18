@@ -16,22 +16,9 @@ import java.util.concurrent.TimeUnit
 object PhoneAuthManager {
     private const val TAG = "PhoneAuthManager"
 
-    // Test bypass and Admin credentials
-    const val TEST_PHONE_NUMBER = "+919949957404"
-    const val TEST_PHONE_RAW = "9949957404"
-    const val TEST_OTP_CODE = "123456"
-    const val ADMIN_EMAIL = "webkaleem@gmail.com"
-    private const val TEST_VERIFICATION_ID = "SMARTDRIVO_TEST_VERIFICATION_ID"
-
-    fun isAdminAccount(identifier: String): Boolean {
-        val digits = identifier.filter { it.isDigit() }
-        val isPhone = digits == TEST_PHONE_RAW || digits == "91$TEST_PHONE_RAW" || normalizePhoneNumber(identifier) == TEST_PHONE_NUMBER
-        val isEmail = identifier.trim().equals(ADMIN_EMAIL, ignoreCase = true)
-        return isPhone || isEmail
-    }
-
     private var auth: FirebaseAuth? = null
     private var resendToken: PhoneAuthProvider.ForceResendingToken? = null
+    private var lastPhoneNumber: String? = null
 
     fun init(context: Context) {
         try {
@@ -69,17 +56,6 @@ object PhoneAuthManager {
         }
     }
 
-    fun isTestPhoneNumber(input: String): Boolean {
-        val digits = input.filter { it.isDigit() }
-        return digits == TEST_PHONE_RAW ||
-                digits == "91$TEST_PHONE_RAW" ||
-                normalizePhoneNumber(input) == TEST_PHONE_NUMBER
-    }
-
-    fun isTestOtpValid(phone: String, otp: String): Boolean {
-        return isTestPhoneNumber(phone) && otp.trim() == TEST_OTP_CODE
-    }
-
     fun sendOtp(
         activity: Activity,
         phoneNumber: String,
@@ -90,69 +66,30 @@ object PhoneAuthManager {
         val formattedPhone = normalizePhoneNumber(phoneNumber)
         Log.i(TAG, "Initiating OTP send for: $formattedPhone")
 
-        // 1. Check for test phone number bypass
-        if (isTestPhoneNumber(phoneNumber)) {
-            Log.i(TAG, "🧪 Test phone number detected: $formattedPhone. Fast-tracking test OTP verification ($TEST_OTP_CODE).")
-            // Instantly notify code sent for test phone
-            onCodeSent(TEST_VERIFICATION_ID)
-
-            // Also trigger standard Firebase Phone Auth in background if Firebase is configured
-            val firebaseAuth = getAuthInstance()
-            if (firebaseAuth != null) {
-                try {
-                    val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
-                        override fun onVerificationCompleted(credential: PhoneAuthCredential) {
-                            Log.i(TAG, "Firebase test verification completed automatically")
-                        }
-                        override fun onVerificationFailed(e: FirebaseException) {
-                            Log.d(TAG, "Firebase test verification background check note: ${e.message}")
-                        }
-                        override fun onCodeSent(
-                            verificationId: String,
-                            token: PhoneAuthProvider.ForceResendingToken
-                        ) {
-                            resendToken = token
-                            Log.i(TAG, "Firebase test code registered: $verificationId")
-                        }
-                    }
-                    val options = PhoneAuthOptions.newBuilder(firebaseAuth)
-                        .setPhoneNumber(formattedPhone)
-                        .setTimeout(60L, TimeUnit.SECONDS)
-                        .setActivity(activity)
-                        .setCallbacks(callbacks)
-                        .build()
-                    PhoneAuthProvider.verifyPhoneNumber(options)
-                } catch (e: Exception) {
-                    Log.d(TAG, "Firebase background test phone verification skipped: ${e.message}")
-                }
-            }
-            return
-        }
-
-        // 2. Standard Firebase Phone Authentication
         val firebaseAuth = getAuthInstance()
         if (firebaseAuth == null) {
-            onError("Firebase Auth is not available. Please check network connection.")
+            Log.e(TAG, "FirebaseAuth is null during sendOtp")
+            onError("Firebase Authentication is not available. Please check network connection.")
             return
         }
 
         val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
             override fun onVerificationCompleted(credential: PhoneAuthCredential) {
-                Log.i(TAG, "Phone auto-verification completed automatically")
+                Log.i(TAG, "✓ Phone auto-verification completed automatically for $formattedPhone")
                 val code = credential.smsCode
                 if (!code.isNullOrEmpty()) {
-                    Log.d(TAG, "SMS code auto-retrieved")
+                    Log.d(TAG, "SMS code auto-retrieved: $code")
                 }
                 signInWithCredential(credential, formattedPhone, onAutoVerified, onError)
             }
 
             override fun onVerificationFailed(e: FirebaseException) {
-                Log.e(TAG, "Phone verification failed: ${e.message}", e)
+                Log.e(TAG, "Firebase phone verification failed for $formattedPhone: ${e.message}", e)
                 val friendlyMessage = when (e) {
                     is FirebaseAuthInvalidCredentialsException ->
                         "Invalid phone number or verification code. Please check your details."
                     is FirebaseTooManyRequestsException ->
-                        "Too many SMS requests sent. Please wait a few minutes or use the test phone number."
+                        "SMS quota exceeded or too many requests. Please wait a few minutes."
                     else ->
                         e.localizedMessage ?: "Failed to send SMS code. Please try again."
                 }
@@ -163,8 +100,9 @@ object PhoneAuthManager {
                 verificationId: String,
                 token: PhoneAuthProvider.ForceResendingToken
             ) {
-                Log.i(TAG, "SMS Code sent successfully. Verification ID: $verificationId")
+                Log.i(TAG, "Firebase SMS code sent successfully to $formattedPhone. Verification ID: $verificationId")
                 resendToken = token
+                lastPhoneNumber = formattedPhone
                 onCodeSent(verificationId)
             }
         }
@@ -176,13 +114,14 @@ object PhoneAuthManager {
                 .setActivity(activity)
                 .setCallbacks(callbacks)
 
-            resendToken?.let { token ->
-                optionsBuilder.setForceResendingToken(token)
+            if (resendToken != null && lastPhoneNumber == formattedPhone) {
+                optionsBuilder.setForceResendingToken(resendToken!!)
             }
 
+            Log.i(TAG, "Triggering PhoneAuthProvider.verifyPhoneNumber for SMS OTP to $formattedPhone")
             PhoneAuthProvider.verifyPhoneNumber(optionsBuilder.build())
         } catch (e: Exception) {
-            Log.e(TAG, "Error calling verifyPhoneNumber: ${e.message}", e)
+            Log.e(TAG, "Error calling PhoneAuthProvider.verifyPhoneNumber: ${e.message}", e)
             onError("Error initiating phone verification: ${e.localizedMessage}")
         }
     }
@@ -197,38 +136,14 @@ object PhoneAuthManager {
         val formattedPhone = normalizePhoneNumber(phone)
         val trimmedOtp = otpCode.trim()
 
-        // 1. Check Test Phone Number & Test OTP Bypass
-        if (isTestPhoneNumber(phone)) {
-            if (trimmedOtp == TEST_OTP_CODE) {
-                Log.i(TAG, "✓ Test OTP 123456 verified successfully for $formattedPhone! Bypassing SMS verification.")
-                // Attempt anonymous sign in if not logged in to get a valid Firebase user UID
-                val firebaseAuth = getAuthInstance()
-                if (firebaseAuth != null && firebaseAuth.currentUser == null) {
-                    firebaseAuth.signInAnonymously().addOnCompleteListener { task ->
-                        if (task.isSuccessful) {
-                            Log.i(TAG, "Signed in anonymously for test session UID: ${firebaseAuth.currentUser?.uid}")
-                        }
-                        onSuccess(formattedPhone)
-                    }
-                } else {
-                    onSuccess(formattedPhone)
-                }
-                return
-            } else {
-                onError("Incorrect test OTP. For $TEST_PHONE_RAW, please enter code: $TEST_OTP_CODE")
-                return
-            }
-        }
-
-        // 2. Standard Firebase OTP Verification
-        val firebaseAuth = getAuthInstance()
-        if (firebaseAuth == null) {
-            onError("Firebase Auth is not available.")
+        if (verificationId.isEmpty()) {
+            onError("Invalid verification session. Please request a new SMS OTP.")
             return
         }
 
-        if (verificationId.isEmpty()) {
-            onError("Missing verification session. Please resend the OTP.")
+        val firebaseAuth = getAuthInstance()
+        if (firebaseAuth == null) {
+            onError("Firebase Authentication is not available. Please check network connection.")
             return
         }
 
@@ -249,7 +164,8 @@ object PhoneAuthManager {
     ) {
         val firebaseAuth = getAuthInstance()
         if (firebaseAuth == null) {
-            onSuccess(phone)
+            Log.e(TAG, "signInWithCredential failed: FirebaseAuth is null")
+            onError("Firebase Authentication is not available.")
             return
         }
 
@@ -264,8 +180,8 @@ object PhoneAuthManager {
                     val e = task.exception
                     Log.e(TAG, "Firebase signInWithCredential failed: ${e?.message}", e)
                     val message = when (e) {
-                        is FirebaseAuthInvalidCredentialsException -> "The OTP code entered is incorrect or has expired."
-                        else -> e?.localizedMessage ?: "Failed to verify OTP. Please try again."
+                        is FirebaseAuthInvalidCredentialsException -> "The SMS OTP code entered is incorrect or has expired."
+                        else -> e?.localizedMessage ?: "Failed to verify SMS OTP. Please try again."
                     }
                     onError(message)
                 }
@@ -288,7 +204,7 @@ object PhoneAuthManager {
                 .addOnCompleteListener { task ->
                     if (task.isSuccessful) {
                         val user = firebaseAuth.currentUser
-                        val emailOrUid = user?.email ?: user?.uid ?: ADMIN_EMAIL
+                        val emailOrUid = user?.email ?: user?.uid ?: ""
                         Log.i(TAG, "✓ Firebase Google Sign-In Successful! UID: ${user?.uid}, Email: $emailOrUid")
                         onSuccess(emailOrUid)
                     } else {

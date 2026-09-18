@@ -113,8 +113,8 @@ fun GuestScreen(
         item {
             FeatureItem(
                 icon = Icons.Default.Speed,
-                title = "Ultra-Fast Auto Accept",
-                description = "Accept orders in 1ms to 50ms before other captains can claim them."
+                title = "Fast Auto Accept",
+                description = "Quickly accepts orders matching your preferences as soon as they appear."
             )
         }
 

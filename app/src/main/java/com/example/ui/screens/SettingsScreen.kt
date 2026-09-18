@@ -35,6 +35,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
@@ -72,6 +73,8 @@ import com.example.ui.theme.PlatformUber
 import com.example.ui.theme.TextDarkPrimary
 import com.example.ui.theme.TextDarkSecondary
 import com.example.ui.theme.TextDarkTertiary
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -85,7 +88,23 @@ fun SettingsScreen(
 
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    var snackbarJob by remember { mutableStateOf<Job?>(null) }
     var hasUnsavedChanges by rememberSaveable { mutableStateOf(false) }
+
+    val showSavedSnackbar: () -> Unit = {
+        snackbarJob?.cancel()
+        snackbarJob = coroutineScope.launch {
+            val displayJob = launch {
+                snackbarHostState.showSnackbar(
+                    message = "Settings Saved ✓",
+                    duration = SnackbarDuration.Indefinite
+                )
+            }
+            delay(2000L)
+            snackbarHostState.currentSnackbarData?.dismiss()
+            displayJob.cancel()
+        }
+    }
 
     var minFareText by rememberSaveable {
         mutableStateOf(
@@ -159,10 +178,10 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item(key = "top_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(4.dp)) }
+            item { Spacer(modifier = Modifier.height(4.dp)) }
 
             // 1. FARE & DISTANCE FILTERS (with Fastest Mode toggle)
-            item(key = "fare_distance_section", contentType = "settings_card") {
+            item {
                 SectionHeader("1. FARE & DISTANCE FILTERS")
                 Card(
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
@@ -182,6 +201,7 @@ fun SettingsScreen(
                             isChecked = settings.isFastestModeEnabled,
                             onCheckedChange = { isFastest ->
                                 prefs.saveAppSettings(settings.copy(isFastestModeEnabled = isFastest))
+                                showSavedSnackbar()
                             }
                         )
 
@@ -439,11 +459,9 @@ fun SettingsScreen(
                                     )
                                 )
                                 hasUnsavedChanges = false
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar("Saved ✓")
-                                }
+                                showSavedSnackbar()
                             },
-                            enabled = hasUnsavedChanges,
+                            enabled = true,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(50.dp)
@@ -451,9 +469,7 @@ fun SettingsScreen(
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = BluePrimary,
-                                contentColor = Color.White,
-                                disabledContainerColor = Color(0xFFE0E0E0),
-                                disabledContentColor = Color(0xFF9E9E9E)
+                                contentColor = Color.White
                             )
                         ) {
                             Icon(
@@ -473,7 +489,7 @@ fun SettingsScreen(
             }
 
             // 2. SUPPORTED PLATFORMS (Rapido, Uber, Ola toggles)
-            item(key = "platforms_section", contentType = "settings_card") {
+            item {
                 SectionHeader("2. SUPPORTED PLATFORMS")
                 Card(
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
@@ -494,6 +510,7 @@ fun SettingsScreen(
                             isChecked = settings.rapidoEnabled,
                             onCheckedChange = { isEnabled ->
                                 prefs.saveAppSettings(settings.copy(rapidoEnabled = isEnabled))
+                                showSavedSnackbar()
                             }
                         )
 
@@ -508,6 +525,7 @@ fun SettingsScreen(
                             isChecked = settings.uberEnabled,
                             onCheckedChange = { isEnabled ->
                                 prefs.saveAppSettings(settings.copy(uberEnabled = isEnabled))
+                                showSavedSnackbar()
                             }
                         )
 
@@ -522,13 +540,14 @@ fun SettingsScreen(
                             isChecked = settings.olaEnabled,
                             onCheckedChange = { isEnabled ->
                                 prefs.saveAppSettings(settings.copy(olaEnabled = isEnabled))
+                                showSavedSnackbar()
                             }
                         )
                     }
                 }
             }
 
-            item(key = "bottom_spacer", contentType = "spacer") {
+            item {
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }

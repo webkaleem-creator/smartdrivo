@@ -8,6 +8,8 @@ data class UserProfile(
     val name: String = "",
     val email: String = "",
     val phone: String = "",
+    val city: String = "",
+    val state: String = "",
     val vehicleType: VehicleType = VehicleType.AUTO,
     val plan: String = "7DAYS",
     val planPrice: Int = 129,
@@ -17,9 +19,7 @@ data class UserProfile(
     val isActive: Boolean = true,
     val referralCode: String = "SMART50",
     val createdAt: Long = System.currentTimeMillis(),
-    val mobile: String = "",
-    val city: String = "",
-    val state: String = ""
+    val mobile: String = ""
 ) {
     val isPlanValid: Boolean
         get() = isApproved && (planExpireMillis > System.currentTimeMillis())
