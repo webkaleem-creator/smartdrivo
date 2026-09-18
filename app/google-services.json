@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "726018491881",
+    "project_id": "smartdrivo",
+    "storage_bucket": "smartdrivo.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:726018491881:android:smartdrivoandroidkrmx",
+        "android_client_info": {
+          "package_name": "com.aistudio.smartdrivo.krmx"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "726018491881-mnmel1slshsfippd0npar09s6j42e3fj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAoTc4WzouWgMHza-rHaRaBRJ1BO7p5gO0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "726018491881-mnmel1slshsfippd0npar09s6j42e3fj.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

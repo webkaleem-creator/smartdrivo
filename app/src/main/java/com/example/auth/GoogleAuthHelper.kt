@@ -14,20 +14,47 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 object GoogleAuthHelper {
     private const val TAG = "GoogleAuthHelper"
 
-    const val DEFAULT_SERVER_CLIENT_ID = "726018491881-apps.googleusercontent.com"
+    // Primary Web OAuth Client ID for Firebase project smartdrivo (726018491881)
+    const val DEFAULT_SERVER_CLIENT_ID = "726018491881-mnmel1slshsfippd0npar09s6j42e3fj.apps.googleusercontent.com"
+
+    fun getServerClientId(context: Context): String {
+        return try {
+            val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+            if (resId != 0) {
+                val fromRes = context.getString(resId)
+                if (fromRes.isNotBlank() && !fromRes.contains("examplewebclientid")) {
+                    Log.d(TAG, "Using web client ID from resources: $fromRes")
+                    return fromRes
+                }
+            }
+            DEFAULT_SERVER_CLIENT_ID
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to resolve default_web_client_id from resources: ${e.message}")
+            DEFAULT_SERVER_CLIENT_ID
+        }
+    }
 
     suspend fun initiateGoogleSignIn(
         context: Context,
-        serverClientId: String = DEFAULT_SERVER_CLIENT_ID,
+        serverClientId: String? = null,
         onTokenReceived: (idToken: String) -> Unit,
         onFallbackPrompt: (errorMessage: String) -> Unit
     ) {
+        val targetClientId = if (serverClientId.isNullOrBlank() ||
+            serverClientId.contains("examplewebclientid")
+        ) {
+            getServerClientId(context)
+        } else {
+            serverClientId
+        }
+
+        Log.i(TAG, "Initiating Google Sign-In with serverClientId: $targetClientId")
         val credentialManager = CredentialManager.create(context)
 
         try {
             val googleIdOption = GetGoogleIdOption.Builder()
                 .setFilterByAuthorizedAccounts(false)
-                .setServerClientId(serverClientId)
+                .setServerClientId(targetClientId)
                 .setAutoSelectEnabled(false)
                 .build()
 
@@ -53,16 +80,17 @@ object GoogleAuthHelper {
                 onFallbackPrompt("Unexpected credential type: ${credential.type}")
             }
         } catch (e: GetCredentialCancellationException) {
-            Log.d(TAG, "User cancelled Google credential dialog")
+            Log.d(TAG, "User cancelled Google credential dialog: ${e.message}")
+            onFallbackPrompt("Sign-in cancelled")
         } catch (e: NoCredentialException) {
-            Log.w(TAG, "No Google accounts available on device/emulator: ${e.message}")
-            onFallbackPrompt("No active Google account found on device. Sign in with Google account or admin email.")
+            Log.w(TAG, "NoCredentialException: ${e.message}. Package: ${context.packageName}, ClientId: $targetClientId")
+            onFallbackPrompt("No Google credentials available on device. Ensure a Google account is logged in or use Admin Login.")
         } catch (e: GetCredentialException) {
             Log.w(TAG, "GetCredentialException: ${e.message}")
             onFallbackPrompt("Google Sign-In: ${e.message}")
         } catch (e: Exception) {
             Log.e(TAG, "General exception in Google sign-in: ${e.message}", e)
-            onFallbackPrompt("Google Sign-In: ${e.message}")
+            onFallbackPrompt("Google Sign-In error: ${e.message}")
         }
     }
 }
