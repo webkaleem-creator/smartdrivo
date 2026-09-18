@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -51,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -98,6 +100,7 @@ enum class HistoryTab(val label: String) {
 fun OrderHistoryScreen(
     prefs: PreferencesManager,
     viewModel: RideHistoryViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
+    onNavigateToDiagnostics: () -> Unit = {},
     onBack: () -> Unit
 ) {
     val historyEntities by viewModel.history.collectAsStateWithLifecycle()
@@ -209,6 +212,16 @@ fun OrderHistoryScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = onNavigateToDiagnostics,
+                        modifier = Modifier.testTag("btn_order_history_diagnostics")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.BugReport,
+                            contentDescription = "Ride Diagnostics",
+                            tint = BluePrimary
+                        )
+                    }
                     if (history.isNotEmpty()) {
                         IconButton(onClick = {
                             viewModel.clearHistory()
