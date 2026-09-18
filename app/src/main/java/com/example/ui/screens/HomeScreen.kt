@@ -354,7 +354,7 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item { Spacer(modifier = Modifier.height(4.dp)) }
 
@@ -1021,7 +1021,7 @@ fun HomeScreen(
                 }
             }
 
-            // Last Order Card from Room History (Reactive & Instant, Part K)
+            // Last Order Card from Room History (Reactive & Instant, Ride Boss Style)
             if (latestHistoryOrder != null) {
                 item {
                     val statusColor = when (latestHistoryOrder.status) {
@@ -1043,15 +1043,26 @@ fun HomeScreen(
                         OrderStatus.MISSED -> Color(0xFFEEEEEE)
                     }
 
+                    val totalMs = when {
+                        latestHistoryOrder.totalProcessingMs > 0L -> latestHistoryOrder.totalProcessingMs
+                        latestHistoryOrder.decisionLatencyMs > 0L && latestHistoryOrder.status != OrderStatus.ACCEPTED -> latestHistoryOrder.decisionLatencyMs
+                        latestHistoryOrder.clickTimeMs > latestHistoryOrder.detectionTimeMs && latestHistoryOrder.detectionTimeMs > 0L -> latestHistoryOrder.clickTimeMs - latestHistoryOrder.detectionTimeMs
+                        else -> 0L
+                    }
+
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onNavigateToHistory() },
                         colors = CardDefaults.cardColors(containerColor = CardBackground),
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.5.dp, statusColor.copy(alpha = 0.5f))
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, statusColor.copy(alpha = 0.5f))
                     ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            // Row 1: "LAST ORDER" Header + Platform/Vehicle + Status Badge + Time
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1061,6 +1072,14 @@ fun HomeScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
+                                    Text(
+                                        text = "LAST ORDER",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = BlueSecondary,
+                                        letterSpacing = 0.5.sp
+                                    )
+
                                     Box(
                                         modifier = Modifier
                                             .background(
@@ -1091,7 +1110,7 @@ fun HomeScreen(
                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                     ) {
                                         Text(
-                                            text = latestHistoryOrder.status.name,
+                                            text = if (latestHistoryOrder.status == OrderStatus.PROCESSING) "PROCESSING ⏳" else latestHistoryOrder.status.name,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = statusColor
@@ -1101,27 +1120,82 @@ fun HomeScreen(
 
                                 Text(
                                     text = latestHistoryOrder.timeStr,
-                                    fontSize = 13.sp,
+                                    fontSize = 12.sp,
                                     color = TextDarkSecondary
                                 )
                             }
 
-                            Spacer(modifier = Modifier.height(6.dp))
+                            // Row 2: Fare & Route
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (latestHistoryOrder.amount > 0f)
+                                        "₹${latestHistoryOrder.amount.toInt()}  →  ${latestHistoryOrder.dropArea.ifEmpty { "Drop Point" }}"
+                                    else
+                                        latestHistoryOrder.dropArea.ifEmpty { "Order evaluating..." },
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextDarkPrimary
+                                )
+                                if (latestHistoryOrder.pickupDistKm > 0f || latestHistoryOrder.dropDistKm > 0f) {
+                                    Text(
+                                        text = "${if (latestHistoryOrder.pickupDistKm > 0f) "%.1f km".format(latestHistoryOrder.pickupDistKm) else "--"} pickup",
+                                        fontSize = 12.sp,
+                                        color = TextDarkSecondary
+                                    )
+                                }
+                            }
 
+                            // Row 3: Exact Reason
+                            val displayReason = latestHistoryOrder.reason.ifBlank {
+                                if (latestHistoryOrder.status == OrderStatus.PROCESSING) "Evaluating ride filters..." else "Filter evaluated"
+                            }
                             Text(
-                                text = if (latestHistoryOrder.amount > 0f) "₹${latestHistoryOrder.amount.toInt()}  →  ${latestHistoryOrder.dropArea.ifEmpty { "Drop Point" }}" else latestHistoryOrder.dropArea.ifEmpty { "Order detected" },
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextDarkPrimary
+                                text = displayReason,
+                                fontSize = 13.sp,
+                                color = TextDarkPrimary,
+                                maxLines = 2
                             )
 
-                            if (latestHistoryOrder.reason.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(4.dp))
+                            // Row 4: Real Response Speed ms + View History prompt
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (latestHistoryOrder.status == OrderStatus.PROCESSING) {
+                                    Text(
+                                        text = "⚡ Speed: In progress...",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFE65100)
+                                    )
+                                } else if (totalMs > 0L) {
+                                    Text(
+                                        text = "⚡ Speed: ${totalMs} ms",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = BluePrimary
+                                    )
+                                } else if (latestHistoryOrder.historyInsertLatencyMs > 0L) {
+                                    Text(
+                                        text = "⚡ Speed: ${latestHistoryOrder.historyInsertLatencyMs} ms",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = BluePrimary
+                                    )
+                                } else {
+                                    Spacer(modifier = Modifier.width(1.dp))
+                                }
+
                                 Text(
-                                    text = latestHistoryOrder.reason,
+                                    text = "View History →",
                                     fontSize = 12.sp,
-                                    color = TextDarkSecondary,
-                                    maxLines = 2
+                                    fontWeight = FontWeight.Medium,
+                                    color = BluePrimary
                                 )
                             }
                         }

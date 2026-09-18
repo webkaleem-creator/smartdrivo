@@ -87,10 +87,10 @@ import java.util.Locale
 import java.util.TimeZone
 
 enum class HistoryTab(val label: String) {
+    ALL("All"),
     ACCEPTED("Accepted"),
     IGNORED("Ignored"),
-    REJECTED("Rejected"),
-    ALL("All")
+    REJECTED("Rejected")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -102,7 +102,7 @@ fun OrderHistoryScreen(
 ) {
     val historyEntities by viewModel.history.collectAsStateWithLifecycle()
     val history = remember(historyEntities) {
-        historyEntities.map { it.toOrderHistoryItem() }
+        historyEntities.sortedByDescending { it.detectedAt }.map { it.toOrderHistoryItem() }
     }
     val totalAccepted by prefs.totalAcceptedFlow.collectAsState()
 
@@ -127,7 +127,7 @@ fun OrderHistoryScreen(
         }
     }
 
-    var selectedTab by remember { mutableStateOf(HistoryTab.ACCEPTED) }
+    var selectedTab by remember { mutableStateOf(HistoryTab.ALL) }
     var selectedPlatformFilter by remember { mutableStateOf<Platform?>(null) }
     var selectedDateRange by remember { mutableStateOf("All") } // "Today", "Yesterday", "Last 7 Days", "All"
 
@@ -145,11 +145,12 @@ fun OrderHistoryScreen(
 
     val acceptedCount = remember(history) { history.count { it.status == OrderStatus.ACCEPTED } }
     val rejectedCount = remember(history) {
-        history.count { isNoGoOrder(it) }
+        history.count { it.status == OrderStatus.REJECTED || isNoGoOrder(it) }
     }
     val ignoredCount = remember(history) {
         history.count {
-            !isNoGoOrder(it) && it.status != OrderStatus.ACCEPTED
+            it.status == OrderStatus.IGNORED ||
+            (!isNoGoOrder(it) && it.status != OrderStatus.ACCEPTED && it.status != OrderStatus.REJECTED && it.status != OrderStatus.PROCESSING)
         }
     }
     val allCount by remember(history) { derivedStateOf { history.size } }
@@ -158,10 +159,10 @@ fun OrderHistoryScreen(
         derivedStateOf {
             history.filter { item ->
                 val matchTab = when (selectedTab) {
-                    HistoryTab.ACCEPTED -> item.status == OrderStatus.ACCEPTED
-                    HistoryTab.REJECTED -> isNoGoOrder(item)
-                    HistoryTab.IGNORED -> !isNoGoOrder(item) && item.status != OrderStatus.ACCEPTED
                     HistoryTab.ALL -> true
+                    HistoryTab.ACCEPTED -> item.status == OrderStatus.ACCEPTED || item.status == OrderStatus.PROCESSING
+                    HistoryTab.REJECTED -> (isNoGoOrder(item) || item.status == OrderStatus.REJECTED) && item.status != OrderStatus.PROCESSING
+                    HistoryTab.IGNORED -> (item.status == OrderStatus.IGNORED || (!isNoGoOrder(item) && item.status != OrderStatus.ACCEPTED && item.status != OrderStatus.REJECTED)) && item.status != OrderStatus.PROCESSING
                 }
                 val matchPlatform = selectedPlatformFilter == null || item.platform == selectedPlatformFilter
                 val matchDate = when (selectedDateRange) {
@@ -1046,11 +1047,12 @@ private fun HistoryCard(item: OrderHistoryItem) {
             // Part J — Performance Latencies (Truthful recorded values)
             val totalMs = when {
                 item.totalProcessingMs > 0L -> item.totalProcessingMs
+                item.decisionLatencyMs > 0L && effectiveStatus != OrderStatus.ACCEPTED -> item.decisionLatencyMs
                 item.clickTimeMs > item.detectionTimeMs && item.detectionTimeMs > 0L -> item.clickTimeMs - item.detectionTimeMs
                 else -> 0L
             }
 
-            if (totalMs > 0L || item.historyInsertLatencyMs > 0L || item.decisionLatencyMs > 0L || item.actionLatencyMs > 0L) {
+            if (effectiveStatus == OrderStatus.PROCESSING || totalMs > 0L || item.historyInsertLatencyMs > 0L || item.decisionLatencyMs > 0L || item.actionLatencyMs > 0L) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp),
@@ -1068,14 +1070,21 @@ private fun HistoryCard(item: OrderHistoryItem) {
                         ) {
                             Text(
                                 text = "⚡ RESPONSE SPEED",
-                                fontSize = 10.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = BluePrimary
                             )
-                            if (totalMs > 0L) {
+                            if (effectiveStatus == OrderStatus.PROCESSING) {
+                                Text(
+                                    text = "In progress...",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFE65100)
+                                )
+                            } else if (totalMs > 0L) {
                                 Text(
                                     text = "Total: ${totalMs} ms",
-                                    fontSize = 10.sp,
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextDarkPrimary
                                 )
@@ -1088,21 +1097,21 @@ private fun HistoryCard(item: OrderHistoryItem) {
                             if (item.historyInsertLatencyMs > 0L) {
                                 Text(
                                     text = "Insert: ${item.historyInsertLatencyMs} ms",
-                                    fontSize = 9.5.sp,
+                                    fontSize = 11.sp,
                                     color = TextDarkSecondary
                                 )
                             }
                             if (item.decisionLatencyMs > 0L) {
                                 Text(
                                     text = "Decision: ${item.decisionLatencyMs} ms",
-                                    fontSize = 9.5.sp,
+                                    fontSize = 11.sp,
                                     color = TextDarkSecondary
                                 )
                             }
                             if (item.actionLatencyMs > 0L) {
                                 Text(
                                     text = "Action: ${item.actionLatencyMs} ms",
-                                    fontSize = 9.5.sp,
+                                    fontSize = 11.sp,
                                     color = TextDarkSecondary
                                 )
                             }
@@ -1203,7 +1212,8 @@ private fun extractAreaName(item: OrderHistoryItem): String {
  * Returns true if an order history item was rejected due to matching a No-Go area.
  */
 private fun isNoGoOrder(item: OrderHistoryItem): Boolean {
-    return item.reason.contains("No-Go", ignoreCase = true) ||
+    return item.status == OrderStatus.REJECTED ||
+           item.reason.contains("No-Go", ignoreCase = true) ||
            item.reason.contains("nogo", ignoreCase = true) ||
            item.reason.contains("No Go", ignoreCase = true)
 }
