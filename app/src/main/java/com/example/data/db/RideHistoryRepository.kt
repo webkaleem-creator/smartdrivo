@@ -84,7 +84,7 @@ class RideHistoryRepository(
             val recordId = if (!candidate.bookingId.isNullOrBlank()) {
                 candidate.bookingId
             } else {
-                "ride_${now}_${UUID.randomUUID().toString().take(6)}"
+                "ride_${fingerprint}"
             }
 
             val (dateStr, timeStr) = formatDateTime(detectedTime)
@@ -144,7 +144,7 @@ class RideHistoryRepository(
         matchedNoGo: String = ""
     ): RideHistoryEntity? = withContext(ioDispatcher) {
         mutex.withLock {
-            val existing = dao.getById(id) ?: return@withContext null
+            val existing = dao.getById(id) ?: dao.getByBookingId(id) ?: dao.getByFingerprint(id) ?: return@withContext null
             val now = System.currentTimeMillis()
             val decisionLatency = (now - existing.detectedAt).coerceAtLeast(0L)
             val totalProcessing = if (status != OrderStatus.ACCEPTED) decisionLatency else existing.totalProcessingMs
@@ -170,7 +170,7 @@ class RideHistoryRepository(
      */
     suspend fun onOrderActionAttempt(id: String): RideHistoryEntity? = withContext(ioDispatcher) {
         mutex.withLock {
-            val existing = dao.getById(id) ?: return@withContext null
+            val existing = dao.getById(id) ?: dao.getByBookingId(id) ?: dao.getByFingerprint(id) ?: return@withContext null
             val now = System.currentTimeMillis()
             val updated = existing.copy(actionAttemptAt = now)
             dao.update(updated)
@@ -191,9 +191,9 @@ class RideHistoryRepository(
         timesClicked: Int = 1
     ): RideHistoryEntity? = withContext(ioDispatcher) {
         mutex.withLock {
-            val existing = dao.getById(id) ?: return@withContext null
+            val existing = dao.getById(id) ?: dao.getByBookingId(id) ?: dao.getByFingerprint(id) ?: return@withContext null
             val now = System.currentTimeMillis()
-            val attemptTime = if (existing.actionAttemptAt > 0L) existing.actionAttemptAt else existing.decisionAt
+            val attemptTime = if (existing.actionAttemptAt > 0L) existing.actionAttemptAt else if (existing.decisionAt > 0L) existing.decisionAt else existing.detectedAt
             val actionLatency = if (attemptTime > 0L) (now - attemptTime).coerceAtLeast(0L) else 0L
             val totalProcessing = (now - existing.detectedAt).coerceAtLeast(0L)
 
@@ -214,7 +214,7 @@ class RideHistoryRepository(
     }
 
     suspend fun getById(id: String): RideHistoryEntity? = withContext(ioDispatcher) {
-        dao.getById(id)
+        dao.getById(id) ?: dao.getByBookingId(id) ?: dao.getByFingerprint(id)
     }
 
     suspend fun clearHistory() = withContext(ioDispatcher) {
