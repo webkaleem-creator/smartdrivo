@@ -910,21 +910,6 @@ private fun GroupEditorDialog(
 
                                 IconButton(
                                     onClick = {
-                                        editingIndex = index
-                                        areaInput = word
-                                    },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Edit,
-                                        contentDescription = "Edit area",
-                                        tint = accent,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-
-                                IconButton(
-                                    onClick = {
                                         keywords = keywords.toMutableList().also {
                                             if (index in it.indices) it.removeAt(index)
                                         }
