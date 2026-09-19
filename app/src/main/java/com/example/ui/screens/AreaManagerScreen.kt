@@ -517,11 +517,46 @@ private fun CompactAreaGroupCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                        "${group.keywords.size} areas",
-                        fontSize = 11.sp,
-                        color = Color(0xFF64748B)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text(
+                            "${group.keywords.size} areas",
+                            fontSize = 11.sp,
+                            color = Color(0xFF64748B)
+                        )
+
+                        Text(
+                            "•",
+                            fontSize = 11.sp,
+                            color = Color(0xFF94A3B8)
+                        )
+
+                        Surface(
+                            color = if (group.isEnabled) {
+                                accent.copy(alpha = 0.12f)
+                            } else {
+                                Color(0xFFF1F5F9)
+                            },
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = if (group.isEnabled) "ACTIVE" else "OFF",
+                                modifier = Modifier.padding(
+                                    horizontal = 6.dp,
+                                    vertical = 2.dp
+                                ),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (group.isEnabled) {
+                                    accent
+                                } else {
+                                    Color(0xFF64748B)
+                                }
+                            )
+                        }
+                    }
                 }
 
                 IconButton(
