@@ -271,7 +271,9 @@ class FirebaseRepository(
                         "id" to a.id,
                         "name" to a.name,
                         "isEnabled" to a.isEnabled,
+                        "maxFare" to a.maxFare,
                         "minPickupKm" to a.minPickupKm,
+                        "maxPickupKm" to a.maxPickupKm,
                         "maxDropKm" to a.maxDropKm,
                         "keywords" to a.keywords
                     )

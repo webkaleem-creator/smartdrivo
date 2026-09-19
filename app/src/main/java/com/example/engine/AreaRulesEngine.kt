@@ -1,17 +1,18 @@
 package com.example.engine
 
+import androidx.compose.runtime.Immutable
 import com.example.model.AreaGroup
-import com.example.model.AreaType
 import com.example.model.AppSettings
 import com.example.model.FilterMode
 import com.example.model.RideCandidate
-import androidx.compose.runtime.Immutable
 
 sealed class DecisionResult {
     @Immutable
     data class Accept(val reason: String) : DecisionResult()
+
     @Immutable
     data class Reject(val reason: String) : DecisionResult()
+
     @Immutable
     data class Ignore(val reason: String) : DecisionResult()
 }
@@ -28,135 +29,214 @@ object AreaRulesEngine {
         isGoToEnabled: Boolean = settings.isGoToEnabled,
         isNoGoEnabled: Boolean = settings.isNoGoEnabled
     ): DecisionResult {
-        // 0. Fastest Mode Check
-        // When Fastest Mode is ON: accept every ride, skip fare/area filters, only check Maximum Pickup Distance km
+        val pickupText =
+            (pickupLocationTextOverride ?: candidate.pickupAddress.orEmpty())
+                .trim()
+                .lowercase()
+
+        val dropText =
+            "${candidate.dropAddress.orEmpty()} ${candidate.dropArea.orEmpty()}"
+                .trim()
+                .lowercase()
+
+        if (candidate.isBundledOrder) {
+            return DecisionResult.Reject(
+                "Bundle Order Filter: Bundle order detected"
+            )
+        }
+
+        // NO GO: group name is label only. Match sub-area words on pickup OR destination.
+        if (isNoGoEnabled) {
+            val activeNoGo = noGoAreas.filter {
+                it.isEnabled && it.keywords.isNotEmpty()
+            }
+
+            for (group in activeNoGo) {
+                val words = group.keywords
+                    .map { it.trim() }
+                    .filter {
+                        it.isNotBlank() &&
+                            !it.equals(group.name, ignoreCase = true)
+                    }
+
+                for (word in words) {
+                    val key = word.lowercase()
+
+                    if (pickupText.contains(key)) {
+                        return DecisionResult.Reject(
+                            "No-Go Area: pickup matches '$word' in '${group.name}'"
+                        )
+                    }
+
+                    if (dropText.contains(key)) {
+                        return DecisionResult.Reject(
+                            "No-Go Area: destination matches '$word' in '${group.name}'"
+                        )
+                    }
+                }
+            }
+        }
+
+        // GO TO PRIORITY:
+        // 1. Destination/drop can match ANY active Go-To group.
+        // 2. Every active group works independently and keeps its own limits.
+        // 3. If multiple groups match, accept when ANY matching group passes all 3 limits.
+        // 4. Global Fare/Distance/Fastest filters are bypassed while Go-To priority is active.
+        if (isGoToEnabled) {
+            val activeGoTo = goToAreas.filter {
+                it.isEnabled && it.keywords.isNotEmpty()
+            }
+
+            if (activeGoTo.isNotEmpty()) {
+                val matchingGroups = activeGoTo.filter { group ->
+                    group.keywords
+                        .map { it.trim() }
+                        .filter {
+                            it.isNotBlank() &&
+                                !it.equals(group.name, ignoreCase = true)
+                        }
+                        .any { word ->
+                            dropText.contains(word.lowercase())
+                        }
+                }
+
+                if (matchingGroups.isEmpty()) {
+                    return DecisionResult.Reject(
+                        "Go-To Area: destination not found in any active Go-To area"
+                    )
+                }
+
+                val fare = candidate.fare
+                val pickup = candidate.pickupDistKm
+                val drop = candidate.dropDistKm
+                var firstFailure: String? = null
+
+                for (matchedGroup in matchingGroups) {
+                    if (
+                        matchedGroup.maxFare > 0f &&
+                        fare != null &&
+                        fare > matchedGroup.maxFare
+                    ) {
+                        if (firstFailure == null) {
+                            firstFailure =
+                                "Go-To '${matchedGroup.name}': fare ₹${fare.toInt()} exceeds max ₹${matchedGroup.maxFare.toInt()}"
+                        }
+                        continue
+                    }
+
+                    if (
+                        matchedGroup.maxPickupKm > 0f &&
+                        pickup != null &&
+                        pickup > matchedGroup.maxPickupKm
+                    ) {
+                        if (firstFailure == null) {
+                            firstFailure =
+                                "Go-To '${matchedGroup.name}': pickup ${pickup}km exceeds max ${matchedGroup.maxPickupKm}km"
+                        }
+                        continue
+                    }
+
+                    if (
+                        matchedGroup.maxDropKm > 0f &&
+                        drop != null &&
+                        drop > matchedGroup.maxDropKm
+                    ) {
+                        if (firstFailure == null) {
+                            firstFailure =
+                                "Go-To '${matchedGroup.name}': drop ${drop}km exceeds max ${matchedGroup.maxDropKm}km"
+                        }
+                        continue
+                    }
+
+                    return DecisionResult.Accept(
+                        "Go-To destination matched '${matchedGroup.name}' and group limits passed"
+                    )
+                }
+
+                return DecisionResult.Reject(
+                    firstFailure ?: "Go-To Area: matched groups did not pass their limits"
+                )
+            }
+        }
+
+        // Fastest mode only when Go-To priority is not active.
         if (settings.isFastestModeEnabled) {
             val pickup = candidate.pickupDistKm
-            if (pickup != null && settings.maxPickupDistanceKm > 0 && pickup > settings.maxPickupDistanceKm) {
-                return DecisionResult.Reject("Fastest Mode: Pickup ${pickup}km exceeds maximum limit (${settings.maxPickupDistanceKm}km)")
-            }
-            return DecisionResult.Accept("Fastest Mode: Order accepted (only pickup distance checked)")
-        }
-
-        // 1. Bundle order check
-        if (candidate.isBundledOrder) {
-            return DecisionResult.Reject("Bundle Order Filter: Bundle order detected - Auto rejected")
-        }
-
-        val pickupText = (pickupLocationTextOverride ?: candidate.pickupAddress.orEmpty()).trim().lowercase()
-        val dropText = "${candidate.dropAddress.orEmpty()} ${candidate.dropArea.orEmpty()}".trim().lowercase()
-
-        // 2. NO-GO Area Check
-        // If No-Go areas list is empty OR No-Go toggle is OFF: SKIP No-Go filter completely.
-        val activeNoGoList = if (isNoGoEnabled) {
-            noGoAreas.filter { it.isEnabled }
-        } else {
-            emptyList()
-        }
-
-        if (activeNoGoList.isNotEmpty()) {
-            for (noGo in activeNoGoList) {
-                val targets = (listOf(noGo.name) + noGo.keywords).map { it.trim() }.filter { it.isNotBlank() }
-                for (target in targets) {
-                    val lowerTarget = target.lowercase()
-                    if (pickupText.contains(lowerTarget)) {
-                        return DecisionResult.Reject("No-Go Area Filter: Pickup location matches No-Go area '$target'")
-                    }
-                    if (dropText.contains(lowerTarget)) {
-                        return DecisionResult.Reject("No-Go Area Filter: Drop location matches No-Go area '$target'")
-                    }
-                }
-            }
-        }
-
-        // 3. GO-TO Area Check
-        // Only apply Go-To filter when BOTH:
-        // 1. Go-To toggle is ON/enabled
-        // 2. gotoAreas list has at least 1 area
-        // If gotoAreas list is empty OR Go-To is disabled: SKIP Go-To filter completely, do not reject.
-        val activeGoToList = if (isGoToEnabled) {
-            goToAreas.filter { it.isEnabled }
-        } else {
-            emptyList()
-        }
-
-        if (isGoToEnabled && activeGoToList.isNotEmpty()) {
-            var matchedGroup: AreaGroup? = null
-            for (group in activeGoToList) {
-                val targets = (listOf(group.name) + group.keywords).map { it.trim() }.filter { it.isNotBlank() }
-                if (targets.any { dropText.contains(it.lowercase()) || pickupText.contains(it.lowercase()) }) {
-                    matchedGroup = group
-                    break
-                }
-            }
-
-            if (matchedGroup == null) {
-                return DecisionResult.Reject("Go-To Area Filter: Drop address not in any active Go-To area")
-            }
-
-            // Check distance constraints from the matched group or areas list
-            val effectiveGroup = areas.firstOrNull { g ->
-                g.isEnabled && g.type == AreaType.GO_TO && (
-                    g.name.equals(matchedGroup.name, ignoreCase = true) ||
-                    g.keywords.any { kw -> kw.equals(matchedGroup.name, ignoreCase = true) }
+            if (
+                pickup != null &&
+                settings.maxPickupDistanceKm > 0f &&
+                pickup > settings.maxPickupDistanceKm
+            ) {
+                return DecisionResult.Reject(
+                    "Fastest Mode: Pickup ${pickup}km exceeds ${settings.maxPickupDistanceKm}km"
                 )
-            } ?: matchedGroup
-
-            val pDist = candidate.pickupDistKm ?: 0f
-            val dDist = candidate.dropDistKm ?: 0f
-            if (pDist > 0 && pDist < effectiveGroup.minPickupKm) {
-                return DecisionResult.Reject("Go-To Distance Filter: Pickup ${pDist}km is under min pickup distance (${effectiveGroup.minPickupKm}km) for '${effectiveGroup.name}'")
             }
-            if (dDist > 0 && dDist > effectiveGroup.maxDropKm) {
-                return DecisionResult.Reject("Go-To Distance Filter: Drop ${dDist}km exceeds max drop distance (${effectiveGroup.maxDropKm}km) for '${effectiveGroup.name}'")
-            }
+
+            return DecisionResult.Accept(
+                "Fastest Mode: pickup distance passed"
+            )
         }
 
-        // BUG 4: Drop distance filter - If drop distance > maxDropDistanceKm from settings -> REJECT order
-        val maxDropLimit = when {
-            settings.maxDropDistanceKm > 0f -> settings.maxDropDistanceKm
-            settings.maxDropKm > 0f -> settings.maxDropKm
-            else -> 0f
-        }
-        val dropDist = candidate.dropDistKm
-        if (dropDist != null && maxDropLimit > 0f && dropDist > maxDropLimit) {
-            return DecisionResult.Reject("Drop distance (${dropDist}km) exceeds max limit (${maxDropLimit}km)")
-        }
+        // Normal Fare / Distance / Both modes.
+        val checkFare =
+            settings.filterMode == FilterMode.FARE_ONLY ||
+                settings.filterMode == FilterMode.BOTH
 
-        val checkFare = settings.filterMode == FilterMode.FARE_ONLY || settings.filterMode == FilterMode.BOTH
-        val checkDistance = settings.filterMode == FilterMode.DISTANCE_ONLY || settings.filterMode == FilterMode.BOTH
+        val checkDistance =
+            settings.filterMode == FilterMode.DISTANCE_ONLY ||
+                settings.filterMode == FilterMode.BOTH
 
-        // 4. Global Fare Filter (evaluated if FilterMode is FARE_ONLY or BOTH)
         if (checkFare) {
             val fare = candidate.fare
-            if (fare != null) {
-                if (settings.minFare > 0 && fare < settings.minFare) {
-                    return DecisionResult.Reject("Fare Filter: Fare ₹${fare.toInt()} is below minimum ₹${settings.minFare.toInt()}")
+
+            if (fare != null && fare > 0f) {
+                if (
+                    settings.minFare > 0f &&
+                    fare < settings.minFare
+                ) {
+                    return DecisionResult.Reject(
+                        "Fare Filter: Fare ₹${fare.toInt()} is below minimum ₹${settings.minFare.toInt()}"
+                    )
                 }
-                if (settings.maxFare > 0 && fare > settings.maxFare) {
-                    return DecisionResult.Reject("Fare Filter: Fare ₹${fare.toInt()} exceeds maximum ₹${settings.maxFare.toInt()}")
+
+                if (
+                    settings.maxFare > 0f &&
+                    fare > settings.maxFare
+                ) {
+                    return DecisionResult.Reject(
+                        "Fare Filter: Fare ₹${fare.toInt()} exceeds maximum ₹${settings.maxFare.toInt()}"
+                    )
                 }
             }
         }
 
-        // 5. Distance Filter (evaluated if FilterMode is DISTANCE_ONLY or BOTH)
         if (checkDistance) {
             val pickup = candidate.pickupDistKm
-            if (pickup != null) {
-                if (settings.maxPickupDistanceKm > 0 && pickup > settings.maxPickupDistanceKm) {
-                    return DecisionResult.Reject("Distance Filter: Pickup ${pickup}km exceeds maximum limit (${settings.maxPickupDistanceKm}km)")
-                }
+            if (
+                pickup != null &&
+                settings.maxPickupDistanceKm > 0f &&
+                pickup > settings.maxPickupDistanceKm
+            ) {
+                return DecisionResult.Reject(
+                    "Distance Filter: Pickup ${pickup}km exceeds ${settings.maxPickupDistanceKm}km"
+                )
             }
 
             val drop = candidate.dropDistKm
-            if (drop != null) {
-                if (settings.maxDropDistanceKm > 0 && drop > settings.maxDropDistanceKm) {
-                    return DecisionResult.Reject("Distance Filter: Drop ${drop}km exceeds maximum limit (${settings.maxDropDistanceKm}km)")
-                }
+            if (
+                drop != null &&
+                settings.maxDropDistanceKm > 0f &&
+                drop > settings.maxDropDistanceKm
+            ) {
+                return DecisionResult.Reject(
+                    "Distance Filter: Drop ${drop}km exceeds ${settings.maxDropDistanceKm}km"
+                )
             }
         }
 
-        return DecisionResult.Accept("Order satisfies ${settings.filterMode.displayName} criteria and area rules")
+        return DecisionResult.Accept(
+            "Order satisfies ${settings.filterMode.displayName} criteria"
+        )
     }
 
     @JvmName("evaluateRideWithStrings")
@@ -173,8 +253,19 @@ object AreaRulesEngine {
         candidate = candidate,
         areas = areas,
         settings = settings,
-        goToAreas = goToAreas.map { AreaGroup(name = it, keywords = listOf(it)) },
-        noGoAreas = noGoAreas.map { AreaGroup(name = it, keywords = listOf(it), type = AreaType.NO_GO) },
+        goToAreas = goToAreas.map {
+            AreaGroup(
+                name = "Go-To",
+                keywords = listOf(it)
+            )
+        },
+        noGoAreas = noGoAreas.map {
+            AreaGroup(
+                name = "No-Go",
+                keywords = listOf(it),
+                type = com.example.model.AreaType.NO_GO
+            )
+        },
         pickupLocationTextOverride = pickupLocationTextOverride,
         isGoToEnabled = isGoToEnabled,
         isNoGoEnabled = isNoGoEnabled

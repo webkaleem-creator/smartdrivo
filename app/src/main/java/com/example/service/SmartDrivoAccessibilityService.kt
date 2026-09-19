@@ -455,7 +455,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                 val pickupText = candidate.pickupAddress.orEmpty().trim().lowercase()
                 val dropText = "${candidate.dropAddress.orEmpty()} ${candidate.dropArea.orEmpty()}".trim().lowercase()
                 for (noGo in noGoAreas) {
-                    val targets = (listOf(noGo.name) + noGo.keywords).map { it.trim() }.filter { it.isNotBlank() }
+                    val targets = noGo.keywords.map { it.trim() }.filter { it.isNotBlank() && !it.equals(noGo.name, ignoreCase = true) }
                     for (target in targets) {
                         val lowerTarget = target.lowercase()
                         if (pickupText.isNotBlank() && pickupText.contains(lowerTarget)) {
@@ -471,6 +471,22 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                     }
                 }
             }
+        }
+
+        // Go-To/Fastest priority is evaluated by AreaRulesEngine after No-Go safety.
+        val prioritySettings = prefs.loadSettings()
+        val hasActiveGoTo = prioritySettings.isGoToEnabled &&
+            prefs.loadGoToAreas().any { group ->
+                group.isEnabled && group.keywords.any { keyword ->
+                    keyword.isNotBlank() && !keyword.equals(group.name, ignoreCase = true)
+                }
+            }
+
+        if (hasActiveGoTo || prioritySettings.isFastestModeEnabled) {
+            return DirectFilterResult(
+                OrderStatus.ACCEPTED,
+                if (hasActiveGoTo) "Go-To priority mode" else "Fastest priority mode"
+            )
         }
 
         val direct = readDirectSettingsFresh()

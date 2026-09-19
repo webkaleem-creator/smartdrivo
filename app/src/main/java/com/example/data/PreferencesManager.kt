@@ -481,6 +481,7 @@ class PreferencesManager(private val context: Context) {
         obj.put("keywords", JSONArray(g.keywords))
         obj.put("filtersEnabled", g.filtersEnabled)
         obj.put("minFare", g.minFare.toDouble())
+        obj.put("maxFare", g.maxFare.toDouble())
         obj.put("minPickupKm", g.minPickupKm.toDouble())
         obj.put("maxPickupKm", g.maxPickupKm.toDouble())
         obj.put("maxDropKm", g.maxDropKm.toDouble())
@@ -503,6 +504,7 @@ class PreferencesManager(private val context: Context) {
             keywords = kwList,
             filtersEnabled = obj.optBoolean("filtersEnabled", false),
             minFare = obj.optDouble("minFare", 50.0).toFloat(),
+            maxFare = obj.optDouble("maxFare", 0.0).toFloat(),
             minPickupKm = obj.optDouble("minPickupKm", 0.5).toFloat(),
             maxPickupKm = obj.optDouble("maxPickupKm", 3.0).toFloat(),
             maxDropKm = obj.optDouble("maxDropKm", 7.5).toFloat()

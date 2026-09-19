@@ -20,6 +20,7 @@ data class AreaGroup(
     // Per-group filter customization
     val filtersEnabled: Boolean = false,
     val minFare: Float = 50f,
+    val maxFare: Float = 0f,
     val minPickupKm: Float = 0.5f,
     val maxPickupKm: Float = 3.0f,
     val maxDropKm: Float = 7.5f
