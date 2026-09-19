@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -63,6 +64,7 @@ import com.example.ui.screens.AdminPanelScreen
 import com.example.ui.screens.AreaManagerScreen
 import com.example.ui.screens.CommunityScreen
 import com.example.ui.screens.DiagnosticScreen
+import com.example.ui.screens.FinishSetupScreen
 import com.example.ui.screens.GuestScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.MoreScreen
@@ -108,6 +110,7 @@ object Routes {
     const val COMMUNITY = "community"
     const val ADMIN_PANEL = "admin_panel"
     const val DIAGNOSTICS = "diagnostics"
+    const val FINISH_SETUP = "finish_setup"
 }
 
 private data class NavItemData(
@@ -204,6 +207,14 @@ fun SmartDrivoApp(
     prefs: PreferencesManager,
     repository: FirebaseRepository
 ) {
+    val context = LocalContext.current
+    val appContext = context.applicationContext
+    val checkAllPermissionsGranted = {
+        PermissionHelper.isAccessibilityPermissionGranted(appContext) &&
+            PermissionHelper.isOverlayPermissionGranted(appContext) &&
+            PermissionHelper.hasNotificationPermission(appContext)
+    }
+
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -257,12 +268,16 @@ fun SmartDrivoApp(
         val fUser = PhoneAuthManager.getAuthInstance()?.currentUser
         val loggedIn = prefs.isLoggedIn && (fUser != null || userProfile.email.isNotBlank() || userProfile.phone.isNotBlank())
         val admin = userProfile.isAdmin
+        val hasAllPermissions = checkAllPermissionsGranted()
+
         if (!loggedIn) {
             Routes.WELCOME
         } else if (!admin && (userProfile.phone.isBlank() || userProfile.city.isBlank() || userProfile.state.isBlank())) {
             Routes.PROFILE_SETUP
         } else if (!admin && !userProfile.isPlanValid) {
             Routes.PLAN_SELECTION
+        } else if (!hasAllPermissions) {
+            Routes.FINISH_SETUP
         } else {
             Routes.HOME
         }
@@ -412,6 +427,7 @@ fun SmartDrivoApp(
                     val fUser = PhoneAuthManager.getAuthInstance()?.currentUser
                     val loggedIn = prefs.isLoggedIn && (fUser != null || userProfile.phone.isNotEmpty() || userProfile.email.isNotEmpty())
                     val admin = userProfile.isAdmin
+                    val hasAllPermissions = checkAllPermissionsGranted()
                     prefs.hasOpenedBefore = true
                     if (!loggedIn) {
                         navController.navigate(Routes.WELCOME) {
@@ -423,6 +439,10 @@ fun SmartDrivoApp(
                         }
                     } else if (!admin && !userProfile.isPlanValid) {
                         navController.navigate(Routes.PLAN_SELECTION) {
+                            popUpTo(Routes.SPLASH) { inclusive = true }
+                        }
+                    } else if (!hasAllPermissions) {
+                        navController.navigate(Routes.FINISH_SETUP) {
                             popUpTo(Routes.SPLASH) { inclusive = true }
                         }
                     } else {
@@ -459,7 +479,9 @@ fun SmartDrivoApp(
                             popUpTo(Routes.WELCOME) { inclusive = true }
                         }
                     } else {
-                        navController.navigate(Routes.HOME) {
+                        val hasAllPermissions = checkAllPermissionsGranted()
+                        val dest = if (hasAllPermissions) Routes.HOME else Routes.FINISH_SETUP
+                        navController.navigate(dest) {
                             popUpTo(Routes.WELCOME) { inclusive = true }
                         }
                     }
@@ -516,7 +538,9 @@ fun SmartDrivoApp(
                         } else {
                             val isMembershipValid = (merged.isAdmin || merged.isPlanValid) && merged.isActive
                             if (isMembershipValid) {
-                                navController.navigate(Routes.HOME) {
+                                val hasAllPermissions = checkAllPermissionsGranted()
+                                val dest = if (hasAllPermissions) Routes.HOME else Routes.FINISH_SETUP
+                                navController.navigate(dest) {
                                     popUpTo(Routes.WELCOME) { inclusive = true }
                                 }
                             } else {
@@ -550,7 +574,9 @@ fun SmartDrivoApp(
                     prefs.saveUserProfile(updated)
                     repository.saveUserProfile(updated)
                     if (updated.isAdmin || updated.isPlanValid) {
-                        navController.navigate(Routes.HOME) {
+                        val hasAllPermissions = checkAllPermissionsGranted()
+                        val dest = if (hasAllPermissions) Routes.HOME else Routes.FINISH_SETUP
+                        navController.navigate(dest) {
                             popUpTo(Routes.PROFILE_SETUP) { inclusive = true }
                         }
                     } else {
@@ -566,7 +592,9 @@ fun SmartDrivoApp(
         composable(Routes.PLAN_SELECTION) {
             if (userProfile.isAdmin || userProfile.isPlanValid) {
                 LaunchedEffect(Unit) {
-                    navController.navigate(Routes.HOME) {
+                    val hasAllPermissions = checkAllPermissionsGranted()
+                    val dest = if (hasAllPermissions) Routes.HOME else Routes.FINISH_SETUP
+                    navController.navigate(dest) {
                         popUpTo(Routes.PLAN_SELECTION) { inclusive = true }
                     }
                 }
@@ -631,7 +659,9 @@ fun SmartDrivoApp(
                 },
                 onGoToHome = {
                     if (isMembershipActive) {
-                        navController.navigate(Routes.HOME) {
+                        val hasAllPermissions = checkAllPermissionsGranted()
+                        val dest = if (hasAllPermissions) Routes.HOME else Routes.FINISH_SETUP
+                        navController.navigate(dest) {
                             popUpTo(Routes.PAYMENT_PENDING) { inclusive = true }
                         }
                     } else {
@@ -647,7 +677,9 @@ fun SmartDrivoApp(
         composable(Routes.PAYMENT_SUCCESS) {
             PaymentSuccessScreen(
                 onContinueToHome = {
-                    navController.navigate(Routes.HOME) {
+                    val hasAllPermissions = checkAllPermissionsGranted()
+                    val dest = if (hasAllPermissions) Routes.HOME else Routes.FINISH_SETUP
+                    navController.navigate(dest) {
                         popUpTo(Routes.PAYMENT_SUCCESS) { inclusive = true }
                     }
                 }
@@ -769,6 +801,17 @@ fun SmartDrivoApp(
             DiagnosticScreen(
                 prefs = prefs,
                 onBack = { navController.popBackStack() }
+            )
+        }
+
+        // 20. First-Install Permission Finish Setup Screen
+        composable(Routes.FINISH_SETUP) {
+            FinishSetupScreen(
+                onGoToHome = {
+                    navController.navigate(Routes.HOME) {
+                        popUpTo(Routes.FINISH_SETUP) { inclusive = true }
+                    }
+                }
             )
         }
             }

@@ -76,13 +76,16 @@ import com.example.model.OrderStatus
 import com.example.model.Platform
 import com.example.model.RideCandidate
 import com.example.model.VehicleType
+import com.example.service.FloatingOverlayService
 import com.example.service.SmartDrivoAccessibilityService
 import com.example.ui.theme.BlueContainer
+import com.example.ui.theme.BlueDark
 import com.example.ui.theme.BluePrimary
 import com.example.ui.theme.BlueSecondary
 import com.example.ui.theme.CardBackground
 import com.example.ui.theme.CardBorderDefault
 import com.example.ui.theme.LightBackground
+import com.example.util.PermissionHelper
 import com.example.ui.theme.LightSurface
 import com.example.ui.theme.PlatformRapido
 import com.example.ui.theme.PlatformRapidoBg
@@ -362,6 +365,7 @@ private fun SimulationDiagnosticCard(
     roomRepo: RideHistoryRepository,
     prefs: PreferencesManager
 ) {
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var isSimulating by remember { mutableStateOf(false) }
 
@@ -377,26 +381,37 @@ private fun SimulationDiagnosticCard(
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Speed,
-                        contentDescription = null,
-                        tint = BluePrimary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Engine Verification Tool",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BluePrimary,
-                        fontFamily = FontFamily.Default
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Speed,
+                    contentDescription = null,
+                    tint = BluePrimary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Engine Verification Tool",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = BluePrimary,
+                    fontFamily = FontFamily.Default
+                )
+            }
 
+            Text(
+                text = "Simulates instant detection → filter evaluation → safe button scan → same-row latency logging.",
+                fontSize = 12.sp,
+                color = TextDarkSecondary,
+                modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
+                fontFamily = FontFamily.Default
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Button(
                     onClick = {
                         if (isSimulating) return@Button
@@ -409,7 +424,9 @@ private fun SimulationDiagnosticCard(
                     enabled = !isSimulating,
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
-                    modifier = Modifier.testTag("run_simulation_button")
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("run_simulation_button")
                 ) {
                     Text(
                         text = if (isSimulating) "Testing..." else "Test Ride",
@@ -419,15 +436,42 @@ private fun SimulationDiagnosticCard(
                         fontFamily = FontFamily.Default
                     )
                 }
-            }
 
-            Text(
-                text = "Simulates instant detection → filter evaluation → safe button scan → same-row latency logging.",
-                fontSize = 12.sp,
-                color = TextDarkSecondary,
-                modifier = Modifier.padding(top = 4.dp),
-                fontFamily = FontFamily.Default
-            )
+                Button(
+                    onClick = {
+                        if (!PermissionHelper.isOverlayPermissionGranted(context)) {
+                            PermissionHelper.openOverlaySettings(context)
+                        } else {
+                            val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
+                            val currentTimeStr = timeFormat.format(Date())
+                            FloatingOverlayService.show(
+                                context = context,
+                                amount = 145f,
+                                pickup = "Indiranagar 100ft Rd, Bangalore",
+                                pickupDist = 1.4f,
+                                drop = "Koramangala 5th Block, Bangalore",
+                                dropDist = 6.8f,
+                                dropArea = "Koramangala",
+                                time = currentTimeStr,
+                                platform = "Rapido"
+                            )
+                        }
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BlueDark),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("test_overlay_button")
+                ) {
+                    Text(
+                        text = "Test Overlay",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        fontFamily = FontFamily.Default
+                    )
+                }
+            }
         }
     }
 }
