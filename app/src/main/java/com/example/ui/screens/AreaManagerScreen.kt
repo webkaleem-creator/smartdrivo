@@ -237,7 +237,7 @@ fun AreaManagerScreen(
                             onClick = { saveAllGroups() },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(42.dp),
+                                .height(56.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = BluePrimary,
                                 contentColor = Color.White
@@ -417,7 +417,7 @@ fun AreaManagerScreen(
                                 singleLine = true,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(42.dp),
+                                    .height(56.dp),
                                 shape = RoundedCornerShape(8.dp),
                                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -442,11 +442,11 @@ fun AreaManagerScreen(
                                     containerColor = GoToGreenPrimary,
                                     contentColor = Color.White
                                 ),
-                                modifier = Modifier.height(42.dp)
+                                modifier = Modifier.height(56.dp)
                             ) {
                                 Icon(Icons.Default.Add, contentDescription = "Add", modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("+ Add Group", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                Text("Add Group", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                             }
                         }
 
@@ -594,7 +594,7 @@ fun AreaManagerScreen(
                                 singleLine = true,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(42.dp),
+                                    .height(56.dp),
                                 shape = RoundedCornerShape(8.dp),
                                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -619,11 +619,11 @@ fun AreaManagerScreen(
                                     containerColor = NoGoRedPrimary,
                                     contentColor = Color.White
                                 ),
-                                modifier = Modifier.height(42.dp)
+                                modifier = Modifier.height(56.dp)
                             ) {
                                 Icon(Icons.Default.Add, contentDescription = "Add", modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("+ Add Group", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                Text("Add Group", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                             }
                         }
 
@@ -833,7 +833,7 @@ fun AreaGroupCard(
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(42.dp),
+                                    .height(56.dp),
                                 shape = RoundedCornerShape(8.dp),
                                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
                                 colors = OutlinedTextFieldDefaults.colors(
@@ -863,7 +863,7 @@ fun AreaGroupCard(
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(42.dp),
+                                    .height(56.dp),
                                 shape = RoundedCornerShape(8.dp),
                                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
                                 colors = OutlinedTextFieldDefaults.colors(
