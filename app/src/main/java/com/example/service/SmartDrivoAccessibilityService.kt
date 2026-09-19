@@ -69,6 +69,14 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     @Volatile
     private var isProcessing = false
 
+    // Rapido can emit hundreds of accessibility events per second.
+    // Keep only one parser job in flight and debounce noisy content-change events.
+    @Volatile
+    private var isRapidoEventProcessing = false
+
+    @Volatile
+    private var lastRapidoEventDispatchAt = 0L
+
     private val toggleReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "com.example.TOGGLE_CHANGED") {
@@ -564,16 +572,14 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
 
-        // 1. Process TYPE_WINDOW_CONTENT_CHANGED (2048) and TYPE_WINDOW_STATE_CHANGED (32)
-        // Ignore only notification events
         if (event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
             return
         }
 
         val eventPkg = event.packageName?.toString().orEmpty().trim().lowercase()
         val activeRootPkg = rootInActiveWindow?.packageName?.toString().orEmpty().trim().lowercase()
+        val selfPkg = packageName.trim().lowercase()
 
-        // 2. Remove restrictive packageName checks - explicitly allow "com.rapido.passenger"
         val isRapido = eventPkg == "com.rapido.passenger" ||
                 isRapidoPackage(eventPkg) ||
                 activeRootPkg == "com.rapido.passenger" ||
@@ -585,21 +591,36 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             return
         }
 
-        // 3. Add requested log line at the start of Rapido processing
+        // Do not keep parsing stale driver-app events while the user is inside SmartDrivo.
+        // This prevents the accessibility event storm from making the SmartDrivo UI lag.
+        if (activeRootPkg == selfPkg) {
+            return
+        }
+
         if (isRapido) {
+            val now = System.currentTimeMillis()
+
+            // TYPE_WINDOW_CONTENT_CHANGED is extremely noisy in the Rapido UI.
+            // 80ms still keeps detection responsive while cutting duplicate parser work heavily.
+            if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+                now - lastRapidoEventDispatchAt < 80L
+            ) {
+                return
+            }
+
+            // Never run multiple full Rapido node-tree parsers at the same time.
+            if (isRapidoEventProcessing) {
+                return
+            }
+
+            lastRapidoEventDispatchAt = now
+
             Log.d("SmartDrivo", "Rapido event received: ${event.eventType}")
-            val eventTypeStr = try { AccessibilityEvent.eventTypeToString(event.eventType) } catch (_: Exception) { "${event.eventType}" }
             Log.i(
                 TAG,
-                "📥 [Rapido] Accessibility event received: eventPkg='$eventPkg', activePkg='$activeRootPkg' | " +
-                    "Type: $eventTypeStr (${event.eventType}) | " +
-                    "Class: ${event.className} | " +
-                    "Text: ${event.text} | " +
-                    "Desc: ${event.contentDescription} | " +
-                    "AutoAcceptEnabled: ${preferencesManager.isAutoAcceptEnabled}"
+                "ðŸ“¥ [Rapido] eventPkg='$eventPkg', activePkg='$activeRootPkg', " +
+                    "type=${event.eventType}, AutoAcceptEnabled=${preferencesManager.isAutoAcceptEnabled}"
             )
-            // DO NOT return early if auto-accept is disabled:
-            // All incoming Rapido orders must be processed and logged to history.
         } else {
             if (!preferencesManager.isAutoAcceptEnabled) return
             if (isClickInProgress) return
@@ -607,17 +628,32 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         }
 
         val targetPkg = if (isRapido) {
-            if (eventPkg == "com.rapido.passenger" || isRapidoPackage(eventPkg)) eventPkg else "com.rapido.passenger"
-        } else eventPkg
+            if (eventPkg == "com.rapido.passenger" || isRapidoPackage(eventPkg)) {
+                eventPkg
+            } else {
+                "com.rapido.passenger"
+            }
+        } else {
+            eventPkg
+        }
 
-        val eventSource = try { event.source } catch (e: Exception) { null }
+        val eventSource = try { event.source } catch (_: Exception) { null }
 
-        // Move accessibility service logic to Dispatchers.IO background thread
-        serviceScope.launch(Dispatchers.IO) {
-            processAccessibilityEvent(targetPkg, eventSource, event.eventType)
+        if (isRapido) {
+            isRapidoEventProcessing = true
+            serviceScope.launch(Dispatchers.IO) {
+                try {
+                    processAccessibilityEvent(targetPkg, eventSource, event.eventType)
+                } finally {
+                    isRapidoEventProcessing = false
+                }
+            }
+        } else {
+            serviceScope.launch(Dispatchers.IO) {
+                processAccessibilityEvent(targetPkg, eventSource, event.eventType)
+            }
         }
     }
-
     private fun processAccessibilityEvent(
         eventPkg: String,
         eventSource: AccessibilityNodeInfo?,
@@ -3662,7 +3698,10 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     ) {
         serviceScope.launch(Dispatchers.IO) {
             try {
-                val updated = rideHistoryRepository.onOrderDecision(
+                // onOrderDetectedFast inserts PROCESSING asynchronously.
+                // A very fast decision can arrive before that insert finishes.
+                // Retry briefly so the same real ride cannot remain stuck at PROCESSING.
+                var updated = rideHistoryRepository.onOrderDecision(
                     id = recordId,
                     status = status,
                     reasonCode = reasonCode,
@@ -3670,16 +3709,37 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                     matchedGoTo = matchedGoTo,
                     matchedNoGo = matchedNoGo
                 )
-                if (updated != null) {
-                    repository.recordOrderHistory(updated.toOrderHistoryItem())
+
+                var retry = 0
+                while (updated == null && retry < 40) {
+                    delay(25L)
+                    retry++
+                    updated = rideHistoryRepository.onOrderDecision(
+                        id = recordId,
+                        status = status,
+                        reasonCode = reasonCode,
+                        reasonText = reasonText,
+                        matchedGoTo = matchedGoTo,
+                        matchedNoGo = matchedNoGo
+                    )
                 }
+
+                val finalUpdated = updated
+                if (finalUpdated == null) {
+                    Log.e(
+                        TAG,
+                        "Decision update failed after waiting for history insert: id=$recordId status=$status reason=$reasonCode"
+                    )
+                    return@launch
+                }
+
+                repository.recordOrderHistory(finalUpdated.toOrderHistoryItem())
                 prefs.notifyOrderHistoryChanged()
             } catch (e: Exception) {
                 Log.e(TAG, "Error in onOrderDecisionFast", e)
             }
         }
     }
-
     private fun onOrderActionAttemptFast(recordId: String) {
         serviceScope.launch(Dispatchers.IO) {
             try {
