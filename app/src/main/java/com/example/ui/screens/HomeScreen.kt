@@ -44,6 +44,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -560,24 +561,18 @@ fun HomeScreen(
                     ) {
                         // Clean Filter Mode selector
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text(
-                                        text = "Order Filters",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp,
-                                        color = TextDarkPrimary
-                                    )
-                                    Text(
-                                        text = "Choose what SmartDrivo should check",
-                                        fontSize = 12.sp,
-                                        color = TextDarkSecondary
-                                    )
-                                }
+                            Column {
+                                Text(
+                                    text = "Order Filters",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp,
+                                    color = TextDarkPrimary
+                                )
+                                Text(
+                                    text = "Choose what SmartDrivo should check",
+                                    fontSize = 12.sp,
+                                    color = TextDarkSecondary
+                                )
                             }
 
                             Row(
@@ -622,22 +617,7 @@ fun HomeScreen(
                             }
                         }
 
-                        // Clean Fare Filter card
-                        val fareActive by remember(settings.filterMode) {
-                            derivedStateOf {
-                                settings.filterMode == FilterMode.FARE_ONLY ||
-                                    settings.filterMode == FilterMode.BOTH
-                            }
-                        }
-
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (fareActive) Color.White else Color(0xFFFAFAFA)
-                            ),
-                            shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(1.dp, CardBorderDefault)
-                        ) {
+                        val fareSection: @Composable () -> Unit = {
                             Column(
                                 modifier = Modifier.padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -654,16 +634,13 @@ fun HomeScreen(
                                         Box(
                                             modifier = Modifier
                                                 .size(36.dp)
-                                                .background(
-                                                    if (fareActive) BlueContainer else Color(0xFFEEEEEE),
-                                                    RoundedCornerShape(10.dp)
-                                                ),
+                                                .background(BlueContainer, RoundedCornerShape(10.dp)),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
                                                 Icons.Default.CurrencyRupee,
                                                 contentDescription = null,
-                                                tint = if (fareActive) BluePrimary else Color.Gray,
+                                                tint = BluePrimary,
                                                 modifier = Modifier.size(20.dp)
                                             )
                                         }
@@ -673,24 +650,21 @@ fun HomeScreen(
                                                 text = "Fare Filter",
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 16.sp,
-                                                color = if (fareActive) TextDarkPrimary else Color.Gray
+                                                color = TextDarkPrimary
                                             )
                                             Text(
-                                                text = if (fareActive)
-                                                    "Accept \u20B9${settings.minFare.toInt()} to \u20B9${settings.maxFare.toInt()}"
-                                                else
-                                                    "Not used in current filter mode",
+                                                text = "Accept ₹${settings.minFare.toInt()} to ₹${settings.maxFare.toInt()}",
                                                 fontSize = 12.sp,
-                                                color = if (fareActive) BluePrimary else TextDarkSecondary
+                                                color = BluePrimary
                                             )
                                         }
                                     }
 
                                     Text(
-                                        text = if (fareActive) "Enabled" else "Off",
+                                        text = "Enabled",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
-                                        color = if (fareActive) StatusActiveGreen else TextDarkTertiary
+                                        color = StatusActiveGreen
                                     )
                                 }
 
@@ -711,7 +685,6 @@ fun HomeScreen(
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         singleLine = true,
                                         shape = RoundedCornerShape(10.dp),
-                                        enabled = fareActive,
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedBorderColor = BluePrimary,
                                             focusedLabelColor = BluePrimary,
@@ -735,7 +708,6 @@ fun HomeScreen(
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         singleLine = true,
                                         shape = RoundedCornerShape(10.dp),
-                                        enabled = fareActive,
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedBorderColor = BluePrimary,
                                             focusedLabelColor = BluePrimary,
@@ -748,68 +720,54 @@ fun HomeScreen(
                                 }
                             }
                         }
-                        // Distance Criteria Section
-                        val distActive by remember(settings.filterMode) {
-                            derivedStateOf { settings.filterMode == FilterMode.DISTANCE_ONLY || settings.filterMode == FilterMode.BOTH }
-                        }
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (distActive) Color.White else Color(0xFFFAFAFA)
-                            ),
-                            shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(1.dp, if (distActive) BlueBorder else CardBorderDefault)
-                        ) {
+
+                        val distanceSection: @Composable () -> Unit = {
                             Column(
-                                modifier = Modifier.padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(38.dp)
-                                                .background(if (distActive) BlueContainer else Color(0xFFEEEEEE), RoundedCornerShape(10.dp)),
+                                                .size(36.dp)
+                                                .background(BlueContainer, RoundedCornerShape(10.dp)),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
                                                 Icons.Default.NearMe,
                                                 contentDescription = null,
-                                                tint = if (distActive) BlueSecondary else Color.Gray,
+                                                tint = BlueSecondary,
                                                 modifier = Modifier.size(20.dp)
                                             )
                                         }
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Column {
-                                            Text(
-                                                text = "Distance Criteria",
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 16.sp,
-                                                color = if (distActive) TextDarkPrimary else Color.Gray
-                                            )
-                                            Text(
-                                                text = "Max Pickup: ${if (settings.maxPickupDistanceKm % 1.0f == 0f) settings.maxPickupDistanceKm.toInt().toString() else settings.maxPickupDistanceKm.toString()} km • Max Drop: ${if (settings.maxDropDistanceKm % 1.0f == 0f) settings.maxDropDistanceKm.toInt().toString() else settings.maxDropDistanceKm.toString()} km",
-                                                fontSize = 14.sp,
-                                                color = if (distActive) BlueSecondary else TextDarkSecondary
-                                            )
-                                        }
+
+                                        Text(
+                                            text = "Distance Criteria",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp,
+                                            color = TextDarkPrimary
+                                        )
                                     }
 
                                     Text(
-                                        text = if (distActive) "ACTIVE" else "OFF",
+                                        text = "Enabled",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
-                                        color = if (distActive) BlueSecondary else Color.Gray
+                                        color = StatusActiveGreen
                                     )
                                 }
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
                                     OutlinedTextField(
                                         value = maxPickupInput,
@@ -819,7 +777,7 @@ fun HomeScreen(
                                                 hasUnsavedChanges = true
                                             }
                                         },
-                                        label = { Text("Max Pickup (km)", fontSize = 14.sp) },
+                                        label = { Text("Max Pickup (km)", fontSize = 13.sp) },
                                         placeholder = { Text("3.0", fontSize = 14.sp, color = TextDarkTertiary) },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         singleLine = true,
@@ -842,7 +800,7 @@ fun HomeScreen(
                                                 hasUnsavedChanges = true
                                             }
                                         },
-                                        label = { Text("Max Drop Distance (km)", fontSize = 14.sp) },
+                                        label = { Text("Max Drop (km)", fontSize = 13.sp) },
                                         placeholder = { Text("7.5", fontSize = 14.sp, color = TextDarkTertiary) },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         singleLine = true,
@@ -860,6 +818,48 @@ fun HomeScreen(
                             }
                         }
 
+                        when (settings.filterMode) {
+                            FilterMode.FARE_ONLY -> {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = BorderStroke(1.dp, CardBorderDefault)
+                                ) {
+                                    fareSection()
+                                }
+                            }
+
+                            FilterMode.DISTANCE_ONLY -> {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = BorderStroke(1.dp, CardBorderDefault)
+                                ) {
+                                    distanceSection()
+                                }
+                            }
+
+                            FilterMode.BOTH -> {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = BorderStroke(1.dp, CardBorderDefault)
+                                ) {
+                                    Column {
+                                        fareSection()
+                                        HorizontalDivider(
+                                            modifier = Modifier.padding(horizontal = 14.dp),
+                                            thickness = 1.dp,
+                                            color = CardBorderDefault
+                                        )
+                                        distanceSection()
+                                    }
+                                }
+                            }
+                        }
                         // Save Settings Button
                         Button(
                             onClick = {
