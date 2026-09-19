@@ -139,10 +139,14 @@ fun HomeScreen(
     val context = LocalContext.current
     val settings by prefs.appSettings.collectAsState()
     val userProfile by prefs.userProfile.collectAsState()
-    val orderHistory by prefs.orderHistory.collectAsState()
     val historyEntities by historyViewModel.history.collectAsStateWithLifecycle()
-    val latestHistoryOrder = remember(historyEntities) {
-        historyEntities.firstOrNull()?.toOrderHistoryItem()
+    // Room is the single UI source of truth for ride history.
+    // Avoid collecting the legacy SharedPreferences JSON history in parallel.
+    val historyItems = remember(historyEntities) {
+        historyEntities.map { it.toOrderHistoryItem() }
+    }
+    val latestHistoryOrder = remember(historyItems) {
+        historyItems.firstOrNull()
     }
     val lastAccepted by prefs.lastAcceptedRide.collectAsState()
     val goToAreas by prefs.goToAreas.collectAsState()
@@ -269,14 +273,11 @@ fun HomeScreen(
         } else "7.5")
     }
 
-    LaunchedEffect(Unit) {
-        prefs.loadStats()
-    }
 
     // Calculate real-time stats for today
     val todayStr = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date()) }
-    val todayOrders by remember(orderHistory, todayStr) {
-        derivedStateOf { orderHistory.filter { it.dateStr == todayStr } }
+    val todayOrders by remember(historyItems, todayStr) {
+        derivedStateOf { historyItems.filter { it.dateStr == todayStr } }
     }
     val acceptedCount by remember(todayOrders) {
         derivedStateOf { todayOrders.count { it.status == OrderStatus.ACCEPTED } }

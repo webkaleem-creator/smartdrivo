@@ -107,28 +107,8 @@ fun OrderHistoryScreen(
     val history = remember(historyEntities) {
         historyEntities.sortedByDescending { it.detectedAt }.map { it.toOrderHistoryItem() }
     }
-    val totalAccepted by prefs.totalAcceptedFlow.collectAsState()
+    val totalAccepted by viewModel.acceptedCount.collectAsStateWithLifecycle()
 
-    fun loadStats() {
-        prefs.loadStats()
-    }
-
-    LaunchedEffect(Unit) {
-        loadStats()
-    }
-
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                loadStats()
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
 
     var selectedTab by remember { mutableStateOf(HistoryTab.ALL) }
     var selectedPlatformFilter by remember { mutableStateOf<Platform?>(null) }
