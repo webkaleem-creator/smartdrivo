@@ -204,7 +204,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             info.flags = info.flags or
                     android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
                     android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-            info.packageNames = null // Listen to all apps without blocking Rapido (com.rapido.passenger)
+            info.packageNames = ALLOWED_PACKAGES.toTypedArray()
             serviceInfo = info
             Log.i(TAG, "AccessibilityServiceInfo configured with TYPE_WINDOW_CONTENT_CHANGED & TYPE_WINDOW_STATE_CHANGED")
         } catch (e: Exception) {
