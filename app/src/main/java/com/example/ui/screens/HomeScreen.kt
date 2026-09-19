@@ -466,23 +466,6 @@ fun HomeScreen(
                 }
             }
 
-            // Automation Health Status Card
-            item {
-                AutomationHealthCard(
-                    isAccessibilityActive = isAccessibilityGranted,
-                    isOverlayActive = isOverlayGranted,
-                    isAutoAcceptActive = settings.isAutoAcceptActive,
-                    onClickAccessibility = {
-                        prefs.isPendingAutoAcceptActivation = true
-                        showAccessibilityDialog = true
-                    },
-                    onClickOverlay = {
-                        prefs.isPendingAutoAcceptActivation = true
-                        showOverlayDialog = true
-                    }
-                )
-            }
-
             // 2. AUTO-ACCEPT ORDERS toggle card (MOVED TO TOP)
             item {
                 Card(
@@ -575,30 +558,26 @@ fun HomeScreen(
                         modifier = Modifier.padding(10.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        // Top: Filter Mode Buttons ("Fare Only" | "Distance Only" | "Both")
+                        // Clean Filter Mode selector
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "FILTER MODE",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    color = TextDarkSecondary,
-                                    letterSpacing = 0.5.sp
-                                )
-                                Text(
-                                    text = "Active: ${settings.filterMode.displayName}",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    color = when (settings.filterMode) {
-                                        FilterMode.FARE_ONLY -> BluePrimary
-                                        FilterMode.DISTANCE_ONLY -> BlueSecondary
-                                        FilterMode.BOTH -> StatusActiveGreen
-                                    }
-                                )
+                                Column {
+                                    Text(
+                                        text = "Order Filters",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp,
+                                        color = TextDarkPrimary
+                                    )
+                                    Text(
+                                        text = "Choose what SmartDrivo should check",
+                                        fontSize = 12.sp,
+                                        color = TextDarkSecondary
+                                    )
+                                }
                             }
 
                             Row(
@@ -613,7 +592,7 @@ fun HomeScreen(
                                     val selectedBg = when (mode) {
                                         FilterMode.FARE_ONLY -> BluePrimary
                                         FilterMode.DISTANCE_ONLY -> BlueSecondary
-                                        FilterMode.BOTH -> Color(0xFF10B981)
+                                        FilterMode.BOTH -> StatusActiveGreen
                                     }
 
                                     Box(
@@ -624,14 +603,18 @@ fun HomeScreen(
                                             .clickable {
                                                 prefs.saveAppSettings(settings.copy(filterMode = mode))
                                             }
-                                            .padding(vertical = 8.dp, horizontal = 4.dp),
+                                            .padding(vertical = 9.dp, horizontal = 4.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
-                                            text = mode.displayName,
+                                            text = when (mode) {
+                                                FilterMode.FARE_ONLY -> "Fare"
+                                                FilterMode.DISTANCE_ONLY -> "Distance"
+                                                FilterMode.BOTH -> "Both"
+                                            },
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                             fontSize = 14.sp,
-                                            color = if (isSelected) Color.White else TextDarkPrimary,
+                                            color = if (isSelected) Color.White else TextDarkSecondary,
                                             maxLines = 1
                                         )
                                     }
@@ -639,32 +622,42 @@ fun HomeScreen(
                             }
                         }
 
-                        // Fare Criteria Section
+                        // Clean Fare Filter card
                         val fareActive by remember(settings.filterMode) {
-                            derivedStateOf { settings.filterMode == FilterMode.FARE_ONLY || settings.filterMode == FilterMode.BOTH }
+                            derivedStateOf {
+                                settings.filterMode == FilterMode.FARE_ONLY ||
+                                    settings.filterMode == FilterMode.BOTH
+                            }
                         }
+
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(
                                 containerColor = if (fareActive) Color.White else Color(0xFFFAFAFA)
                             ),
                             shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(1.dp, if (fareActive) BlueBorder else CardBorderDefault)
+                            border = BorderStroke(1.dp, CardBorderDefault)
                         ) {
                             Column(
-                                modifier = Modifier.padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(38.dp)
-                                                .background(if (fareActive) BlueContainer else Color(0xFFEEEEEE), RoundedCornerShape(10.dp)),
+                                                .size(36.dp)
+                                                .background(
+                                                    if (fareActive) BlueContainer else Color(0xFFEEEEEE),
+                                                    RoundedCornerShape(10.dp)
+                                                ),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
@@ -674,33 +667,36 @@ fun HomeScreen(
                                                 modifier = Modifier.size(20.dp)
                                             )
                                         }
-                                        Spacer(modifier = Modifier.width(12.dp))
+
                                         Column {
                                             Text(
-                                                text = "Fare Criteria",
+                                                text = "Fare Filter",
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 16.sp,
                                                 color = if (fareActive) TextDarkPrimary else Color.Gray
                                             )
                                             Text(
-                                                text = "Accepting: ₹${settings.minFare.toInt()} - ₹${settings.maxFare.toInt()}",
-                                                fontSize = 14.sp,
+                                                text = if (fareActive)
+                                                    "Accept \u20B9${settings.minFare.toInt()} to \u20B9${settings.maxFare.toInt()}"
+                                                else
+                                                    "Not used in current filter mode",
+                                                fontSize = 12.sp,
                                                 color = if (fareActive) BluePrimary else TextDarkSecondary
                                             )
                                         }
                                     }
 
                                     Text(
-                                        text = if (fareActive) "ACTIVE" else "OFF",
+                                        text = if (fareActive) "Enabled" else "Off",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
-                                        color = if (fareActive) BluePrimary else Color.Gray
+                                        color = if (fareActive) StatusActiveGreen else TextDarkTertiary
                                     )
                                 }
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
                                     OutlinedTextField(
                                         value = minFareInput,
@@ -710,11 +706,12 @@ fun HomeScreen(
                                                 hasUnsavedChanges = true
                                             }
                                         },
-                                        label = { Text("Minimum Fare (₹)", fontSize = 14.sp) },
+                                        label = { Text("Minimum Fare", fontSize = 13.sp) },
                                         placeholder = { Text("50", fontSize = 14.sp, color = TextDarkTertiary) },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         singleLine = true,
                                         shape = RoundedCornerShape(10.dp),
+                                        enabled = fareActive,
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedBorderColor = BluePrimary,
                                             focusedLabelColor = BluePrimary,
@@ -733,11 +730,12 @@ fun HomeScreen(
                                                 hasUnsavedChanges = true
                                             }
                                         },
-                                        label = { Text("Maximum Fare (₹)", fontSize = 14.sp) },
+                                        label = { Text("Maximum Fare", fontSize = 13.sp) },
                                         placeholder = { Text("999", fontSize = 14.sp, color = TextDarkTertiary) },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         singleLine = true,
                                         shape = RoundedCornerShape(10.dp),
+                                        enabled = fareActive,
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedBorderColor = BluePrimary,
                                             focusedLabelColor = BluePrimary,
@@ -750,7 +748,6 @@ fun HomeScreen(
                                 }
                             }
                         }
-
                         // Distance Criteria Section
                         val distActive by remember(settings.filterMode) {
                             derivedStateOf { settings.filterMode == FilterMode.DISTANCE_ONLY || settings.filterMode == FilterMode.BOTH }
