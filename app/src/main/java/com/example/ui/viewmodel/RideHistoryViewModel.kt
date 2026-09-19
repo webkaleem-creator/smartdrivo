@@ -11,9 +11,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class RideHistoryViewModel(
-    application: Application,
-    private val repository: RideHistoryRepository = RideHistoryRepository.getInstance(application)
+    application: Application
 ) : AndroidViewModel(application) {
+
+    private val repository: RideHistoryRepository = RideHistoryRepository.getInstance(application)
 
     val history: StateFlow<List<RideHistoryEntity>> = repository.allHistory
         .stateIn(
