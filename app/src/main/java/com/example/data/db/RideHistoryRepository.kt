@@ -63,7 +63,7 @@ class RideHistoryRepository(
 
             if (existing != null) {
                 // If existing record was detected within 20 seconds, treat as duplicate event
-                val isRecent = (now - existing.detectedAt) < 20_000L
+                val isRecent = (now - existing.detectedAt) < 8_000L
                 if (isRecent) {
                     val merged = existing.copy(
                         fare = if ((candidate.fare ?: 0f) > 0f) (candidate.fare ?: 0f) else existing.fare,

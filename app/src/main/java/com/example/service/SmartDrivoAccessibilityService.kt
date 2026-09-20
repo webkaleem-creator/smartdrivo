@@ -76,7 +76,10 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
     @Volatile
     private var lastRapidoEventDispatchAt = 0L
+
 
+    @Volatile
+    private var activeRapidoPopupOrderId: String? = null
     private val toggleReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "com.example.TOGGLE_CHANGED") {
@@ -606,10 +609,11 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         if (!isRapido && !isUber && !isOla) {
             return
         }
+        // Keep the old lag protection while the user is inside SmartDrivo,
+        // but DO NOT ignore a real Rapido accessibility event.
+        val isDirectRapidoEvent = isRapidoPackage(eventPkg)
 
-        // Do not keep parsing stale driver-app events while the user is inside SmartDrivo.
-        // This prevents the accessibility event storm from making the SmartDrivo UI lag.
-        if (activeRootPkg == selfPkg) {
+        if (activeRootPkg == selfPkg && !isDirectRapidoEvent) {
             return
         }
 
@@ -698,6 +702,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
             // Requirement 3: Check if root contains "Today's Earnings" or "ON DUTY" or "Blue Performance" -> HOME SCREEN, skip completely
             if (RapidoAdapter.isRapidoHomeScreen(sourceRoot) || RapidoAdapter.isRapidoHomeScreen(activeRoot)) {
+                activeRapidoPopupOrderId = null
                 Log.d(TAG, "🏠 Rapido home screen detected in event ('Today's Earnings' / 'ON DUTY' / 'Blue Performance'). Skipping completely.")
                 return
             }
@@ -720,6 +725,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                     return
                 }
             } else {
+                activeRapidoPopupOrderId = null
                 Log.d(TAG, "ℹ️ [Rapido] Event from $eventPkg does not contain a genuine order popup with fare, pickup distance, and Accept button. Skipping.")
             }
         }
@@ -2316,19 +2322,22 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             fare = finalFare,
             pickupDistKm = rawCandidate.pickupDistKm ?: validation.pickupDistKm
         )
-
-        // Skip duplicate orders using bookingId / order identifier check
+        // Ignore repeated accessibility events only for the CURRENT visible Rapido popup.
+        // Do not blacklist an order signature for minutes: legitimate offers can arrive quickly.
         val bookingId = candidate.bookingId
         val orderId = getOrderIdentifier(candidate)
-        if (isDuplicateRapidoBookingId(bookingId) || isDuplicateRapidoOrderId(orderId)) {
-            Log.i(TAG, "⏭️ Duplicate Rapido order skipped (bookingId: $bookingId, orderId: $orderId)")
+
+        if (activeRapidoPopupOrderId == orderId) {
+            Log.i(
+                TAG,
+                "⏭️ Duplicate event for current Rapido popup skipped " +
+                    "(bookingId: $bookingId, orderId: $orderId)"
+            )
             resetProcessing()
             return
         }
 
-        // Record order ID immediately so we don't process it repeatedly
-        if (!bookingId.isNullOrBlank()) recordRapidoBookingId(bookingId)
-        recordRapidoOrderId(orderId)
+        activeRapidoPopupOrderId = orderId
 
         // PART B/E: Detection-First Insert: IMMEDIATELY create one History record with PROCESSING status in Room
         val recordId = onOrderDetectedFast(candidate)

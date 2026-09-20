@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -113,6 +114,7 @@ fun OrderHistoryScreen(
     var selectedTab by remember { mutableStateOf(HistoryTab.ALL) }
     var selectedPlatformFilter by remember { mutableStateOf<Platform?>(null) }
     var selectedDateRange by remember { mutableStateOf("All") } // "Today", "Yesterday", "Last 7 Days", "All"
+    val historyListState = rememberLazyListState()
 
     val todayStr = remember {
         SimpleDateFormat("dd/MM/yyyy", Locale.ENGLISH).apply {
@@ -159,6 +161,14 @@ fun OrderHistoryScreen(
         }
     }
 
+    // AUTO-SCROLL TO NEWEST ORDER
+    val newestVisibleOrderId = filteredList.firstOrNull()?.id
+
+    LaunchedEffect(newestVisibleOrderId) {
+        if (newestVisibleOrderId != null && filteredList.isNotEmpty()) {
+            historyListState.scrollToItem(0)
+        }
+    }
     val totalAcceptedCount by remember(totalAccepted, acceptedCount) {
         derivedStateOf { totalAccepted.coerceAtLeast(acceptedCount) }
     }
@@ -461,6 +471,7 @@ fun OrderHistoryScreen(
                 }
             } else {
                 LazyColumn(
+                    state = historyListState,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 8.dp),
