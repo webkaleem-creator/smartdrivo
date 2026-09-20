@@ -163,7 +163,7 @@ fun MoreScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item { Spacer(modifier = Modifier.height(4.dp)) }
 
@@ -312,20 +312,20 @@ fun MoreScreen(
                 SectionHeader("PLATFORM & VEHICLE")
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
                     border = BorderStroke(1.dp, CardBorderDefault)
                 ) {
                     Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         // Driver Platforms
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(
                                     modifier = Modifier
-                                        .size(38.dp)
+                                        .size(30.dp)
                                         .background(BlueContainer, RoundedCornerShape(10.dp)),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -333,25 +333,25 @@ fun MoreScreen(
                                         imageVector = Icons.Default.Layers,
                                         contentDescription = null,
                                         tint = BluePrimary,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(17.dp)
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(12.dp))
+                                Spacer(modifier = Modifier.width(9.dp))
                                 Column {
                                     Text(
                                         text = "Driver Platforms",
-                                        fontSize = 16.sp,
+                                        fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = TextDarkPrimary
                                     )
                                     Text(
                                         text = "Select partner apps to monitor",
-                                        fontSize = 13.sp,
+                                        fontSize = 11.sp,
                                         color = TextDarkSecondary
                                     )
                                 }
                             }
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -360,7 +360,7 @@ fun MoreScreen(
                                 FilterChip(
                                     selected = settings.rapidoEnabled,
                                     onClick = { prefs.saveAppSettings(settings.copy(rapidoEnabled = !settings.rapidoEnabled)) },
-                                    label = { Text("Rapido ✓", fontSize = 14.sp) },
+                                    label = { Text("Rapido ✓", fontSize = 12.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = PlatformRapido,
                                         selectedLabelColor = Color.White,
@@ -377,7 +377,7 @@ fun MoreScreen(
                                 FilterChip(
                                     selected = settings.uberEnabled,
                                     onClick = { prefs.saveAppSettings(settings.copy(uberEnabled = !settings.uberEnabled)) },
-                                    label = { Text("Uber ✓", fontSize = 14.sp) },
+                                    label = { Text("Uber ✓", fontSize = 12.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = Color(0xFF212121),
                                         selectedLabelColor = Color.White,
@@ -394,7 +394,7 @@ fun MoreScreen(
                                 FilterChip(
                                     selected = settings.olaEnabled,
                                     onClick = { prefs.saveAppSettings(settings.copy(olaEnabled = !settings.olaEnabled)) },
-                                    label = { Text("Ola ✓", fontSize = 14.sp) },
+                                    label = { Text("Ola ✓", fontSize = 12.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = StatusActiveGreen,
                                         selectedLabelColor = Color.White,
@@ -418,7 +418,7 @@ fun MoreScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(
                                     modifier = Modifier
-                                        .size(38.dp)
+                                        .size(30.dp)
                                         .background(BlueContainer, RoundedCornerShape(10.dp)),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -426,25 +426,25 @@ fun MoreScreen(
                                         imageVector = Icons.Default.DirectionsCar,
                                         contentDescription = null,
                                         tint = BlueSecondary,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(17.dp)
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(12.dp))
+                                Spacer(modifier = Modifier.width(9.dp))
                                 Column {
                                     Text(
                                         text = "Vehicle Type",
-                                        fontSize = 16.sp,
+                                        fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = TextDarkPrimary
                                     )
                                     Text(
                                         text = "Filter rides by vehicle category",
-                                        fontSize = 13.sp,
+                                        fontSize = 11.sp,
                                         color = TextDarkSecondary
                                     )
                                 }
                             }
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -454,9 +454,9 @@ fun MoreScreen(
                                     selected = settings.bikeEnabled,
                                     onClick = { prefs.saveAppSettings(settings.copy(bikeEnabled = !settings.bikeEnabled)) },
                                     leadingIcon = {
-                                        Text("🏍️", fontSize = 14.sp)
+                                        Text("🏍️", fontSize = 12.sp)
                                     },
-                                    label = { Text("Bike", fontSize = 13.sp) },
+                                    label = { Text("Bike", fontSize = 11.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = BlueSecondary,
                                         selectedLabelColor = Color.White,
@@ -468,9 +468,9 @@ fun MoreScreen(
                                     selected = settings.autoEnabled,
                                     onClick = { prefs.saveAppSettings(settings.copy(autoEnabled = !settings.autoEnabled)) },
                                     leadingIcon = {
-                                        Text("🛺", fontSize = 14.sp)
+                                        Text("🛺", fontSize = 12.sp)
                                     },
-                                    label = { Text("Auto Rickshaw", fontSize = 13.sp) },
+                                    label = { Text("Auto Rickshaw", fontSize = 11.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = BlueSecondary,
                                         selectedLabelColor = Color.White,
@@ -482,9 +482,9 @@ fun MoreScreen(
                                     selected = settings.carEnabled,
                                     onClick = { prefs.saveAppSettings(settings.copy(carEnabled = !settings.carEnabled)) },
                                     leadingIcon = {
-                                        Text("🚗", fontSize = 14.sp)
+                                        Text("🚗", fontSize = 12.sp)
                                     },
-                                    label = { Text("Car", fontSize = 13.sp) },
+                                    label = { Text("Car", fontSize = 11.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = BlueSecondary,
                                         selectedLabelColor = Color.White,
@@ -565,14 +565,14 @@ fun MoreScreen(
                 SectionHeader("SHARE SMARTDRIVO APP")
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
                     border = BorderStroke(1.dp, CardBorderDefault)
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp)
+                            .padding(10.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -580,30 +580,30 @@ fun MoreScreen(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(42.dp)
+                                    .size(30.dp)
                                     .background(Color(0xFFDCFCE7), RoundedCornerShape(10.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("📲", fontSize = 20.sp)
+                                Text("📲", fontSize = 16.sp)
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
+                            Spacer(modifier = Modifier.width(9.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "Share SmartDrivo App",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp,
+                                    fontSize = 14.sp,
                                     color = TextDarkPrimary
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = "Share with other drivers on WhatsApp",
-                                    fontSize = 12.sp,
+                                    fontSize = 11.sp,
                                     color = TextDarkSecondary
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
                         val shareText = "SmartDrivo - Auto Accept karo Rapido/Uber/Ola orders automatically!\nApp download link coming soon. Contact: webkaleem@gmail.com"
 
@@ -626,7 +626,7 @@ fun MoreScreen(
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(46.dp),
+                                .height(40.dp),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF25D366),
@@ -638,28 +638,10 @@ fun MoreScreen(
                             Text(
                                 text = "Share via WhatsApp",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
+                                fontSize = 11.sp
                             )
                         }
                     }
-                }
-            }
-
-            // 6. ENGINE RELIABILITY & DIAGNOSTICS
-            item {
-                SectionHeader("ENGINE RELIABILITY")
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = CardBackground),
-                    border = BorderStroke(1.dp, CardBorderDefault)
-                ) {
-                    MoreCardRow(
-                        icon = Icons.Default.BugReport,
-                        title = "Ride Diagnostics Monitor",
-                        subtitle = "Live rule evaluations, button detection & latencies",
-                        onClick = onNavigateToDiagnostics
-                    )
                 }
             }
 
@@ -819,12 +801,12 @@ fun MoreCardRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 13.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(38.dp)
+                .size(30.dp)
                 .background(BlueContainer, RoundedCornerShape(10.dp)),
             contentAlignment = Alignment.Center
         ) {
@@ -832,22 +814,22 @@ fun MoreCardRow(
                 imageVector = icon,
                 contentDescription = null,
                 tint = BluePrimary,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(17.dp)
             )
         }
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(9.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
                 fontWeight = FontWeight.Bold,
-                fontSize = 15.sp,
+                fontSize = 14.sp,
                 color = TextDarkPrimary
             )
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(1.dp))
             Text(
                 text = subtitle,
                 fontWeight = FontWeight.Normal,
-                fontSize = 13.sp,
+                fontSize = 11.sp,
                 color = TextDarkSecondary
             )
         }
@@ -855,7 +837,7 @@ fun MoreCardRow(
             imageVector = Icons.Default.ChevronRight,
             contentDescription = null,
             tint = TextDarkTertiary,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(17.dp)
         )
     }
 }

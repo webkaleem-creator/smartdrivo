@@ -45,6 +45,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -146,11 +147,7 @@ fun HomeScreen(
     val historyItems = remember(historyEntities) {
         historyEntities.map { it.toOrderHistoryItem() }
     }
-    val latestHistoryOrder = remember(historyItems) {
-        historyItems.firstOrNull()
-    }
-    val lastAccepted by prefs.lastAcceptedRide.collectAsState()
-    val goToAreas by prefs.goToAreas.collectAsState()
+val goToAreas by prefs.goToAreas.collectAsState()
     val noGoAreas by prefs.noGoAreas.collectAsState()
     val activeAreaFilterCount by remember(goToAreas, noGoAreas) {
         derivedStateOf { goToAreas.size + noGoAreas.size }
@@ -220,6 +217,12 @@ fun HomeScreen(
                     .setPackage(context.packageName)
                     .putExtra("enabled", false)
             )
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar(
+                    message = "Auto-Accept is now OFF",
+                    duration = SnackbarDuration.Short
+                )
+            }
         } else {
             val hasAccessibility = PermissionHelper.isAccessibilityPermissionGranted(context)
             val hasOverlay = PermissionHelper.isOverlayPermissionGranted(context)
@@ -283,25 +286,6 @@ fun HomeScreen(
     val acceptedCount by remember(todayOrders) {
         derivedStateOf { todayOrders.count { it.status == OrderStatus.ACCEPTED } }
     }
-    val rejectedCount by remember(todayOrders) {
-        derivedStateOf {
-            todayOrders.count {
-                it.reason.contains("No-Go", ignoreCase = true) ||
-                it.reason.contains("nogo", ignoreCase = true) ||
-                it.reason.contains("No Go", ignoreCase = true)
-            }
-        }
-    }
-    val ignoredCount by remember(todayOrders) {
-        derivedStateOf {
-            todayOrders.count {
-                it.status != OrderStatus.ACCEPTED &&
-                !(it.reason.contains("No-Go", ignoreCase = true) ||
-                  it.reason.contains("nogo", ignoreCase = true) ||
-                  it.reason.contains("No Go", ignoreCase = true))
-            }
-        }
-    }
     val earningsAssisted by remember(todayOrders) {
         derivedStateOf {
             todayOrders
@@ -360,6 +344,99 @@ fun HomeScreen(
         ) {
             item { Spacer(modifier = Modifier.height(4.dp)) }
 
+            // HOME TOP: Compact Today's Performance
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, CardBorderDefault)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            text = "Today's Performance",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextDarkPrimary
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = todayOrders.size.toString(),
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BluePrimary
+                                )
+                                Text(
+                                    text = "Total Orders",
+                                    fontSize = 11.sp,
+                                    color = TextDarkSecondary,
+                                    maxLines = 1
+                                )
+                            }
+
+                            VerticalDivider(
+                                modifier = Modifier.height(38.dp),
+                                thickness = 1.dp,
+                                color = CardBorderDefault
+                            )
+
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = acceptedCount.toString(),
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = StatusActiveGreen
+                                )
+                                Text(
+                                    text = "Accepted",
+                                    fontSize = 11.sp,
+                                    color = TextDarkSecondary,
+                                    maxLines = 1
+                                )
+                            }
+
+                            VerticalDivider(
+                                modifier = Modifier.height(38.dp),
+                                thickness = 1.dp,
+                                color = CardBorderDefault
+                            )
+
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "₹$earningsAssisted",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BlueSecondary
+                                )
+                                Text(
+                                    text = "Today Earning",
+                                    fontSize = 11.sp,
+                                    color = TextDarkSecondary,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+            }
             // Accessibility Service Warning (Colorful Warning Card)
             if (!isAccessibilityGranted) {
                 item {
@@ -467,7 +544,7 @@ fun HomeScreen(
                 }
             }
 
-            // 2. AUTO-ACCEPT ORDERS toggle card (MOVED TO TOP)
+            // 2. AUTO-ACCEPT ORDERS — COMPACT V2
             item {
                 Card(
                     modifier = Modifier
@@ -478,57 +555,56 @@ fun HomeScreen(
                     colors = CardDefaults.cardColors(
                         containerColor = if (settings.isAutoAcceptActive) StatusActiveGreenBg else StatusInactiveRedBg
                     ),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     border = BorderStroke(
-                        1.5.dp,
+                        1.dp,
                         if (settings.isAutoAcceptActive) StatusActiveGreenBorder else StatusInactiveRedBorder
                     )
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .background(
+                                    if (settings.isAutoAcceptActive) Color(0xFFDCFCE7) else Color(0xFFFFEBEE),
+                                    RoundedCornerShape(8.dp)
+                                ),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .background(
-                                        if (settings.isAutoAcceptActive) Color(0xFFDCFCE7) else Color(0xFFFFEBEE),
-                                        RoundedCornerShape(10.dp)
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.ElectricBolt,
-                                    contentDescription = null,
-                                    tint = if (settings.isAutoAcceptActive) StatusActiveGreen else StatusInactiveRed,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Auto-Accept Orders",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextDarkPrimary
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = if (settings.isAutoAcceptActive)
-                                        "ACTIVE — Instant click & filter enabled"
-                                    else
-                                        "INACTIVE — Auto click is paused",
-                                    fontSize = 14.sp,
-                                    color = TextDarkSecondary
-                                )
-                            }
+                            Icon(
+                                Icons.Default.ElectricBolt,
+                                contentDescription = null,
+                                tint = if (settings.isAutoAcceptActive) StatusActiveGreen else StatusInactiveRed,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(9.dp))
+
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Auto-Accept Orders",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextDarkPrimary,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = if (settings.isAutoAcceptActive)
+                                    "ACTIVE • Ready"
+                                else
+                                    "INACTIVE • Paused",
+                                fontSize = 11.sp,
+                                color = if (settings.isAutoAcceptActive) StatusActiveGreen else TextDarkSecondary,
+                                maxLines = 1
+                            )
                         }
 
                         Switch(
@@ -546,26 +622,25 @@ fun HomeScreen(
                     }
                 }
             }
-
             // 3. Filter Mode buttons + Fare Criteria card + Distance Criteria card
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     border = BorderStroke(1.dp, CardBorderDefault)
                 ) {
                     Column(
                         modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         // Clean Filter Mode selector
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Column {
                                 Text(
                                     text = "Order Filters",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
+                                    fontSize = 14.sp,
                                     color = TextDarkPrimary
                                 )
                                 Text(
@@ -598,7 +673,7 @@ fun HomeScreen(
                                             .clickable {
                                                 prefs.saveAppSettings(settings.copy(filterMode = mode))
                                             }
-                                            .padding(vertical = 9.dp, horizontal = 4.dp),
+                                            .padding(vertical = 7.dp, horizontal = 4.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
@@ -608,7 +683,7 @@ fun HomeScreen(
                                                 FilterMode.BOTH -> "Both"
                                             },
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            fontSize = 14.sp,
+                                            fontSize = 12.sp,
                                             color = if (isSelected) Color.White else TextDarkSecondary,
                                             maxLines = 1
                                         )
@@ -619,8 +694,8 @@ fun HomeScreen(
 
                         val fareSection: @Composable () -> Unit = {
                             Column(
-                                modifier = Modifier.padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -633,7 +708,7 @@ fun HomeScreen(
                                     ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(36.dp)
+                                                .size(30.dp)
                                                 .background(BlueContainer, RoundedCornerShape(10.dp)),
                                             contentAlignment = Alignment.Center
                                         ) {
@@ -641,7 +716,7 @@ fun HomeScreen(
                                                 Icons.Default.CurrencyRupee,
                                                 contentDescription = null,
                                                 tint = BluePrimary,
-                                                modifier = Modifier.size(20.dp)
+                                                modifier = Modifier.size(17.dp)
                                             )
                                         }
 
@@ -649,7 +724,7 @@ fun HomeScreen(
                                             Text(
                                                 text = "Fare Filter",
                                                 fontWeight = FontWeight.Bold,
-                                                fontSize = 16.sp,
+                                                fontSize = 14.sp,
                                                 color = TextDarkPrimary
                                             )
                                             Text(
@@ -680,8 +755,8 @@ fun HomeScreen(
                                                 hasUnsavedChanges = true
                                             }
                                         },
-                                        label = { Text("Minimum Fare", fontSize = 13.sp) },
-                                        placeholder = { Text("50", fontSize = 14.sp, color = TextDarkTertiary) },
+                                        label = { Text("Minimum Fare", fontSize = 11.sp) },
+                                        placeholder = { Text("50", fontSize = 12.sp, color = TextDarkTertiary) },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         singleLine = true,
                                         shape = RoundedCornerShape(10.dp),
@@ -703,8 +778,8 @@ fun HomeScreen(
                                                 hasUnsavedChanges = true
                                             }
                                         },
-                                        label = { Text("Maximum Fare", fontSize = 13.sp) },
-                                        placeholder = { Text("999", fontSize = 14.sp, color = TextDarkTertiary) },
+                                        label = { Text("Maximum Fare", fontSize = 11.sp) },
+                                        placeholder = { Text("999", fontSize = 12.sp, color = TextDarkTertiary) },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         singleLine = true,
                                         shape = RoundedCornerShape(10.dp),
@@ -723,8 +798,8 @@ fun HomeScreen(
 
                         val distanceSection: @Composable () -> Unit = {
                             Column(
-                                modifier = Modifier.padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -737,7 +812,7 @@ fun HomeScreen(
                                     ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(36.dp)
+                                                .size(30.dp)
                                                 .background(BlueContainer, RoundedCornerShape(10.dp)),
                                             contentAlignment = Alignment.Center
                                         ) {
@@ -745,14 +820,14 @@ fun HomeScreen(
                                                 Icons.Default.NearMe,
                                                 contentDescription = null,
                                                 tint = BlueSecondary,
-                                                modifier = Modifier.size(20.dp)
+                                                modifier = Modifier.size(17.dp)
                                             )
                                         }
 
                                         Text(
                                             text = "Distance Criteria",
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 16.sp,
+                                            fontSize = 14.sp,
                                             color = TextDarkPrimary
                                         )
                                     }
@@ -777,8 +852,8 @@ fun HomeScreen(
                                                 hasUnsavedChanges = true
                                             }
                                         },
-                                        label = { Text("Max Pickup (km)", fontSize = 13.sp) },
-                                        placeholder = { Text("3.0", fontSize = 14.sp, color = TextDarkTertiary) },
+                                        label = { Text("Max Pickup (km)", fontSize = 11.sp) },
+                                        placeholder = { Text("3.0", fontSize = 12.sp, color = TextDarkTertiary) },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         singleLine = true,
                                         shape = RoundedCornerShape(10.dp),
@@ -800,8 +875,8 @@ fun HomeScreen(
                                                 hasUnsavedChanges = true
                                             }
                                         },
-                                        label = { Text("Max Drop (km)", fontSize = 13.sp) },
-                                        placeholder = { Text("7.5", fontSize = 14.sp, color = TextDarkTertiary) },
+                                        label = { Text("Max Drop (km)", fontSize = 11.sp) },
+                                        placeholder = { Text("7.5", fontSize = 12.sp, color = TextDarkTertiary) },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         singleLine = true,
                                         shape = RoundedCornerShape(10.dp),
@@ -884,7 +959,7 @@ fun HomeScreen(
                             enabled = true,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(50.dp)
+                                .height(44.dp)
                                 .testTag("save_settings_button"),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(
@@ -895,199 +970,110 @@ fun HomeScreen(
                             Icon(
                                 Icons.Default.CheckCircle,
                                 contentDescription = null,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(17.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "Save Settings",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
+                                fontSize = 12.sp
                             )
                         }
                     }
                 }
             }
 
-            // 4. Today's Performance Stats
-            item {
-                Text(
-                    text = "Today's Performance",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextDarkPrimary
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    StatCard(
-                        title = "Accepted",
-                        value = acceptedCount.toString(),
-                        color = StatusActiveGreen,
-                        modifier = Modifier.weight(1f)
-                    )
-                    StatCard(
-                        title = "Rejected",
-                        value = rejectedCount.toString(),
-                        color = StatusInactiveRed,
-                        modifier = Modifier.weight(1f)
-                    )
-                    StatCard(
-                        title = "Ignored",
-                        value = ignoredCount.toString(),
-                        color = StatusWarningYellow,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = CardBackground),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, CardBorderDefault)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Earnings Assisted (Today)",
-                            fontSize = 14.sp,
-                            color = TextDarkSecondary
-                        )
-                        Text(
-                            text = "₹$earningsAssisted",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = BluePrimary
-                        )
-                    }
-                }
-            }
-
-            // Last Accepted Ride Info Card
-            if (lastAccepted != null) {
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = StatusActiveGreenBg),
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.5.dp, StatusActiveGreenBorder)
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "LAST ACCEPTED RIDE (${lastAccepted!!.platform.name}):",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = StatusActiveGreen
-                                )
-                                Text(
-                                    text = lastAccepted!!.timeStr,
-                                    fontSize = 14.sp,
-                                    color = TextDarkSecondary
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "₹${lastAccepted!!.amount.toInt()}  →  ${lastAccepted!!.dropArea.ifEmpty { "Drop Point" }}",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextDarkPrimary
-                            )
-                            if (lastAccepted!!.pickupAddress.isNotEmpty()) {
-                                Text(
-                                    text = "Pickup: ${lastAccepted!!.pickupAddress}",
-                                    fontSize = 14.sp,
-                                    color = TextDarkSecondary,
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 7. Area Rules Engine card
+            // 7. Area Rules Engine card — COMPACT
             item {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onNavigateToAreaManager() },
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     border = BorderStroke(1.dp, CardBorderDefault)
                 ) {
                     Row(
-                        modifier = Modifier.padding(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(38.dp)
-                                .background(BlueContainer, RoundedCornerShape(10.dp)),
+                                .size(30.dp)
+                                .background(BlueContainer, RoundedCornerShape(8.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Default.Map,
                                 contentDescription = null,
                                 tint = BlueSecondary,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(17.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Spacer(modifier = Modifier.width(9.dp))
+
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = "Area Rules Engine",
                                     fontWeight = FontWeight.Bold,
                                     color = TextDarkPrimary,
-                                    fontSize = 16.sp
+                                    fontSize = 14.sp,
+                                    maxLines = 1
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
+
+                                Spacer(modifier = Modifier.width(6.dp))
+
                                 Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (activeAreaFilterCount > 0) Color(0xFFDCFCE7) else Color(0xFFF1F5F9),
-                                    border = BorderStroke(1.dp, if (activeAreaFilterCount > 0) Color(0xFF86EFAC) else Color(0xFFE2E8F0))
+                                    shape = RoundedCornerShape(7.dp),
+                                    color = if (activeAreaFilterCount > 0)
+                                        Color(0xFFDCFCE7)
+                                    else
+                                        Color(0xFFF1F5F9),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (activeAreaFilterCount > 0)
+                                            Color(0xFF86EFAC)
+                                        else
+                                            Color(0xFFE2E8F0)
+                                    )
                                 ) {
                                     Text(
                                         text = "$activeAreaFilterCount Active",
-                                        fontSize = 12.sp,
+                                        fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (activeAreaFilterCount > 0) Color(0xFF15803D) else Color(0xFF64748B),
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        color = if (activeAreaFilterCount > 0)
+                                            Color(0xFF15803D)
+                                        else
+                                            Color(0xFF64748B),
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                                     )
                                 }
                             }
+
                             Text(
                                 text = if (activeAreaFilterCount > 0)
-                                    "${goToAreas.size} Go-To (Green) • ${noGoAreas.size} No-Go (Red)"
+                                    "${goToAreas.size} Go-To • ${noGoAreas.size} No-Go"
                                 else
-                                    "Configure GO TO & NO GO filter groups",
+                                    "Configure GO TO & NO GO groups",
                                 color = TextDarkSecondary,
-                                fontSize = 14.sp
+                                fontSize = 11.sp,
+                                maxLines = 1
                             )
                         }
+
                         Icon(
                             Icons.Default.ChevronRight,
                             contentDescription = null,
-                            tint = TextDarkSecondary
+                            tint = TextDarkSecondary,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
             }
-
             item {
                 Spacer(modifier = Modifier.height(16.dp))
             }

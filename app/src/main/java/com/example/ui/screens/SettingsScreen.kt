@@ -180,7 +180,7 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item { Spacer(modifier = Modifier.height(4.dp)) }
 
@@ -192,13 +192,13 @@ fun SettingsScreen(
                     colors = CardDefaults.cardColors(
                         containerColor = CardBackground
                     ),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     border = BorderStroke(1.dp, CardBorderDefault),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         SettingToggleRow(
                             icon = Icons.Default.ElectricBolt,
@@ -242,7 +242,7 @@ fun SettingsScreen(
                             )
 
                             Column(
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                verticalArrangement = Arrangement.spacedBy(7.dp)
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -250,7 +250,7 @@ fun SettingsScreen(
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .size(38.dp)
+                                            .size(30.dp)
                                             .background(
                                                 BlueContainer,
                                                 RoundedCornerShape(10.dp)
@@ -261,12 +261,12 @@ fun SettingsScreen(
                                             Icons.Default.NearMe,
                                             contentDescription = null,
                                             tint = BluePrimary,
-                                            modifier = Modifier.size(20.dp)
+                                            modifier = Modifier.size(17.dp)
                                         )
                                     }
 
                                     Spacer(
-                                        modifier = Modifier.width(12.dp)
+                                        modifier = Modifier.width(9.dp)
                                     )
 
                                     Column(
@@ -275,13 +275,13 @@ fun SettingsScreen(
                                         Text(
                                             text = "Maximum Pickup Distance",
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 16.sp,
+                                            fontSize = 14.sp,
                                             color = TextDarkPrimary
                                         )
 
                                         Text(
                                             text = "Required while Fastest Mode is ON",
-                                            fontSize = 13.sp,
+                                            fontSize = 11.sp,
                                             color = TextDarkSecondary
                                         )
                                     }
@@ -310,7 +310,7 @@ fun SettingsScreen(
                                     label = {
                                         Text(
                                             "Maximum Pickup Distance (km) *",
-                                            fontSize = 14.sp
+                                            fontSize = 12.sp
                                         )
                                     },
                                     supportingText = {
@@ -333,7 +333,7 @@ fun SettingsScreen(
                                         Text(
                                             "3.0",
                                             color = TextDarkTertiary,
-                                            fontSize = 14.sp
+                                            fontSize = 12.sp
                                         )
                                     },
                                     keyboardOptions = KeyboardOptions(
@@ -384,7 +384,7 @@ fun SettingsScreen(
                                     Icon(
                                         Icons.Default.CheckCircle,
                                         contentDescription = null,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(17.dp)
                                     )
 
                                     Spacer(
@@ -394,14 +394,14 @@ fun SettingsScreen(
                                     Text(
                                         text = "Save Maximum Pickup",
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp
+                                        fontSize = 12.sp
                                     )
                                 }
                             }
                         } else {
                             Text(
                                 text = "Fare and Distance filters are managed from the Home screen.",
-                                fontSize = 13.sp,
+                                fontSize = 11.sp,
                                 color = TextDarkSecondary
                             )
                         }
@@ -413,13 +413,13 @@ fun SettingsScreen(
                 SectionHeader("2. SUPPORTED PLATFORMS")
                 Card(
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     border = BorderStroke(1.dp, CardBorderDefault),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         // Rapido Toggle
                         SettingToggleRow(
@@ -467,65 +467,6 @@ fun SettingsScreen(
                 }
             }
 
-            // Diagnostics & Reliability Section
-            item {
-                SectionHeader("ENGINE DIAGNOSTICS & RELIABILITY")
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = LightSurface),
-                    border = BorderStroke(1.dp, CardBorderDefault),
-                    onClick = onNavigateToDiagnostics
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(BlueContainer),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.BugReport,
-                                    contentDescription = null,
-                                    tint = BluePrimary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Ride Diagnostics Monitor",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = TextDarkPrimary
-                                )
-                                Text(
-                                    text = "Live rule evaluations, button detection & latencies",
-                                    fontSize = 12.sp,
-                                    color = TextDarkSecondary
-                                )
-                            }
-                        }
-                        Icon(
-                            imageVector = Icons.Default.ChevronRight,
-                            contentDescription = "Open Diagnostics",
-                            tint = TextDarkTertiary
-                        )
-                    }
-                }
-            }
-
             item {
                 Spacer(modifier = Modifier.height(24.dp))
             }
@@ -565,7 +506,7 @@ private fun SettingToggleRow(
             if (icon != null) {
                 Box(
                     modifier = Modifier
-                        .size(38.dp)
+                        .size(30.dp)
                         .background(BlueContainer, RoundedCornerShape(10.dp)),
                     contentAlignment = Alignment.Center
                 ) {
@@ -573,21 +514,21 @@ private fun SettingToggleRow(
                         imageVector = icon,
                         contentDescription = null,
                         tint = iconTint,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                 }
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(9.dp))
             }
             Column(modifier = Modifier.weight(1f, fill = false)) {
                 Text(
                     text = title,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
+                    fontSize = 11.sp,
                     color = TextDarkPrimary
                 )
                 Text(
                     text = subtitle,
-                    fontSize = 14.sp,
+                    fontSize = 11.sp,
                     color = TextDarkSecondary
                 )
             }
