@@ -147,7 +147,9 @@ fun AreaManagerScreen(
                 it.id != saved.id && it.name.equals(saved.name, ignoreCase = true)
             }
             if (duplicate) {
-                scope.launch { snackbar.showSnackbar("Go-To group '${saved.name}' already exists") }
+                scope.launch {
+                    snackbar.showSnackbar("Go-To group '${saved.name}' already exists")
+                }
                 return
             }
 
@@ -157,13 +159,29 @@ fun AreaManagerScreen(
             } else {
                 goToGroups + saved
             }
+
             persist(updated, noGoGroups)
+
+            val saveAction = if (exists) "updated" else "created"
+            val status = if (saved.isEnabled && saved.keywords.isNotEmpty()) {
+                "ACTIVE"
+            } else {
+                "OFF"
+            }
+
+            scope.launch {
+                val message =
+                    "Go-To '${saved.name}' $saveAction ✓ • $status"
+                snackbar.showSnackbar(message)
+            }
         } else {
             val duplicate = noGoGroups.any {
                 it.id != saved.id && it.name.equals(saved.name, ignoreCase = true)
             }
             if (duplicate) {
-                scope.launch { snackbar.showSnackbar("No-Go group '${saved.name}' already exists") }
+                scope.launch {
+                    snackbar.showSnackbar("No-Go group '${saved.name}' already exists")
+                }
                 return
             }
 
@@ -173,10 +191,23 @@ fun AreaManagerScreen(
             } else {
                 noGoGroups + saved
             }
+
             persist(goToGroups, updated)
+
+            val saveAction = if (exists) "updated" else "created"
+            val status = if (saved.isEnabled && saved.keywords.isNotEmpty()) {
+                "ACTIVE"
+            } else {
+                "OFF"
+            }
+
+            scope.launch {
+                val message =
+                    "No-Go '${saved.name}' $saveAction ✓ • $status"
+                snackbar.showSnackbar(message)
+            }
         }
     }
-
     val visibleGroups = if (selectedType == AreaType.GO_TO) goToGroups else noGoGroups
     val accent = if (selectedType == AreaType.GO_TO) GoToGreen else NoGoRed
 

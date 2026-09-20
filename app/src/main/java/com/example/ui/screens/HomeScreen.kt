@@ -149,8 +149,18 @@ fun HomeScreen(
     }
 val goToAreas by prefs.goToAreas.collectAsState()
     val noGoAreas by prefs.noGoAreas.collectAsState()
-    val activeAreaFilterCount by remember(goToAreas, noGoAreas) {
-        derivedStateOf { goToAreas.size + noGoAreas.size }
+    val activeGoToCount by remember(goToAreas) {
+        derivedStateOf {
+            goToAreas.count { it.isEnabled && it.keywords.isNotEmpty() }
+        }
+    }
+    val activeNoGoCount by remember(noGoAreas) {
+        derivedStateOf {
+            noGoAreas.count { it.isEnabled && it.keywords.isNotEmpty() }
+        }
+    }
+    val activeAreaFilterCount by remember(activeGoToCount, activeNoGoCount) {
+        derivedStateOf { activeGoToCount + activeNoGoCount }
     }
 
     var showSimulateDialog by remember { mutableStateOf(false) }
@@ -255,6 +265,20 @@ val goToAreas by prefs.goToAreas.collectAsState()
 
     // Fare and Distance inputs with rememberSaveable and hasUnsavedChanges
     var hasUnsavedChanges by rememberSaveable { mutableStateOf(false) }
+
+    // The tab the driver is currently editing. It does NOT become active
+    // until Save Settings is pressed.
+    var pendingFilterMode by remember { mutableStateOf(settings.filterMode) }
+
+    // Last successfully saved mode. Used only for the Enabled/Disabled badge.
+    var savedFilterMode by remember { mutableStateOf(settings.filterMode) }
+
+    LaunchedEffect(settings.filterMode) {
+        savedFilterMode = settings.filterMode
+        if (!hasUnsavedChanges) {
+            pendingFilterMode = settings.filterMode
+        }
+    }
 
     var minFareInput by rememberSaveable {
         mutableStateOf(if (settings.minFare > 0) {
@@ -658,7 +682,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 FilterMode.values().forEach { mode ->
-                                    val isSelected = settings.filterMode == mode
+                                    val isSelected = pendingFilterMode == mode
                                     val selectedBg = when (mode) {
                                         FilterMode.FARE_ONLY -> BluePrimary
                                         FilterMode.DISTANCE_ONLY -> BlueSecondary
@@ -671,7 +695,10 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                             .clip(RoundedCornerShape(9.dp))
                                             .background(if (isSelected) selectedBg else Color.Transparent)
                                             .clickable {
-                                                prefs.saveAppSettings(settings.copy(filterMode = mode))
+                                                if (pendingFilterMode != mode) {
+                                                    pendingFilterMode = mode
+                                                    hasUnsavedChanges = true
+                                                }
                                             }
                                             .padding(vertical = 7.dp, horizontal = 4.dp),
                                         contentAlignment = Alignment.Center
@@ -690,6 +717,23 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                     }
                                 }
                             }
+                        }
+
+                        // Badge status belongs to the CURRENTLY VIEWED mode.
+                        // Fare/Distance keep their own saved status.
+                        // BOTH is one combined mode: until BOTH itself is saved,
+                        // both criteria must show Disabled; after saving BOTH,
+                        // both criteria show Enabled.
+                        val fareIsEnabled = when (pendingFilterMode) {
+                            FilterMode.FARE_ONLY -> savedFilterMode == FilterMode.FARE_ONLY
+                            FilterMode.DISTANCE_ONLY -> false
+                            FilterMode.BOTH -> savedFilterMode == FilterMode.BOTH
+                        }
+
+                        val distanceIsEnabled = when (pendingFilterMode) {
+                            FilterMode.FARE_ONLY -> false
+                            FilterMode.DISTANCE_ONLY -> savedFilterMode == FilterMode.DISTANCE_ONLY
+                            FilterMode.BOTH -> savedFilterMode == FilterMode.BOTH
                         }
 
                         val fareSection: @Composable () -> Unit = {
@@ -736,10 +780,10 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                     }
 
                                     Text(
-                                        text = "Enabled",
+                                        text = if (fareIsEnabled) "Enabled" else "Disabled",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
-                                        color = StatusActiveGreen
+                                        color = if (fareIsEnabled) StatusActiveGreen else StatusInactiveRed
                                     )
                                 }
 
@@ -833,10 +877,10 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                     }
 
                                     Text(
-                                        text = "Enabled",
+                                        text = if (distanceIsEnabled) "Enabled" else "Disabled",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
-                                        color = StatusActiveGreen
+                                        color = if (distanceIsEnabled) StatusActiveGreen else StatusInactiveRed
                                     )
                                 }
 
@@ -893,7 +937,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
                             }
                         }
 
-                        when (settings.filterMode) {
+                        when (pendingFilterMode) {
                             FilterMode.FARE_ONLY -> {
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
@@ -945,15 +989,26 @@ val goToAreas by prefs.goToAreas.collectAsState()
 
                                 prefs.saveAppSettings(
                                     settings.copy(
+                                        filterMode = pendingFilterMode,
                                         minFare = minF,
                                         maxFare = maxF,
                                         maxPickupDistanceKm = maxP,
                                         maxDropDistanceKm = maxD
                                     )
                                 )
+                                savedFilterMode = pendingFilterMode
                                 hasUnsavedChanges = false
+
+                                val savedModeLabel = when (pendingFilterMode) {
+                                    FilterMode.FARE_ONLY -> "Fare"
+                                    FilterMode.DISTANCE_ONLY -> "Distance"
+                                    FilterMode.BOTH -> "Both"
+                                }
+
                                 coroutineScope.launch {
-                                    snackbarHostState.showSnackbar("Saved ✓")
+                                    snackbarHostState.showSnackbar(
+                                        "$savedModeLabel settings saved ✓"
+                                    )
                                 }
                             },
                             enabled = true,
@@ -1056,9 +1111,9 @@ val goToAreas by prefs.goToAreas.collectAsState()
 
                             Text(
                                 text = if (activeAreaFilterCount > 0)
-                                    "${goToAreas.size} Go-To • ${noGoAreas.size} No-Go"
+                                    "$activeGoToCount Go-To • $activeNoGoCount No-Go"
                                 else
-                                    "Configure GO TO & NO GO groups",
+                                    "No active area rules",
                                 color = TextDarkSecondary,
                                 fontSize = 11.sp,
                                 maxLines = 1
