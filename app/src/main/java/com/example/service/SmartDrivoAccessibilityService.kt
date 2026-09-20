@@ -508,40 +508,66 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         val checkDistance = filterMode == "distance_only" || filterMode == "both"
         val checkFare = filterMode == "fare_only" || filterMode == "both"
 
-        // 2. Distance checks (pickup and drop): Only evaluated when checkDistance is true (distance_only or both)
-        // All other filter failures (fare, pickup km, drop km) → OrderStatus.IGNORED
+        // Build a complete decision report instead of stopping at the first failure.
+        // This preserves the REAL order values + the filter limits that were active
+        // at the exact moment the order was evaluated.
+        val failureReasons = mutableListOf<String>()
+
         if (checkDistance) {
-            // Pickup distance check: If pickup distance > maxPickupKm -> IGNORED
             if (pickup != null && direct.maxPickupKm > 0f && pickup > direct.maxPickupKm) {
-                val reason = "Pickup distance (${pickup}km) exceeds max limit (${direct.maxPickupKm}km)"
-                Log.w(TAG, "⏭️ [Direct Filter IGNORED] $reason")
-                return DirectFilterResult(OrderStatus.IGNORED, reason)
+                failureReasons += "Pickup ${"%.1f".format(pickup)} km > max ${"%.1f".format(direct.maxPickupKm)} km"
             }
 
-            // Drop distance check: If drop distance > maxDropKm -> IGNORED
             if (drop != null && direct.maxDropKm > 0f && drop > direct.maxDropKm) {
-                val reason = "Drop distance (${drop}km) exceeds max limit (${direct.maxDropKm}km)"
-                Log.w(TAG, "⏭️ [Direct Filter IGNORED] $reason")
-                return DirectFilterResult(OrderStatus.IGNORED, reason)
+                failureReasons += "Trip ${"%.1f".format(drop)} km > max ${"%.1f".format(direct.maxDropKm)} km"
             }
         }
 
-        // 3. Fare check: Only evaluated when checkFare is true (fare_only or both)
-        if (checkFare) {
-            if (fare != null && fare > 0f) {
-                if (direct.minFare > 0f && fare < direct.minFare) {
-                    val reason = "Fare ₹${fare.toInt()} is below min fare ₹${direct.minFare.toInt()}"
-                    Log.w(TAG, "⏭️ [Direct Filter IGNORED] $reason")
-                    return DirectFilterResult(OrderStatus.IGNORED, reason)
-                }
-                if (direct.maxFare > 0f && fare > direct.maxFare) {
-                    val reason = "Fare ₹${fare.toInt()} exceeds max fare ₹${direct.maxFare.toInt()}"
-                    Log.w(TAG, "⏭️ [Direct Filter IGNORED] $reason")
-                    return DirectFilterResult(OrderStatus.IGNORED, reason)
-                }
+        if (checkFare && fare != null && fare > 0f) {
+            if (direct.minFare > 0f && fare < direct.minFare) {
+                failureReasons += "Fare ₹${fare.toInt()} < min ₹${direct.minFare.toInt()}"
+            }
+            if (direct.maxFare > 0f && fare > direct.maxFare) {
+                failureReasons += "Fare ₹${fare.toInt()} > max ₹${direct.maxFare.toInt()}"
             }
         }
 
+        if (failureReasons.isNotEmpty()) {
+            val modeLabel = when (filterMode) {
+                "fare_only" -> "Fare Only"
+                "distance_only" -> "Distance Only"
+                "both" -> "Both"
+                else -> filterMode
+            }
+
+            val orderParts = mutableListOf<String>()
+            if (fare != null && fare > 0f) orderParts += "Fare ₹${fare.toInt()}"
+            orderParts += "Pickup ${pickup?.let { "%.1f km".format(it) } ?: "N/A"}"
+            orderParts += "Trip ${drop?.let { "%.1f km".format(it) } ?: "N/A"}"
+
+            val limitParts = mutableListOf<String>()
+            if (checkFare) {
+                val minText = if (direct.minFare > 0f) "₹${direct.minFare.toInt()}" else "OFF"
+                val maxText = if (direct.maxFare > 0f) "₹${direct.maxFare.toInt()}" else "OFF"
+                limitParts += "Fare $minText-$maxText"
+            }
+            if (checkDistance) {
+                val pickupLimit = if (direct.maxPickupKm > 0f) "${"%.1f".format(direct.maxPickupKm)} km" else "OFF"
+                val dropLimit = if (direct.maxDropKm > 0f) "${"%.1f".format(direct.maxDropKm)} km" else "OFF"
+                limitParts += "Pickup ≤ $pickupLimit"
+                limitParts += "Trip ≤ $dropLimit"
+            }
+
+            val reason = buildString {
+                append("Mode: $modeLabel")
+                append("\nOrder: ${orderParts.joinToString(" | ")}")
+                append("\nLimits: ${limitParts.joinToString(" | ")}")
+                append("\nWhy ignored: ${failureReasons.joinToString("; ")}")
+            }
+
+            Log.w(TAG, "⏭️ [Direct Filter IGNORED] $reason")
+            return DirectFilterResult(OrderStatus.IGNORED, reason)
+        }
         // All filters passed → OrderStatus.ACCEPTED
         return DirectFilterResult(OrderStatus.ACCEPTED, "All direct filters passed")
     }

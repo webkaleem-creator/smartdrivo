@@ -311,7 +311,7 @@ fun OrderHistoryScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 3.dp),
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = CardBackground),
                 border = BorderStroke(1.dp, CardBorderDefault)
@@ -319,7 +319,7 @@ fun OrderHistoryScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -354,7 +354,7 @@ fun OrderHistoryScreen(
                     Box(
                         modifier = Modifier
                             .width(1.dp)
-                            .height(28.dp)
+                            .height(24.dp)
                             .background(CardBorderDefault)
                     )
 
@@ -381,7 +381,7 @@ fun OrderHistoryScreen(
                     Box(
                         modifier = Modifier
                             .width(1.dp)
-                            .height(28.dp)
+                            .height(24.dp)
                             .background(CardBorderDefault)
                     )
 
@@ -411,7 +411,7 @@ fun OrderHistoryScreen(
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 2.dp),
+                    .padding(horizontal = 8.dp, vertical = 1.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 val dates = listOf("All", "Today", "Yesterday")
@@ -419,7 +419,7 @@ fun OrderHistoryScreen(
                     FilterChip(
                         selected = selectedDateRange == d,
                         onClick = { selectedDateRange = d },
-                        label = { Text(d, fontSize = 12.sp) },
+                        label = { Text(d, fontSize = 11.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = BluePrimary,
                             selectedLabelColor = Color.White,
@@ -435,7 +435,7 @@ fun OrderHistoryScreen(
                         onClick = {
                             selectedPlatformFilter = if (selectedPlatformFilter == platform) null else platform
                         },
-                        label = { Text(platform.displayName, fontSize = 12.sp) },
+                        label = { Text(platform.displayName, fontSize = 11.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = when (platform) {
                                 Platform.RAPIDO -> PlatformRapido
@@ -489,6 +489,7 @@ fun OrderHistoryScreen(
     }
 }
 
+// HISTORY COMPACT UI SAFE V3
 @Composable
 private fun HistoryCard(item: OrderHistoryItem) {
     val formattedTime = remember(item.timestamp) {
@@ -538,7 +539,7 @@ private fun HistoryCard(item: OrderHistoryItem) {
                     Box(
                         modifier = Modifier
                             .background(platformBg, RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .padding(horizontal = 5.dp, vertical = 1.dp)
                     ) {
                         Text(
                             item.platform.displayName,
@@ -552,7 +553,7 @@ private fun HistoryCard(item: OrderHistoryItem) {
                     Box(
                         modifier = Modifier
                             .background(BlueContainer, RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .padding(horizontal = 5.dp, vertical = 1.dp)
                     ) {
                         Text(
                             item.vehicleType.name,
@@ -583,7 +584,7 @@ private fun HistoryCard(item: OrderHistoryItem) {
                 Box(
                     modifier = Modifier
                         .background(statusBg, RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .padding(horizontal = 5.dp, vertical = 1.dp)
                 ) {
                     Text(
                         text = statusLabel,
@@ -617,7 +618,7 @@ private fun HistoryCard(item: OrderHistoryItem) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -686,7 +687,7 @@ private fun HistoryCard(item: OrderHistoryItem) {
                     border = BorderStroke(1.dp, BlueSecondary.copy(alpha = 0.25f))
                 ) {
                     Row(
-                        modifier = Modifier.padding(4.dp),
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("📍", fontSize = 10.sp)
@@ -707,7 +708,7 @@ private fun HistoryCard(item: OrderHistoryItem) {
                     border = BorderStroke(1.dp, CardBorderDefault)
                 ) {
                     Row(
-                        modifier = Modifier.padding(4.dp),
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("🎯", fontSize = 10.sp)
@@ -733,11 +734,11 @@ private fun HistoryCard(item: OrderHistoryItem) {
                 ) {
                     Box(
                         modifier = Modifier
-                            .padding(top = 3.dp)
+                            .padding(top = 2.dp)
                             .size(8.dp)
                             .background(StatusActiveGreen, CircleShape)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = "PICKUP ADDRESS",
@@ -753,7 +754,7 @@ private fun HistoryCard(item: OrderHistoryItem) {
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Normal,
                             color = TextDarkPrimary,
-                            lineHeight = 15.sp
+                            lineHeight = 14.sp
                         )
                     }
                 }
@@ -765,11 +766,11 @@ private fun HistoryCard(item: OrderHistoryItem) {
                 ) {
                     Box(
                         modifier = Modifier
-                            .padding(top = 3.dp)
+                            .padding(top = 2.dp)
                             .size(8.dp)
                             .background(StatusInactiveRed, CircleShape)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = "DROP ADDRESS",
@@ -785,7 +786,7 @@ private fun HistoryCard(item: OrderHistoryItem) {
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Normal,
                             color = TextDarkPrimary,
-                            lineHeight = 15.sp
+                            lineHeight = 14.sp
                         )
                     }
                 }
@@ -800,14 +801,14 @@ private fun HistoryCard(item: OrderHistoryItem) {
                             .fillMaxWidth()
                             .background(StatusActiveGreenBg, RoundedCornerShape(8.dp))
                             .border(BorderStroke(1.dp, StatusActiveGreen.copy(alpha = 0.5f)), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("✅", fontSize = 13.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Column {
                                 Text(
                                     text = "Order Accepted",
@@ -846,14 +847,14 @@ private fun HistoryCard(item: OrderHistoryItem) {
                             .fillMaxWidth()
                             .background(StatusWarningYellowBg, RoundedCornerShape(8.dp))
                             .border(BorderStroke(1.dp, StatusWarningYellow.copy(alpha = 0.6f)), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("ℹ️", fontSize = 13.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Column {
                                 Text(
                                     text = "Order Ignored",
@@ -892,14 +893,14 @@ private fun HistoryCard(item: OrderHistoryItem) {
                             .fillMaxWidth()
                             .background(StatusInactiveRedBg, RoundedCornerShape(8.dp))
                             .border(BorderStroke(1.dp, StatusInactiveRed.copy(alpha = 0.5f)), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("❌", fontSize = 13.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Column {
                                 Text(
                                     text = "Order Rejected",
@@ -924,14 +925,14 @@ private fun HistoryCard(item: OrderHistoryItem) {
                             .fillMaxWidth()
                             .background(Color(0xFFFFF9C4), RoundedCornerShape(8.dp))
                             .border(BorderStroke(1.dp, Color(0xFFFBC02D).copy(alpha = 0.6f)), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("⏳", fontSize = 13.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Column {
                                 Text(
                                     text = "Processing Order",
@@ -956,14 +957,14 @@ private fun HistoryCard(item: OrderHistoryItem) {
                             .fillMaxWidth()
                             .background(Color(0xFFFFEBEE), RoundedCornerShape(8.dp))
                             .border(BorderStroke(1.dp, Color(0xFFEF9A9A)), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("⚠️", fontSize = 13.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Column {
                                 Text(
                                     text = "Action Failed",
@@ -988,14 +989,14 @@ private fun HistoryCard(item: OrderHistoryItem) {
                             .fillMaxWidth()
                             .background(Color(0xFFEDE7F6), RoundedCornerShape(8.dp))
                             .border(BorderStroke(1.dp, Color(0xFFD1C4E9)), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("⏭️", fontSize = 13.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Column {
                                 Text(
                                     text = "Order Skipped",
@@ -1020,14 +1021,14 @@ private fun HistoryCard(item: OrderHistoryItem) {
                             .fillMaxWidth()
                             .background(Color(0xFFF5F5F5), RoundedCornerShape(8.dp))
                             .border(BorderStroke(1.dp, Color(0xFFE0E0E0)), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("⏱️", fontSize = 13.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Column {
                                 Text(
                                     text = "Order Missed",
@@ -1064,8 +1065,8 @@ private fun HistoryCard(item: OrderHistoryItem) {
                     border = BorderStroke(1.dp, Color(0xFFE2E8F0))
                 ) {
                     Column(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
