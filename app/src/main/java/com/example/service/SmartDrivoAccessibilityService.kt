@@ -766,43 +766,108 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             }
         }
 
-        // 2. Check Rapido: Allow processing when Rapido sends events even if partially in background
-        val isRapidoPkg = eventPkg == "com.rapido.passenger" || isRapidoPackage(eventPkg)
+        // 2. Check Rapido: overlay-safe detection.
+        // A real order popup can appear over Rapido Home, SmartDrivo,
+        // or another foreground screen. Search for a valid popup FIRST.
+        val isRapidoPkg =
+            eventPkg == "com.rapido.passenger" ||
+                isRapidoPackage(eventPkg)
+
         if (isRapidoPkg) {
             Log.d("SmartDrivo", "Rapido event received: $eventType")
-            val activeRoot = rootInActiveWindow
-            val sourceRoot = getTopRootNode(eventSource)
 
-            // Requirement 3: Check if root contains "Today's Earnings" or "ON DUTY" or "Blue Performance" -> HOME SCREEN, skip completely
-            if (RapidoAdapter.isRapidoHomeScreen(sourceRoot) || RapidoAdapter.isRapidoHomeScreen(activeRoot)) {
-                activeRapidoPopupOrderId = null
-                Log.d(TAG, "🏠 Rapido home screen detected in event ('Today's Earnings' / 'ON DUTY' / 'Blue Performance'). Skipping completely.")
+            val candidateRoots =
+                mutableListOf<AccessibilityNodeInfo>()
+
+            fun addCandidateRoot(node: AccessibilityNodeInfo?) {
+                if (node == null) return
+
+                val top = getTopRootNode(node) ?: node
+                val pkg =
+                    top.packageName
+                        ?.toString()
+                        .orEmpty()
+                        .trim()
+                        .lowercase(Locale.ROOT)
+
+                if (isRapidoPackage(pkg) || pkg == "com.rapido.passenger") {
+                    if (candidateRoots.none { it === top }) {
+                        candidateRoots.add(top)
+                    }
+                }
+            }
+
+            addCandidateRoot(eventSource)
+            addCandidateRoot(rootInActiveWindow)
+
+            try {
+                windows.forEach { window ->
+                    addCandidateRoot(window.root)
+                }
+            } catch (e: Exception) {
+                Log.w(
+                    TAG,
+                    "⚠️ [Rapido] Unable to scan accessibility windows: ${e.message}"
+                )
+            }
+
+            var validatedRoot: AccessibilityNodeInfo? = null
+            var validatedPopup: RapidoPopupValidation? = null
+
+            for (root in candidateRoots) {
+                val validation =
+                    RapidoAdapter.validateRapidoOrderPopup(root)
+
+                if (validation.isValid) {
+                    validatedRoot = root
+                    validatedPopup = validation
+                    break
+                }
+            }
+
+            if (validatedRoot != null && validatedPopup != null) {
+                Log.i(
+                    TAG,
+                    "🎯 [Rapido] Genuine order popup detected across windows: " +
+                        "fare=₹${validatedPopup.fare}, " +
+                        "pickupKm=${validatedPopup.pickupDistKm}, " +
+                        "nearby=${validatedPopup.hasNearby}, " +
+                        "rootsScanned=${candidateRoots.size}"
+                )
+
+                handleRapidoOrder(
+                    validatedRoot,
+                    validatedPopup
+                )
                 return
             }
 
-            // Find the node tree containing a genuine Rapido order popup
-            val candidateRoot = when {
-                sourceRoot != null && RapidoAdapter.validateRapidoOrderPopup(sourceRoot).isValid -> sourceRoot
-                activeRoot != null && RapidoAdapter.validateRapidoOrderPopup(activeRoot).isValid -> activeRoot
-                else -> null
-            }
-
-            if (candidateRoot != null) {
-                val validation = RapidoAdapter.validateRapidoOrderPopup(candidateRoot)
-                if (validation.isValid) {
-                    Log.i(
-                        TAG,
-                        "🎯 [Rapido] Genuine order popup detected: fare=₹${validation.fare}, pickupKm=${validation.pickupDistKm}, nearby=${validation.hasNearby}"
-                    )
-                    handleRapidoOrder(candidateRoot, validation)
-                    return
+            val anyRapidoHome =
+                candidateRoots.any {
+                    RapidoAdapter.isRapidoHomeScreen(it)
                 }
-            } else {
-                activeRapidoPopupOrderId = null
-                Log.d(TAG, "ℹ️ [Rapido] Event from $eventPkg does not contain a genuine order popup with fare, pickup distance, and Accept button. Skipping.")
-            }
-        }
 
+            if (anyRapidoHome) {
+                activeRapidoPopupOrderId = null
+
+                Log.d(
+                    TAG,
+                    "🏠 Rapido home screen detected and NO valid order popup " +
+                        "was found across ${candidateRoots.size} Rapido root(s). " +
+                        "Skipping."
+                )
+                return
+            }
+
+            activeRapidoPopupOrderId = null
+
+            Log.d(
+                TAG,
+                "ℹ️ [Rapido] No genuine order popup found across " +
+                    "${candidateRoots.size} Rapido root(s). " +
+                    "Need fare + pickup distance + Accept button."
+            )
+        }
         // 3. Check Ola window or event for ola.cabs / com.olacabs.oladriver
         val isOlaPkg = isOlaPackage(eventPkg)
         if (isOlaPkg && preferencesManager.isAutoAcceptEnabled) {
@@ -2347,24 +2412,30 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             return
         }
 
-        // Requirement 3: Add a check: if the root node contains "Today's Earnings" or "ON DUTY" or "Blue Performance" -> HOME SCREEN, skip completely
-        if (RapidoAdapter.isRapidoHomeScreen(root)) {
-            Log.i(TAG, "🏠 Rapido HOME SCREEN detected ('Today's Earnings' / 'ON DUTY' / 'Blue Performance'). Skipping completely.")
-            return
-        }
+        // Validate genuine popup BEFORE applying home-screen detection.
+        // A real Rapido order card can be rendered as an overlay while
+        // underlying Home text is still present in the same node tree.
+        val validation =
+            preValidation
+                ?: RapidoAdapter.validateRapidoOrderPopup(root)
 
-        // Requirement 1 & 2: Only process Rapido data when a REAL ORDER POPUP is visible:
-        // Must have ALL together:
-        // - Fare amount not inside "Today's Earnings" or "Earnings" container
-        // - Pickup distance in km OR "Nearby"
-        // - "Accept" or "ACCEPT" button visible on screen
-        // If any of these are missing -> do NOT log to history, do NOT process
-        val validation = preValidation ?: RapidoAdapter.validateRapidoOrderPopup(root)
         if (!validation.isValid) {
-            Log.d(TAG, "❌ Rapido order popup missing required elements: ${validation.failureReason}. Do NOT log to history, do NOT process.")
+            if (RapidoAdapter.isRapidoHomeScreen(root)) {
+                Log.i(
+                    TAG,
+                    "🏠 Rapido HOME SCREEN detected with no valid order popup. " +
+                        "Skipping completely."
+                )
+            } else {
+                Log.d(
+                    TAG,
+                    "❌ Rapido order popup missing required elements: " +
+                        "${validation.failureReason}. " +
+                        "Do NOT log to history, do NOT process."
+                )
+            }
             return
         }
-
         // Fast direct candidate extraction (under 50ms)
         val rawCandidate = extractRapidoCandidate(
             root = root,
@@ -2402,21 +2473,28 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         val recordId = onOrderDetectedFast(candidate)
         Log.i(TAG, "⚡ Rapido order detected & inserted to Room [PROCESSING]: Fare=₹${candidate.fare}, pickup=${candidate.pickupAddress}")
 
-        // If auto-accept is OFF, update record as IGNORED
-        if (!preferencesManager.isAutoAcceptEnabled) {
+        // Auto-Accept and Auto-Reject are independent.
+        // BOTH OFF -> manual mode.
+        // Auto-Reject ON + Auto-Accept OFF -> bad offers may be skipped,
+        // matching offers remain visible for manual acceptance.
+        val settings = prefs.loadSettings()
+        val autoAcceptEnabled =
+            preferencesManager.isAutoAcceptEnabled
+        val autoRejectEnabled =
+            settings.isAutoRejectBadFaresEnabled
+
+        if (!autoAcceptEnabled && !autoRejectEnabled) {
             onOrderDecisionFast(
                 recordId = recordId,
                 candidate = candidate,
                 status = OrderStatus.IGNORED,
-                reasonCode = "TOGGLE_DISABLED",
-                reasonText = "Auto-accept toggle is OFF"
+                reasonCode = "MANUAL_MODE",
+                reasonText =
+                    "Auto-Accept OFF • Auto-Reject OFF • Manual mode"
             )
             resetProcessing()
             return
         }
-
-        // Reload settings fresh from PreferencesManager before evaluating ride
-        val settings = prefs.loadSettings()
         val userProfile = prefs.userProfile.value
 
         // Check if user is approved and active
@@ -2485,23 +2563,36 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             }
 
             // Direct SharedPreferences Filter Evaluation before evaluating ANY ride
-            val directResult = evaluateDirectRideFilters(candidate)
+            val directResult =
+                evaluateDirectRideFilters(candidate)
+
             when (directResult.status) {
-                OrderStatus.REJECTED -> {
-                    Log.i(TAG, "Rapido ride rejected by direct filter: ${directResult.reason}")
-                    attemptRejectOrder(root, Platform.RAPIDO, candidate, directResult.reason, pkg)
-                    return
-                }
+                OrderStatus.REJECTED,
                 OrderStatus.IGNORED -> {
-                    Log.i(TAG, "Rapido ride ignored by direct filter: ${directResult.reason}")
-                    logOrderEvent(candidate, OrderStatus.IGNORED, directResult.reason)
-                    resetProcessing()
+                    Log.i(
+                        TAG,
+                        "Rapido ride failed direct filter: " +
+                            "${directResult.reason} " +
+                            "(autoReject=$autoRejectEnabled)"
+                    )
+
+                    handleRapidoFilterFailure(
+                        root = root,
+                        candidate = candidate,
+                        recordId = recordId,
+                        reason = directResult.reason,
+                        defaultStatus = directResult.status
+                    )
                     return
                 }
+
                 OrderStatus.ACCEPTED -> {
-                    // Direct filters passed, continue evaluation
+                    // Direct filters passed.
                 }
-                else -> { /* no-op */ }
+
+                else -> {
+                    // no-op
+                }
             }
 
             // Fix 2: Vibrate only once per order using lastVibratedOrderId
@@ -2514,9 +2605,18 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             }
 
             if (!isVehicleAllowed) {
-                Log.d(TAG, "Vehicle type ${candidate.vehicleType} disabled in settings")
-                logOrderEvent(candidate, OrderStatus.REJECTED, "Vehicle ${candidate.vehicleType} disabled in settings")
-                resetProcessing()
+                val reason =
+                    "Vehicle ${candidate.vehicleType} disabled in settings"
+
+                Log.d(TAG, reason)
+
+                handleRapidoFilterFailure(
+                    root = root,
+                    candidate = candidate,
+                    recordId = recordId,
+                    reason = reason,
+                    defaultStatus = OrderStatus.REJECTED
+                )
                 return
             }
 
@@ -2525,10 +2625,27 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             val goToAreas = prefs.loadGoToAreas()
             val noGoAreas = prefs.loadNoGoAreas()
 
-            val pickupAreaDecision = checkPickupAreaRules(pickupText, goToAreas, noGoAreas)
+            val pickupAreaDecision =
+                checkPickupAreaRules(
+                    pickupText,
+                    goToAreas,
+                    noGoAreas
+                )
+
             if (pickupAreaDecision is DecisionResult.Reject) {
-                Log.i(TAG, "Rapido ride rejected by pickup area rule: ${pickupAreaDecision.reason}")
-                attemptRejectOrder(root, Platform.RAPIDO, candidate, pickupAreaDecision.reason, pkg)
+                Log.i(
+                    TAG,
+                    "Rapido ride failed pickup area rule: " +
+                        pickupAreaDecision.reason
+                )
+
+                handleRapidoFilterFailure(
+                    root = root,
+                    candidate = candidate,
+                    recordId = recordId,
+                    reason = pickupAreaDecision.reason,
+                    defaultStatus = OrderStatus.REJECTED
+                )
                 return
             }
 
@@ -2551,20 +2668,62 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             )
 
             if (decision is DecisionResult.Reject) {
-                val isNoGo = decision.reason.contains("No-Go", ignoreCase = true)
-                if (isNoGo) {
-                    Log.i(TAG, "Rapido ride rejected by filter: ${decision.reason}")
-                    attemptRejectOrder(root, Platform.RAPIDO, candidate, decision.reason, pkg)
-                } else {
-                    Log.i(TAG, "Rapido ride ignored by filter: ${decision.reason}")
-                    logOrderEvent(candidate, OrderStatus.IGNORED, decision.reason)
-                    resetProcessing()
-                }
+                val isNoGo =
+                    decision.reason.contains(
+                        "No-Go",
+                        ignoreCase = true
+                    )
+
+                Log.i(
+                    TAG,
+                    "Rapido ride failed Area Rules filter: " +
+                        "${decision.reason} " +
+                        "(autoReject=$autoRejectEnabled)"
+                )
+
+                handleRapidoFilterFailure(
+                    root = root,
+                    candidate = candidate,
+                    recordId = recordId,
+                    reason = decision.reason,
+                    defaultStatus =
+                        if (isNoGo)
+                            OrderStatus.REJECTED
+                        else
+                            OrderStatus.IGNORED
+                )
                 return
             }
+
             if (decision is DecisionResult.Ignore) {
-                Log.i(TAG, "Rapido ride ignored: ${decision.reason}")
-                logOrderEvent(candidate, OrderStatus.IGNORED, decision.reason)
+                Log.i(
+                    TAG,
+                    "Rapido ride ignored by Area Rules: " +
+                        "${decision.reason} " +
+                        "(autoReject=$autoRejectEnabled)"
+                )
+
+                handleRapidoFilterFailure(
+                    root = root,
+                    candidate = candidate,
+                    recordId = recordId,
+                    reason = decision.reason,
+                    defaultStatus = OrderStatus.IGNORED
+                )
+                return
+            }
+
+            // Matching offer must never be removed by Auto-Reject.
+            // If Auto-Accept is OFF, leave it on screen for manual acceptance.
+            if (!autoAcceptEnabled) {
+                onOrderDecisionFast(
+                    recordId = recordId,
+                    candidate = candidate,
+                    status = OrderStatus.IGNORED,
+                    reasonCode = "MANUAL_MATCH",
+                    reasonText =
+                        "Conditions matched • Auto-Accept OFF • Manual accept"
+                )
                 resetProcessing()
                 return
             }
@@ -3550,6 +3709,316 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         }
     }
 
+    /**
+     * Auto Reject No Condition Match (Rapido only).
+     *
+     * Important:
+     * - Independent from Auto-Accept.
+     * - OFF means this feature never skips an offer.
+     * - ON means saved-condition failures may click ONLY a verified
+     *   Rapido skip/reject control.
+     * - No blind coordinate taps.
+     */
+    private fun handleRapidoFilterFailure(
+        root: AccessibilityNodeInfo,
+        candidate: RideCandidate,
+        recordId: String,
+        reason: String,
+        defaultStatus: OrderStatus
+    ) {
+        val freshSettings = prefs.loadSettings()
+
+        if (freshSettings.isAutoRejectBadFaresEnabled) {
+            executeRapidoAutoReject(
+                candidate = candidate,
+                orderRoot = root,
+                recordId = recordId,
+                reason = reason
+            )
+            return
+        }
+
+        onOrderDecisionFast(
+            recordId = recordId,
+            candidate = candidate,
+            status = defaultStatus,
+            reasonCode = mapReasonToCode(defaultStatus, reason),
+            reasonText = reason
+        )
+        resetProcessing()
+    }
+
+    private fun findStrictRapidoRejectNode(
+        root: AccessibilityNodeInfo
+    ): AccessibilityNodeInfo? {
+        val acceptNode = findStrictRapidoAcceptNode(root) ?: return null
+
+        val acceptBounds = Rect()
+        acceptNode.getBoundsInScreen(acceptBounds)
+        if (acceptBounds.width() <= 0 || acceptBounds.height() <= 0) return null
+
+        var bestNode: AccessibilityNodeInfo? = null
+        var bestScore = Int.MIN_VALUE
+
+        fun clickableSelfOrAncestor(
+            node: AccessibilityNodeInfo
+        ): AccessibilityNodeInfo? {
+            if (node.isClickable) return node
+
+            var parent = node.parent
+            var depth = 0
+
+            while (parent != null && depth < 3) {
+                if (parent.isClickable) return parent
+                parent = parent.parent
+                depth++
+            }
+
+            return null
+        }
+
+        fun scan(node: AccessibilityNodeInfo?) {
+            if (node == null) return
+
+            val text = node.text?.toString()?.trim().orEmpty()
+            val desc = node.contentDescription?.toString()?.trim().orEmpty()
+            val label = "$text $desc".trim().lowercase(Locale.ROOT)
+
+            val explicitRejectLabel =
+                label.contains("reject") ||
+                    label.contains("decline") ||
+                    label.contains("skip") ||
+                    label.contains("pass") ||
+                    text in setOf("-", "−", "–", "—") ||
+                    desc in setOf("-", "−", "–", "—")
+
+            if (!label.contains("accept")) {
+                val target = clickableSelfOrAncestor(node)
+
+                if (target != null && !isOrderCardOrDetailsNode(target)) {
+                    val pkg =
+                        target.packageName
+                            ?.toString()
+                            .orEmpty()
+                            .trim()
+                            .lowercase(Locale.ROOT)
+
+                    if (pkg.isBlank() || isRapidoPackage(pkg)) {
+                        val bounds = Rect()
+                        target.getBoundsInScreen(bounds)
+
+                        if (bounds.width() > 0 && bounds.height() > 0) {
+                            val verticalDelta =
+                                Math.abs(
+                                    bounds.centerY() -
+                                        acceptBounds.centerY()
+                                )
+
+                            val sameRow =
+                                verticalDelta <=
+                                    maxOf(acceptBounds.height(), 100)
+
+                            val leftOfAccept =
+                                bounds.right <= acceptBounds.left
+
+                            val compactControl =
+                                bounds.width() <=
+                                    maxOf(acceptBounds.height() * 2, 180) &&
+                                    bounds.height() <=
+                                    maxOf(acceptBounds.height() * 2, 180)
+
+                            if (
+                                sameRow &&
+                                leftOfAccept &&
+                                compactControl
+                            ) {
+                                val horizontalGap =
+                                    Math.abs(
+                                        acceptBounds.left -
+                                            bounds.right
+                                    )
+
+                                val score =
+                                    (if (explicitRejectLabel) 10000 else 1000) -
+                                        (verticalDelta * 5) -
+                                        horizontalGap
+
+                                if (score > bestScore) {
+                                    bestScore = score
+                                    bestNode = target
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (i in 0 until node.childCount) {
+                scan(node.getChild(i))
+            }
+        }
+
+        scan(root)
+
+        val result = bestNode
+
+        if (result != null) {
+            val bounds = Rect()
+            result.getBoundsInScreen(bounds)
+
+            Log.i(
+                TAG,
+                "⛔ [Rapido Auto-Reject] verified skip control " +
+                    "text='${result.text}', " +
+                    "desc='${result.contentDescription}', " +
+                    "id='${result.viewIdResourceName}', " +
+                    "bounds=$bounds"
+            )
+        } else {
+            Log.w(
+                TAG,
+                "⛔ [Rapido Auto-Reject] safe skip control not found. " +
+                    "No blind click attempted."
+            )
+        }
+
+        return result
+    }
+
+    private fun executeRapidoAutoReject(
+        candidate: RideCandidate,
+        orderRoot: AccessibilityNodeInfo,
+        recordId: String,
+        reason: String
+    ) {
+        val freshSettings = prefs.loadSettings()
+
+        if (!freshSettings.isAutoRejectBadFaresEnabled) {
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.IGNORED,
+                reasonCode = "AUTO_REJECT_OFF",
+                reasonText = reason
+            )
+            resetProcessing()
+            return
+        }
+
+        val rapidoRoot =
+            getRapidoOrderRootNode(orderRoot)
+
+        if (
+            rapidoRoot == null ||
+            (
+                !hasRapidoOrderNodes(rapidoRoot) &&
+                    !isRapidoOrderPopupShowing(rapidoRoot)
+            )
+        ) {
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.IGNORED,
+                reasonCode = "AUTO_REJECT_POPUP_GONE",
+                reasonText =
+                    "$reason • Order popup already gone"
+            )
+            resetProcessing()
+            return
+        }
+
+        val rejectNode =
+            findStrictRapidoRejectNode(rapidoRoot)
+
+        if (rejectNode == null) {
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.IGNORED,
+                reasonCode = "AUTO_REJECT_BUTTON_NOT_FOUND",
+                reasonText =
+                    "$reason • Auto-Reject ON, safe skip control not found"
+            )
+            resetProcessing()
+            return
+        }
+
+        val rejectPkg =
+            rejectNode.packageName
+                ?.toString()
+                .orEmpty()
+                .trim()
+                .lowercase(Locale.ROOT)
+
+        if (
+            rejectPkg.isNotBlank() &&
+            !isRapidoPackage(rejectPkg)
+        ) {
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.IGNORED,
+                reasonCode = "AUTO_REJECT_UNVERIFIED_TARGET",
+                reasonText =
+                    "$reason • Skip target did not belong to Rapido"
+            )
+            resetProcessing()
+            return
+        }
+
+        if (!canExecuteClick()) {
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.IGNORED,
+                reasonCode = "AUTO_REJECT_CLICK_BLOCKED",
+                reasonText =
+                    "$reason • Auto-Reject click blocked by click cooldown"
+            )
+            resetProcessing()
+            return
+        }
+
+        notifyClickInitiated()
+
+        val clicked =
+            rejectNode.isClickable &&
+                rejectNode.performAction(
+                    AccessibilityNodeInfo.ACTION_CLICK
+                )
+
+        if (clicked) {
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.REJECTED,
+                reasonCode = "AUTO_REJECT_NO_MATCH",
+                reasonText =
+                    "Auto-Rejected (skipped): $reason"
+            )
+
+            Log.i(
+                TAG,
+                "⛔ [Rapido Auto-Reject] ACTION_CLICK succeeded: $reason"
+            )
+        } else {
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.IGNORED,
+                reasonCode = "AUTO_REJECT_CLICK_FAILED",
+                reasonText =
+                    "$reason • Skip control found but ACTION_CLICK failed"
+            )
+
+            Log.w(
+                TAG,
+                "⛔ [Rapido Auto-Reject] skip target found, click failed"
+            )
+        }
+
+        resetProcessing()
+    }
     private fun attemptRejectOrder(
         root: AccessibilityNodeInfo,
         platform: Platform,

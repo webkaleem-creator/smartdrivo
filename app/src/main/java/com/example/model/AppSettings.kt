@@ -54,6 +54,9 @@ data class CommunityLinks(
 @Immutable
 data class AppSettings(
     val isAutoAcceptActive: Boolean = false,
+    // Independent user-controlled switch:
+    // when ON, Rapido offers that fail SAVED conditions can be skipped automatically.
+    val isAutoRejectBadFaresEnabled: Boolean = false,
     val isFastestModeEnabled: Boolean = false,
     // Platforms enabled
     val rapidoEnabled: Boolean = true,

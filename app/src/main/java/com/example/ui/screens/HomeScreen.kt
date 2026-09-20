@@ -646,6 +646,104 @@ val goToAreas by prefs.goToAreas.collectAsState()
                     }
                 }
             }
+            // AUTO REJECT NO CONDITION MATCH — SEPARATE CARD
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (settings.isAutoRejectBadFaresEnabled)
+                            Color(0xFFFFF1F2)
+                        else
+                            Color.White
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(
+                        1.dp,
+                        if (settings.isAutoRejectBadFaresEnabled)
+                            Color(0xFFFCA5A5)
+                        else
+                            CardBorderDefault
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .background(
+                                    if (settings.isAutoRejectBadFaresEnabled)
+                                        Color(0xFFFFE4E6)
+                                    else
+                                        Color(0xFFF1F5F9),
+                                    RoundedCornerShape(8.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "⛔",
+                                fontSize = 15.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(9.dp))
+
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Auto Reject No Condition Match",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextDarkPrimary,
+                                maxLines = 1
+                            )
+
+                            Text(
+                                text = if (settings.isAutoRejectBadFaresEnabled)
+                                    "ACTIVE • Skip orders that fail saved conditions"
+                                else
+                                    "INACTIVE • Manual action",
+                                fontSize = 10.sp,
+                                color = if (settings.isAutoRejectBadFaresEnabled)
+                                    StatusInactiveRed
+                                else
+                                    TextDarkSecondary,
+                                maxLines = 1
+                            )
+                        }
+
+                        Switch(
+                            checked = settings.isAutoRejectBadFaresEnabled,
+                            onCheckedChange = { enabled ->
+                                prefs.saveAppSettings(
+                                    settings.copy(
+                                        isAutoRejectBadFaresEnabled = enabled
+                                    )
+                                )
+
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        if (enabled)
+                                            "Auto Reject No Condition Match ON ✓"
+                                        else
+                                            "Auto Reject No Condition Match OFF • Manual mode"
+                                    )
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = StatusInactiveRed,
+                                uncheckedThumbColor = Color.White,
+                                uncheckedTrackColor = Color(0xFFBDBDBD)
+                            )
+                        )
+                    }
+                }
+            }
             // 3. Filter Mode buttons + Fare Criteria card + Distance Criteria card
             item {
                 Card(

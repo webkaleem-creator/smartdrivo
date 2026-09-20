@@ -874,22 +874,25 @@ private fun HistoryCard(item: OrderHistoryItem) {
                     }
                 }
                 OrderStatus.REJECTED -> {
-                    val areaName = extractAreaName(item)
-                    val rejectedReason = if (item.reason.contains("Mode: No-Go", ignoreCase = true)) {
-                        item.reason
-                    } else if (item.reason.isNotBlank() && item.reason.contains("No-Go", ignoreCase = true)) {
-                        if (areaName.isNotBlank() && !item.reason.contains(areaName, ignoreCase = true)) {
-                            "${item.reason}: $areaName"
-                        } else {
-                            item.reason
+                    val actualReason = item.decisionReasonText
+                        .ifBlank { item.reason }
+                        .trim()
+
+                    val rejectedReason = when {
+                        actualReason.isNotBlank() -> actualReason
+
+                        isNoGoOrder(item) -> {
+                            val areaName = extractAreaName(item)
+                            if (areaName.isNotBlank()) {
+                                "No-Go area matched: $areaName"
+                            } else {
+                                "No-Go area matched"
+                            }
                         }
-                    } else if (areaName.isNotBlank()) {
-                        "No-Go area matched: $areaName"
-                    } else if (item.reason.isNotBlank()) {
-                        item.reason
-                    } else {
-                        "No-Go area matched"
+
+                        else -> "Order rejected by saved conditions"
                     }
+
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1172,50 +1175,63 @@ private fun formatAcceptedFilterReason(item: OrderHistoryItem): String {
  * e.g. "No-Go area matched: Koramangala"
  */
 private fun extractAreaName(item: OrderHistoryItem): String {
-    val r = item.reason.trim()
-    // 1. If reason already contains "No-Go area matched: XYZ"
+    if (item.matchedNoGoGroup.isNotBlank()) {
+        return item.matchedNoGoGroup.trim()
+    }
+
+    val r = item.decisionReasonText
+        .ifBlank { item.reason }
+        .trim()
+
     if (r.contains("No-Go area matched:", ignoreCase = true)) {
-        val extracted = r.substringAfter("No-Go area matched:", "").trim().removeSurrounding("[", "]").removeSurrounding("'", "'").trim()
+        val extracted = r
+            .substringAfter("No-Go area matched:", "")
+            .trim()
+            .removeSurrounding("[", "]")
+            .removeSurrounding("'", "'")
+            .trim()
+
         if (extracted.isNotBlank()) return extracted
     }
-    // 2. If single-quoted area name e.g. 'Koramangala'
+
     if (r.contains("'")) {
         val candidate = r.substringAfter("'").substringBefore("'").trim()
-        if (candidate.isNotBlank() && candidate.length < 50) return candidate
+        if (candidate.isNotBlank() && candidate.length < 80) return candidate
     }
-    // 3. If double-quoted area name e.g. "Koramangala"
+
     if (r.contains("\"")) {
         val candidate = r.substringAfter("\"").substringBefore("\"").trim()
-        if (candidate.isNotBlank() && candidate.length < 50) return candidate
+        if (candidate.isNotBlank() && candidate.length < 80) return candidate
     }
-    // 4. If item.dropArea is specified
+
     if (item.dropArea.isNotBlank()) {
         return item.dropArea.trim()
     }
-    // 5. If item.dropAddress is specified, extract first address segment
+
     if (item.dropAddress.isNotBlank()) {
         val part = item.dropAddress.split(",").firstOrNull()?.trim().orEmpty()
-        if (part.isNotBlank() && part.length < 40) return part
+        if (part.isNotBlank() && part.length < 80) return part
     }
-    // 6. If item.pickupAddress is specified, extract first address segment
-    if (item.pickupAddress.isNotBlank()) {
-        val part = item.pickupAddress.split(",").firstOrNull()?.trim().orEmpty()
-        if (part.isNotBlank() && part.length < 40) return part
-    }
-    // 7. If reason mentions an area after "area "
-    if (r.contains("area ", ignoreCase = true)) {
-        val after = r.substringAfter("area ", "").trim().take(30)
-        if (after.isNotBlank()) return after
-    }
-    return "Restricted Area"
+
+    return ""
 }
 
 /**
  * Returns true if an order history item was rejected due to matching a No-Go area.
  */
 private fun isNoGoOrder(item: OrderHistoryItem): Boolean {
-    return item.status == OrderStatus.REJECTED ||
-           item.reason.contains("No-Go", ignoreCase = true) ||
-           item.reason.contains("nogo", ignoreCase = true) ||
-           item.reason.contains("No Go", ignoreCase = true)
+    val combinedReason = buildString {
+        append(item.decisionReasonCode)
+        append(" ")
+        append(item.decisionReasonText)
+        append(" ")
+        append(item.reason)
+        append(" ")
+        append(item.matchedNoGoGroup)
+    }
+
+    return item.matchedNoGoGroup.isNotBlank() ||
+        combinedReason.contains("No-Go", ignoreCase = true) ||
+        combinedReason.contains("NOGO", ignoreCase = true) ||
+        combinedReason.contains("No Go", ignoreCase = true)
 }

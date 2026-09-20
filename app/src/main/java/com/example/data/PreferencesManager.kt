@@ -347,6 +347,7 @@ class PreferencesManager(private val context: Context) {
     fun saveAppSettings(settings: AppSettings) {
         prefs.edit().apply {
             putBoolean(KEY_AUTO_ACCEPT, settings.isAutoAcceptActive)
+            putBoolean(KEY_AUTO_REJECT_BAD_FARES, settings.isAutoRejectBadFaresEnabled)
             putBoolean(KEY_FASTEST_MODE, settings.isFastestModeEnabled)
             putBoolean(KEY_RAPIDO_ENABLED, settings.rapidoEnabled)
             putBoolean(KEY_UBER_ENABLED, settings.uberEnabled)
@@ -409,6 +410,7 @@ class PreferencesManager(private val context: Context) {
 
         return AppSettings(
             isAutoAcceptActive = prefs.getBoolean(KEY_AUTO_ACCEPT, true),
+            isAutoRejectBadFaresEnabled = prefs.getBoolean(KEY_AUTO_REJECT_BAD_FARES, false),
             isFastestModeEnabled = prefs.getBoolean(KEY_FASTEST_MODE, false),
             rapidoEnabled = prefs.getBoolean(KEY_RAPIDO_ENABLED, true),
             uberEnabled = prefs.getBoolean(KEY_UBER_ENABLED, true),
@@ -1124,6 +1126,7 @@ class PreferencesManager(private val context: Context) {
         private const val KEY_HAS_OPENED_BEFORE = "app_has_opened_before"
 
         private const val KEY_AUTO_ACCEPT = "setting_auto_accept"
+        private const val KEY_AUTO_REJECT_BAD_FARES = "setting_auto_reject_bad_fares"
         private const val KEY_FASTEST_MODE = "setting_fastest_mode"
         private const val KEY_RAPIDO_ENABLED = "setting_rapido"
         private const val KEY_UBER_ENABLED = "setting_uber"
