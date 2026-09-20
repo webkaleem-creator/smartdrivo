@@ -3742,26 +3742,28 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
     private fun buildAcceptedFilterReason(candidate: RideCandidate): String {
         val matches = mutableListOf<String>()
+
         val fare = candidate.fare ?: candidate.baseFare
         if (fare != null && fare > 0f) {
-            matches.add("Fare ₹${fare.toInt()} matched")
+            matches += "Fare ₹${fare.toInt()} matched"
         }
+
         val pickup = candidate.pickupDistKm
         if (pickup != null && pickup > 0f) {
-            val pickupStr = if (pickup % 1f == 0f && pickup >= 10f) {
-                "${pickup.toInt()}km"
-            } else {
-                String.format(Locale.ENGLISH, "%.1fkm", pickup)
-            }
-            matches.add("Pickup $pickupStr matched")
+            matches += "Pickup ${String.format(Locale.ENGLISH, "%.1f km", pickup)} matched"
         }
-        if (matches.isEmpty() && candidate.dropDistKm != null && candidate.dropDistKm > 0f) {
-            val dropStr = String.format(Locale.ENGLISH, "%.1fkm", candidate.dropDistKm)
-            matches.add("Trip $dropStr matched")
-        }
-        return if (matches.isNotEmpty()) matches.joinToString(", ") else "Criteria matched"
-    }
 
+        val trip = candidate.dropDistKm
+        if (trip != null && trip > 0f) {
+            matches += "Trip ${String.format(Locale.ENGLISH, "%.1f km", trip)} matched"
+        }
+
+        return if (matches.isNotEmpty()) {
+            matches.joinToString(" | ")
+        } else {
+            "Criteria matched"
+        }
+    }
     private fun mapReasonToCode(status: OrderStatus, reason: String): String {
         val lower = reason.lowercase(Locale.ROOT)
         return when (status) {

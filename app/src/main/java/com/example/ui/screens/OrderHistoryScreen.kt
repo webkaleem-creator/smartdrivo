@@ -1135,43 +1135,38 @@ private fun HistoryCard(item: OrderHistoryItem) {
  * e.g. "Fare ₹113 matched, Pickup 0.6km matched"
  */
 private fun formatAcceptedFilterReason(item: OrderHistoryItem): String {
-    // If the item reason already has a formatted matched filter string with actual numbers
-    if (item.reason.isNotBlank() &&
-        item.reason.contains("matched", ignoreCase = true) &&
-        !item.reason.contains("No-Go", ignoreCase = true) &&
-        !item.reason.equals("Fare & distance criteria matched", ignoreCase = true) &&
-        (item.reason.contains("₹") || item.reason.contains("km"))
-    ) {
-        return item.reason
-    }
-
     val matches = mutableListOf<String>()
+
     val fare = if (item.amount > 0f) item.amount else item.baseFare
     if (fare > 0f) {
-        matches.add("Fare ₹${fare.toInt()} matched")
+        matches += "Fare ₹${fare.toInt()} matched"
     }
 
     if (item.pickupDistKm > 0f) {
-        val pickupStr = if (item.pickupDistKm % 1f == 0f && item.pickupDistKm >= 10f) {
-            "${item.pickupDistKm.toInt()}km"
-        } else {
-            String.format(Locale.ENGLISH, "%.1fkm", item.pickupDistKm)
-        }
-        matches.add("Pickup $pickupStr matched")
+        matches += "Pickup ${String.format(Locale.ENGLISH, "%.1f km", item.pickupDistKm)} matched"
     }
 
-    if (matches.isEmpty() && item.dropDistKm > 0f) {
-        val dropStr = String.format(Locale.ENGLISH, "%.1fkm", item.dropDistKm)
-        matches.add("Trip $dropStr matched")
+    if (item.dropDistKm > 0f) {
+        matches += "Trip ${String.format(Locale.ENGLISH, "%.1f km", item.dropDistKm)} matched"
     }
 
-    return if (matches.isNotEmpty()) {
-        matches.joinToString(", ")
+    val fullMatch = if (matches.isNotEmpty()) {
+        matches.joinToString(" | ")
     } else {
         "Criteria matched"
     }
-}
 
+    // Preserve useful priority-mode information when present, while still
+    // showing the real fare/pickup/trip values above.
+    val specialReason = item.reason.trim()
+    return when {
+        specialReason.contains("Go-To", ignoreCase = true) ->
+            "$fullMatch\n${specialReason}"
+        specialReason.contains("Fastest Mode", ignoreCase = true) ->
+            "$fullMatch\n${specialReason}"
+        else -> fullMatch
+    }
+}
 /**
  * Extract matched No-Go area name for REJECTED orders:
  * e.g. "No-Go area matched: Koramangala"
