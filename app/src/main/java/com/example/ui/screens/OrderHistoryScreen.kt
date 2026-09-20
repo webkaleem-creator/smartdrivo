@@ -875,7 +875,9 @@ private fun HistoryCard(item: OrderHistoryItem) {
                 }
                 OrderStatus.REJECTED -> {
                     val areaName = extractAreaName(item)
-                    val rejectedReason = if (item.reason.isNotBlank() && item.reason.contains("No-Go", ignoreCase = true)) {
+                    val rejectedReason = if (item.reason.contains("Mode: No-Go", ignoreCase = true)) {
+                        item.reason
+                    } else if (item.reason.isNotBlank() && item.reason.contains("No-Go", ignoreCase = true)) {
                         if (areaName.isNotBlank() && !item.reason.contains(areaName, ignoreCase = true)) {
                             "${item.reason}: $areaName"
                         } else {

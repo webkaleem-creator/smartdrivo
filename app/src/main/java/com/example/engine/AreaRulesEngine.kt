@@ -45,7 +45,8 @@ object AreaRulesEngine {
             )
         }
 
-        // NO GO: group name is label only. Match sub-area words on pickup OR destination.
+        // NO GO: DROP / DESTINATION ONLY.
+        // Group name is a label only. Pickup location must NOT trigger No-Go.
         if (isNoGoEnabled) {
             val activeNoGo = noGoAreas.filter {
                 it.isEnabled && it.keywords.isNotEmpty()
@@ -56,19 +57,11 @@ object AreaRulesEngine {
                     .map { it.trim() }
                     .filter {
                         it.isNotBlank() &&
-                            !it.equals(group.name, ignoreCase = true)
+                        !it.equals(group.name, ignoreCase = true)
                     }
 
                 for (word in words) {
-                    val key = word.lowercase()
-
-                    if (pickupText.contains(key)) {
-                        return DecisionResult.Reject(
-                            "No-Go Area: pickup matches '$word' in '${group.name}'"
-                        )
-                    }
-
-                    if (dropText.contains(key)) {
+                    if (dropText.contains(word.lowercase())) {
                         return DecisionResult.Reject(
                             "No-Go Area: destination matches '$word' in '${group.name}'"
                         )
@@ -76,7 +69,6 @@ object AreaRulesEngine {
                 }
             }
         }
-
         // GO TO PRIORITY:
         // 1. Destination/drop can match ANY active Go-To group.
         // 2. Every active group works independently and keeps its own limits.

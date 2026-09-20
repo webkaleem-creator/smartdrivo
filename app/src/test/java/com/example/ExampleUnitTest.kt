@@ -218,14 +218,6 @@ class ExampleUnitTest {
 
     @Test
     fun testAreaRulesEngineNoGoFilter() {
-        val candidate = com.example.model.RideCandidate(
-            fare = 100f,
-            pickupDistKm = 1.0f,
-            dropDistKm = 3.0f,
-            pickupAddress = "Silk Board Junction",
-            dropAddress = "BTM Layout",
-            dropArea = "BTM Layout"
-        )
         val settings = com.example.model.AppSettings(
             minFare = 50f,
             maxFare = 500f,
@@ -235,18 +227,53 @@ class ExampleUnitTest {
             isNoGoEnabled = true
         )
 
-        // Matches No-Go area "Silk Board"
-        val resultReject = com.example.engine.AreaRulesEngine.evaluateRide(
-            candidate = candidate,
+        // Pickup matches a No-Go area, but destination does NOT.
+        // No-Go must NOT reject based on pickup.
+        val pickupOnlyCandidate = com.example.model.RideCandidate(
+            fare = 100f,
+            pickupDistKm = 1.0f,
+            dropDistKm = 3.0f,
+            pickupAddress = "Silk Board Junction",
+            dropAddress = "BTM Layout",
+            dropArea = "BTM Layout"
+        )
+
+        val pickupOnlyResult = com.example.engine.AreaRulesEngine.evaluateRide(
+            candidate = pickupOnlyCandidate,
             settings = settings,
             goToAreas = emptyList(),
             noGoAreas = listOf("Silk Board")
         )
-        assertTrue(resultReject is com.example.engine.DecisionResult.Reject)
-        val reason = (resultReject as com.example.engine.DecisionResult.Reject).reason
-        assertTrue("Reason should mention No-Go Area Filter: $reason", reason.startsWith("No-Go Area Filter"))
-    }
 
+        assertTrue(
+            "Pickup-only No-Go match must not reject: $pickupOnlyResult",
+            pickupOnlyResult !is com.example.engine.DecisionResult.Reject
+        )
+
+        // Destination matches No-Go area -> MUST reject.
+        val dropCandidate = com.example.model.RideCandidate(
+            fare = 100f,
+            pickupDistKm = 1.0f,
+            dropDistKm = 3.0f,
+            pickupAddress = "BTM Layout Pickup",
+            dropAddress = "Silk Board Junction",
+            dropArea = "Silk Board Junction"
+        )
+
+        val dropResult = com.example.engine.AreaRulesEngine.evaluateRide(
+            candidate = dropCandidate,
+            settings = settings,
+            goToAreas = emptyList(),
+            noGoAreas = listOf("Silk Board")
+        )
+
+        assertTrue(dropResult is com.example.engine.DecisionResult.Reject)
+        val reason = (dropResult as com.example.engine.DecisionResult.Reject).reason
+        assertTrue(
+            "Reason should mention No-Go destination match: $reason",
+            reason.contains("destination", ignoreCase = true)
+        )
+    }
     @Test
     fun testUberStandardUpfrontOfferExtraction() {
         val texts = listOf(

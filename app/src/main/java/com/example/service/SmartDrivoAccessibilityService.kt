@@ -451,31 +451,78 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
      * - If filterMode == "both" -> check both fare and distance filters
      */
     private fun evaluateDirectRideFilters(candidate: RideCandidate): DirectFilterResult {
-        // 1. Check No-Go Areas first: If No-Go area matched → OrderStatus.REJECTED
+        // 1. NO-GO = DROP / DESTINATION ONLY.
+        // Pickup address and pickup distance must NEVER trigger No-Go.
         if (prefs.isNoGoEnabled) {
             val noGoAreas = prefs.loadNoGoAreas().filter { it.isEnabled }
+
             if (noGoAreas.isNotEmpty()) {
-                val pickupText = candidate.pickupAddress.orEmpty().trim().lowercase()
-                val dropText = "${candidate.dropAddress.orEmpty()} ${candidate.dropArea.orEmpty()}".trim().lowercase()
+                val dropTextRaw =
+                    "${candidate.dropAddress.orEmpty()} ${candidate.dropArea.orEmpty()}".trim()
+                val dropText = dropTextRaw.lowercase()
+
+                val dropMatches = mutableListOf<String>()
+                val matchedGroups = mutableListOf<String>()
+
                 for (noGo in noGoAreas) {
-                    val targets = noGo.keywords.map { it.trim() }.filter { it.isNotBlank() && !it.equals(noGo.name, ignoreCase = true) }
-                    for (target in targets) {
-                        val lowerTarget = target.lowercase()
-                        if (pickupText.isNotBlank() && pickupText.contains(lowerTarget)) {
-                            val reason = "No-Go Area Filter: Pickup location matches No-Go area '$target'"
-                            Log.w(TAG, "❌ [Direct Filter REJECT] $reason")
-                            return DirectFilterResult(OrderStatus.REJECTED, reason)
+                    val targets = noGo.keywords
+                        .map { it.trim() }
+                        .filter {
+                            it.isNotBlank() &&
+                            !it.equals(noGo.name, ignoreCase = true)
                         }
-                        if (dropText.isNotBlank() && dropText.contains(lowerTarget)) {
-                            val reason = "No-Go Area Filter: Drop location matches No-Go area '$target'"
-                            Log.w(TAG, "❌ [Direct Filter REJECT] $reason")
-                            return DirectFilterResult(OrderStatus.REJECTED, reason)
+
+                    var groupMatched = false
+
+                    for (target in targets) {
+                        if (
+                            dropText.isNotBlank() &&
+                            dropText.contains(target.lowercase())
+                        ) {
+                            dropMatches += target
+                            groupMatched = true
                         }
                     }
+
+                    if (groupMatched && noGo.name.isNotBlank()) {
+                        matchedGroups += noGo.name
+                    }
+                }
+
+                if (dropMatches.isNotEmpty()) {
+                    val fareText = candidate.fare
+                        ?.takeIf { it > 0f }
+                        ?.let { "₹${it.toInt()}" }
+                        ?: "N/A"
+
+                    val pickupKmText = candidate.pickupDistKm
+                        ?.takeIf { it > 0f }
+                        ?.let { String.format(Locale.ENGLISH, "%.1f km", it) }
+                        ?: "N/A"
+
+                    val tripKmText = candidate.dropDistKm
+                        ?.takeIf { it > 0f }
+                        ?.let { String.format(Locale.ENGLISH, "%.1f km", it) }
+                        ?: "N/A"
+
+                    val groups = matchedGroups.distinct()
+                    val areas = dropMatches.distinct()
+
+                    val reason = buildString {
+                        append("Mode: No-Go (Drop Only)")
+                        if (groups.isNotEmpty()) {
+                            append("\nGroup: ${groups.joinToString(", ")}")
+                        }
+                        append("\nOrder: Fare $fareText | Pickup $pickupKmText | Trip $tripKmText")
+                        append("\nDrop matched: ${areas.joinToString(", ")}")
+                        append("\nWhy rejected: destination/drop area is blocked")
+                    }
+
+                    Log.w(TAG, "❌ [Direct Filter REJECT] $reason")
+                    return DirectFilterResult(OrderStatus.REJECTED, reason)
                 }
             }
         }
-
         // Go-To/Fastest priority is evaluated by AreaRulesEngine after No-Go safety.
         val prioritySettings = prefs.loadSettings()
         val hasActiveGoTo = prioritySettings.isGoToEnabled &&
@@ -1273,25 +1320,11 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         goToAreas: List<AreaGroup>,
         noGoAreas: List<AreaGroup>
     ): DecisionResult? {
-        if (prefs.appSettings.value.isFastestModeEnabled) {
-            return null
-        }
-        val cleanPickup = pickupLocationText.trim().lowercase()
-
-        // 1. If No-Go filter is enabled and list is not empty, check pickup area
-        val activeNoGo = noGoAreas.filter { it.isEnabled }
-        for (group in activeNoGo) {
-            for (keyword in group.keywords) {
-                if (cleanPickup.contains(keyword.trim().lowercase())) {
-                    return DecisionResult.Reject("No-Go Area Filter: Pickup location matches No-Go area '${group.name}'")
-                }
-            }
-        }
-
-        // Go-To filter check (for drop/pickup) is evaluated completely in AreaRulesEngine.evaluateRide
+        // No-Go is intentionally DROP / DESTINATION ONLY.
+        // Pickup text and pickup distance must never trigger No-Go.
+        // Go-To destination logic is handled by AreaRulesEngine.
         return null
     }
-
     private fun extractPickupLocationText(candidate: RideCandidate, root: AccessibilityNodeInfo?): String {
         val addr = candidate.pickupAddress.orEmpty().trim()
         if (addr.isNotEmpty() && !addr.equals("Detected Pickup Location", ignoreCase = true) && !addr.equals("Pickup Location", ignoreCase = true)) {
