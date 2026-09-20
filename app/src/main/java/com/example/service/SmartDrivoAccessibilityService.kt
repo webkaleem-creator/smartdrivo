@@ -2689,15 +2689,57 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             return
         }
 
-        // Safety check: Don't click if foreground is SmartDrivo UI
+        // Safe overlay handling:
+        // Rapido may show its live order card above SmartDrivo while SmartDrivo
+        // remains rootInActiveWindow. Allow a click ONLY when the already-found
+        // strict Accept node/root is verified as belonging to Rapido.
         val activeBeforeClick = rootInActiveWindow
-        val activePkgBeforeClick = activeBeforeClick?.packageName?.toString().orEmpty().trim().lowercase()
-        if (RapidoAdapter.isSmartDrivoPackage(activePkgBeforeClick)) {
-            Log.w(TAG, "❌ [Rapido] SmartDrivo UI is in active window ($activePkgBeforeClick). Refusing to click.")
+        val activePkgBeforeClick =
+            activeBeforeClick?.packageName?.toString().orEmpty().trim().lowercase()
+
+        val acceptNodePkg =
+            acceptNode.packageName?.toString().orEmpty().trim().lowercase()
+        val rapidoRootPkg =
+            rapidoRoot.packageName?.toString().orEmpty().trim().lowercase()
+
+        val verifiedRapidoTarget =
+            isRapidoPackage(acceptNodePkg) || isRapidoPackage(rapidoRootPkg)
+
+        if (!verifiedRapidoTarget) {
+            Log.w(
+                TAG,
+                "❌ [Rapido] Accept target is not owned by Rapido " +
+                    "(acceptPkg='$acceptNodePkg', rootPkg='$rapidoRootPkg'). Click prevented."
+            )
+
+            val recordId =
+                activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+
+            onOrderActionCompletedFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.FAILED,
+                reasonCode = "UNVERIFIED_ACCEPT_TARGET",
+                reasonText = "Accept target did not belong to Rapido - click prevented",
+                actionSucceeded = false,
+                timesClicked = 0,
+                buttonFound = true,
+                buttonDetails = "acceptPkg='$acceptNodePkg', rootPkg='$rapidoRootPkg'",
+                clickMethod = "None (target ownership check failed)",
+                errorMsg = "Verified Rapido package required"
+            )
+
             resetProcessing()
             return
         }
 
+        if (RapidoAdapter.isSmartDrivoPackage(activePkgBeforeClick)) {
+            Log.i(
+                TAG,
+                "✅ [Rapido] SmartDrivo is active root, but verified Rapido overlay " +
+                    "Accept target belongs to Rapido. Safe click allowed."
+            )
+        }
         Log.i(
             TAG,
             "✅ [Rapido] Strict Accept button FOUND | " +
