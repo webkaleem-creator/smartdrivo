@@ -1138,6 +1138,20 @@ private fun HistoryCard(item: OrderHistoryItem) {
  * e.g. "Fare ₹113 matched, Pickup 0.6km matched"
  */
 private fun formatAcceptedFilterReason(item: OrderHistoryItem): String {
+    val storedReason = item.decisionReasonText
+        .ifBlank { item.reason }
+        .trim()
+
+    // New records store the exact mode-aware reason in the service.
+    // Always display that exact reason instead of rebuilding every field.
+    if (storedReason.isNotBlank() &&
+        !storedReason.equals("Ride auto-accepted successfully", ignoreCase = true) &&
+        !storedReason.equals("Criteria matched", ignoreCase = true)
+    ) {
+        return storedReason
+    }
+
+    // Legacy fallback for older history rows that did not store mode.
     val matches = mutableListOf<String>()
 
     val fare = if (item.amount > 0f) item.amount else item.baseFare
@@ -1153,21 +1167,10 @@ private fun formatAcceptedFilterReason(item: OrderHistoryItem): String {
         matches += "Trip ${String.format(Locale.ENGLISH, "%.1f km", item.dropDistKm)} matched"
     }
 
-    val fullMatch = if (matches.isNotEmpty()) {
+    return if (matches.isNotEmpty()) {
         matches.joinToString(" | ")
     } else {
         "Criteria matched"
-    }
-
-    // Preserve useful priority-mode information when present, while still
-    // showing the real fare/pickup/trip values above.
-    val specialReason = item.reason.trim()
-    return when {
-        specialReason.contains("Go-To", ignoreCase = true) ->
-            "$fullMatch\n${specialReason}"
-        specialReason.contains("Fastest Mode", ignoreCase = true) ->
-            "$fullMatch\n${specialReason}"
-        else -> fullMatch
     }
 }
 /**

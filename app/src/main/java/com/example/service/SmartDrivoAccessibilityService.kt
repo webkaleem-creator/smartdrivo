@@ -4210,27 +4210,91 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     }
 
     private fun buildAcceptedFilterReason(candidate: RideCandidate): String {
-        val matches = mutableListOf<String>()
+        val settings = prefs.getFreshSettings()
 
-        val fare = candidate.fare ?: candidate.baseFare
-        if (fare != null && fare > 0f) {
-            matches += "Fare ₹${fare.toInt()} matched"
+        val fare = candidate.fare ?: candidate.baseFare ?: 0f
+        val pickup = candidate.pickupDistKm ?: 0f
+        val trip = candidate.dropDistKm ?: 0f
+
+        fun km(value: Float): String =
+            String.format(Locale.ENGLISH, "%.1f km", value)
+
+        fun fareRange(): String {
+            val min = settings.minFare.toInt()
+            return if (settings.maxFare > 0f) {
+                "₹$min–₹${settings.maxFare.toInt()}"
+            } else {
+                "₹$min+"
+            }
         }
 
-        val pickup = candidate.pickupDistKm
-        if (pickup != null && pickup > 0f) {
-            matches += "Pickup ${String.format(Locale.ENGLISH, "%.1f km", pickup)} matched"
+        // Priority modes should describe the mode that actually controlled acceptance.
+        val hasActiveGoTo =
+            settings.isGoToEnabled &&
+                prefs.goToAreas.value.any { it.isEnabled }
+
+        if (hasActiveGoTo) {
+            return buildString {
+                append("Mode: Go-To Priority")
+                if (fare > 0f) append("\nFare ₹${fare.toInt()}")
+                if (pickup > 0f) append(" | Pickup ${km(pickup)}")
+                if (trip > 0f) append(" | Trip ${km(trip)}")
+                append("\nDestination matched active Go-To rule")
+            }
         }
 
-        val trip = candidate.dropDistKm
-        if (trip != null && trip > 0f) {
-            matches += "Trip ${String.format(Locale.ENGLISH, "%.1f km", trip)} matched"
+        if (settings.isFastestModeEnabled) {
+            return buildString {
+                append("Mode: Fastest")
+                if (pickup > 0f) {
+                    append("\nPickup ${km(pickup)} matched")
+                    if (settings.maxPickupDistanceKm > 0f) {
+                        append(" (≤ ${km(settings.maxPickupDistanceKm)})")
+                    }
+                } else {
+                    append("\nPickup matched")
+                }
+            }
         }
 
-        return if (matches.isNotEmpty()) {
-            matches.joinToString(" | ")
-        } else {
-            "Criteria matched"
+        return when (settings.filterMode) {
+            com.example.model.FilterMode.FARE_ONLY -> {
+                buildString {
+                    append("Mode: Fare Only")
+                    append("\nFare ₹${fare.toInt()} matched")
+                    append(" • Saved range ${fareRange()}")
+                }
+            }
+
+            com.example.model.FilterMode.DISTANCE_ONLY -> {
+                buildString {
+                    append("Mode: Distance Only")
+                    append("\nPickup ${km(pickup)} matched")
+                    if (settings.maxPickupDistanceKm > 0f) {
+                        append(" (≤ ${km(settings.maxPickupDistanceKm)})")
+                    }
+                    append(" | Trip ${km(trip)} matched")
+                    if (settings.maxDropDistanceKm > 0f) {
+                        append(" (≤ ${km(settings.maxDropDistanceKm)})")
+                    }
+                }
+            }
+
+            com.example.model.FilterMode.BOTH -> {
+                buildString {
+                    append("Mode: Both")
+                    append("\nFare ₹${fare.toInt()} matched")
+                    append(" (${fareRange()})")
+                    append(" | Pickup ${km(pickup)} matched")
+                    if (settings.maxPickupDistanceKm > 0f) {
+                        append(" (≤ ${km(settings.maxPickupDistanceKm)})")
+                    }
+                    append(" | Trip ${km(trip)} matched")
+                    if (settings.maxDropDistanceKm > 0f) {
+                        append(" (≤ ${km(settings.maxDropDistanceKm)})")
+                    }
+                }
+            }
         }
     }
     private fun mapReasonToCode(status: OrderStatus, reason: String): String {
