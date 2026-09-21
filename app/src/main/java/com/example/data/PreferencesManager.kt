@@ -886,6 +886,14 @@ class PreferencesManager(private val context: Context) {
         _paymentSubmissions.value = list
     }
 
+    fun setPaymentSubmissions(list: List<PaymentSubmission>) {
+        savePaymentSubmissions(list)
+    }
+
+    fun setAllUsers(list: List<UserProfile>) {
+        saveAllUsers(list)
+    }
+
     private fun loadPaymentSubmissions(): List<PaymentSubmission> {
         val json = prefs.getString(KEY_PAYMENTS, null)
         if (!json.isNullOrEmpty()) {
@@ -914,32 +922,7 @@ class PreferencesManager(private val context: Context) {
             } catch (e: Exception) { e.printStackTrace() }
         }
 
-        // Default initial demo payment submissions for instant admin testing
-        val defaultPayments = listOf(
-            PaymentSubmission(
-                paymentId = "PAY-DEMO-001",
-                uid = "driver_rajesh_9876543210",
-                userName = "Rajesh Kumar (+919876543210)",
-                utrNumber = "425619847231",
-                planSelected = "7DAYS",
-                amount = 129,
-                status = PaymentStatus.PENDING,
-                submittedAt = System.currentTimeMillis() - 25 * 60 * 1000L
-            ),
-            PaymentSubmission(
-                paymentId = "PAY-DEMO-002",
-                uid = "driver_arif_9848022338",
-                userName = "Mohammed Arif (+919848022338)",
-                utrNumber = "998811223344",
-                planSelected = "3DAYS",
-                amount = 59,
-                status = PaymentStatus.APPROVED,
-                submittedAt = System.currentTimeMillis() - 2 * 3600 * 1000L,
-                approvedAt = System.currentTimeMillis() - 1 * 3600 * 1000L
-            )
-        )
-        persistPaymentSubmissionsToPrefs(defaultPayments)
-        return defaultPayments
+        return emptyList()
     }
 
     // --- User & Driver Partners Management ---

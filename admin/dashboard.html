@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SmartDrivo Admin Control Center</title>
   
-  <!-- CRITICAL: Instant Auth Guard before page renders -->
+  <!-- Fast Session Guard (pre-render redirect) -->
   <script>
     if (sessionStorage.getItem('smartdrivo_admin_auth') !== 'true') {
       window.location.replace('login.html');
@@ -242,7 +242,7 @@
       color: #CBD5E1; 
       margin-bottom: 8px; 
     }
-    input[type="text"], input[type="number"] { 
+    input[type="text"], input[type="number"], input[type="email"] { 
       width: 100%; 
       max-width: 520px; 
       padding: 11px 14px; 
@@ -279,21 +279,43 @@
     tr:hover td {
       background: rgba(255, 255, 255, 0.02);
     }
+    #toastNotification {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 99999;
+      display: none;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+      align-items: center;
+      gap: 10px;
+      transition: all 0.3s ease;
+    }
+    .toast-success { background: #064E3B; color: #34D399; border: 1px solid #059669; }
+    .toast-error { background: #4C0519; color: #FB7185; border: 1px solid #E11D48; }
+    .toast-info { background: #172554; color: #60A5FA; border: 1px solid #2563EB; }
+    .toast-warning { background: #451A03; color: #FBBF24; border: 1px solid #D97706; }
   </style>
 </head>
 <body>
+  <!-- Global Notification Toast -->
+  <div id="toastNotification"></div>
+
   <div class="container">
     <header>
       <div class="brand">
         <div class="logo"><i class="fa-solid fa-bolt"></i></div>
         <div>
           <h1>SmartDrivo Admin Control Center</h1>
-          <p style="font-size: 12px; color: var(--text-dim);">Live Firebase Driver & Payment Management</p>
+          <p style="font-size: 12px; color: var(--text-dim);">Real-time Firebase Driver & Payment Management</p>
         </div>
       </div>
       <div class="header-actions">
-        <span class="badge badge-approved"><i class="fa-solid fa-circle-check"></i> System Online</span>
-        <span class="badge badge-user"><i class="fa-solid fa-user-shield"></i> <span id="adminUserLabel">kkaleem4u</span></span>
+        <span id="systemStatusBadge" class="badge badge-approved"><i class="fa-solid fa-circle-check"></i> Firebase Connected</span>
+        <span class="badge badge-user"><i class="fa-solid fa-user-shield"></i> <span id="adminUserLabel">Loading...</span></span>
         <button class="btn-logout" onclick="adminLogout()" title="End session and log out">
           <i class="fa-solid fa-arrow-right-from-bracket"></i> Logout
         </button>
@@ -301,8 +323,14 @@
     </header>
 
     <div class="nav-tabs">
-      <button class="tab-btn active" onclick="showTab('payments', event)"><i class="fa-solid fa-receipt"></i> Pending Payments</button>
-      <button class="tab-btn" onclick="showTab('drivers', event)"><i class="fa-solid fa-users"></i> Registered Drivers</button>
+      <button class="tab-btn active" onclick="showTab('payments', event)">
+        <i class="fa-solid fa-receipt"></i> Pending Payments 
+        <span id="pendingBadge" class="badge badge-pending" style="display:none; margin-left: 6px; font-size: 10px; padding: 2px 7px;">0</span>
+      </button>
+      <button class="tab-btn" onclick="showTab('drivers', event)">
+        <i class="fa-solid fa-users"></i> Registered Drivers 
+        <span id="driversCountBadge" class="badge" style="background: rgba(255,255,255,0.1); color: #FFF; margin-left: 6px; font-size: 10px; padding: 2px 7px;">0</span>
+      </button>
       <button class="tab-btn" onclick="showTab('pricing', event)"><i class="fa-solid fa-qrcode"></i> Plans & UPI QR</button>
       <button class="tab-btn" onclick="showTab('community', event)"><i class="fa-solid fa-share-nodes"></i> Community Links</button>
       <button class="tab-btn" onclick="showTab('logs', event)"><i class="fa-solid fa-terminal"></i> App Logs</button>
@@ -310,38 +338,37 @@
 
     <!-- 1. Pending Payments Panel -->
     <div id="payments" class="panel active">
-      <h2 class="panel-title"><i class="fa-solid fa-money-bill-transfer" style="color: var(--accent);"></i> Payment Verification Queue (Manual UPI & UTR)</h2>
-      <p class="panel-desc">Approve or reject UTR transactions to activate driver memberships.</p>
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 8px;">
+        <h2 class="panel-title"><i class="fa-solid fa-money-bill-transfer" style="color: var(--accent);"></i> Payment Verification Queue (Manual UPI & UTR)</h2>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button class="btn btn-sm" id="filterPendingBtn" style="background: var(--accent);" onclick="setPaymentFilter('PENDING')">Pending Only</button>
+          <button class="btn btn-sm" id="filterAllPaymentsBtn" style="background: #202632; color: var(--text-dim);" onclick="setPaymentFilter('ALL')">All Payments</button>
+        </div>
+      </div>
+      <p class="panel-desc">Approve or reject UTR transactions to activate driver memberships in real-time Firestore.</p>
       
       <div id="paymentsList">
-        <div class="card" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-          <div>
-            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
-              <strong style="font-size: 15px;">Ramesh Kumar (Auto)</strong>
-              <span class="badge badge-pending">PENDING</span>
-            </div>
-            <div style="font-size: 13px; color: var(--text-dim); line-height: 1.5;">
-              UTR: <strong style="color: #FFF;">425619847231</strong> &nbsp;|&nbsp; Plan: <strong style="color: var(--accent);">7 DAYS (₹129)</strong> &nbsp;|&nbsp; Phone: +91 9876543210
-            </div>
-          </div>
-          <div style="display: flex; gap: 10px;">
-            <button class="btn btn-success" onclick="alert('Payment Approved! Driver membership activated for 7 days.')">
-              <i class="fa-solid fa-check"></i> Approve
-            </button>
-            <button class="btn btn-danger" onclick="alert('Payment Rejected')">
-              <i class="fa-solid fa-xmark"></i> Reject
-            </button>
-          </div>
+        <div id="paymentsLoading" style="text-align: center; padding: 36px; color: var(--text-dim);">
+          <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 24px; color: var(--accent); margin-bottom: 10px; display: block;"></i>
+          Connecting to live Firestore /payments collection...
         </div>
       </div>
     </div>
 
     <!-- 2. Registered Drivers Panel -->
     <div id="drivers" class="panel">
-      <h2 class="panel-title"><i class="fa-solid fa-id-card" style="color: var(--accent);"></i> Driver Directory</h2>
-      <p class="panel-desc">All onboarded auto & bike drivers currently registered on SmartDrivo.</p>
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 8px;">
+        <div>
+          <h2 class="panel-title"><i class="fa-solid fa-id-card" style="color: var(--accent);"></i> Driver Directory</h2>
+          <p class="panel-desc">Live Firestore `/users` directory. Changes instantly sync between Web and Android app.</p>
+        </div>
+        <div id="driversStatsRow" style="display: flex; gap: 8px;">
+          <span class="badge badge-approved" id="activeDriversCountBadge">0 Active</span>
+          <span class="badge badge-rejected" id="inactiveDriversCountBadge">0 Inactive</span>
+        </div>
+      </div>
 
-      <!-- 1. Search Box: Search user by name, mobile, city, or state -->
+      <!-- Search Box: Search user by name, mobile, city, or state -->
       <div style="margin-bottom: 18px; display: flex; align-items: center; gap: 10px; max-width: 480px; position: relative;">
         <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--text-dim); font-size: 13px; pointer-events: none;"></i>
         <input 
@@ -362,120 +389,47 @@
         </button>
       </div>
 
-      <table id="driversTable">
-        <thead>
-          <tr>
-            <th>User Name</th>
-            <th>Mobile Number</th>
-            <th>City</th>
-            <th>State</th>
-            <th>Vehicle</th>
-            <th>Active Plan</th>
-            <th>Expiry</th>
-            <th>Status</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>
-              <strong>Kaleem</strong>
-              <span class="badge" style="background: rgba(37,99,235,0.2); color: #60A5FA; font-size: 10px; margin-left: 6px;">ADMIN</span>
-            </td>
-            <td>
-              <div><strong>+91 9949957404</strong></div>
-              <div style="font-size: 11px; color: var(--text-dim);">kaleem.admin@smartdrivo.com</div>
-            </td>
-            <td><span style="color: #F8FAFC; font-weight: 600;">Hyderabad</span></td>
-            <td><span style="color: #94A3B8;">Telangana</span></td>
-            <td><span class="badge" style="background:#172554; color:#60A5FA;">CAR</span></td>
-            <td>Lifetime Admin</td>
-            <td>Unlimited</td>
-            <td><span class="badge badge-approved status-badge"><i class="fa-solid fa-circle-check"></i> Active</span></td>
-            <td>
-              <button type="button" class="btn btn-danger btn-sm toggle-status-btn" data-status="active" onclick="toggleDriverStatus(this)" title="Click to Deactivate driver">
-                <i class="fa-solid fa-toggle-on"></i> Deactivate
-              </button>
-            </td>
-          </tr>
-          <tr>
-            <td><strong>Ramesh Kumar</strong></td>
-            <td>
-              <div><strong>+91 9876543210</strong></div>
-              <div style="font-size: 11px; color: var(--text-dim);">ramesh.auto@gmail.com</div>
-            </td>
-            <td><span style="color: #F8FAFC; font-weight: 600;">Hyderabad</span></td>
-            <td><span style="color: #94A3B8;">Telangana</span></td>
-            <td><span class="badge" style="background:#2C2215; color:#F59E0B;">AUTO</span></td>
-            <td>7 Days (₹129)</td>
-            <td>17/09/2026</td>
-            <td><span class="badge badge-approved status-badge"><i class="fa-solid fa-circle-check"></i> Active</span></td>
-            <td>
-              <button type="button" class="btn btn-danger btn-sm toggle-status-btn" data-status="active" onclick="toggleDriverStatus(this)" title="Click to Deactivate driver">
-                <i class="fa-solid fa-toggle-on"></i> Deactivate
-              </button>
-            </td>
-          </tr>
-          <tr>
-            <td><strong>Suresh Sharma</strong></td>
-            <td>
-              <div><strong>+91 9123456780</strong></div>
-              <div style="font-size: 11px; color: var(--text-dim);">suresh.rider@gmail.com</div>
-            </td>
-            <td><span style="color: #F8FAFC; font-weight: 600;">Bengaluru</span></td>
-            <td><span style="color: #94A3B8;">Karnataka</span></td>
-            <td><span class="badge" style="background:#172554; color:#60A5FA;">BIKE</span></td>
-            <td>1 Month (₹329)</td>
-            <td>10/10/2026</td>
-            <td><span class="badge badge-approved status-badge"><i class="fa-solid fa-circle-check"></i> Active</span></td>
-            <td>
-              <button type="button" class="btn btn-danger btn-sm toggle-status-btn" data-status="active" onclick="toggleDriverStatus(this)" title="Click to Deactivate driver">
-                <i class="fa-solid fa-toggle-on"></i> Deactivate
-              </button>
-            </td>
-          </tr>
-          <tr>
-            <td><strong>Amit Verma</strong></td>
-            <td>
-              <div><strong>+91 9988776655</strong></div>
-              <div style="font-size: 11px; color: var(--text-dim);">amit.verma@smartdrivo.in</div>
-            </td>
-            <td><span style="color: #F8FAFC; font-weight: 600;">Hyderabad</span></td>
-            <td><span style="color: #94A3B8;">Telangana</span></td>
-            <td><span class="badge" style="background:#2C2215; color:#F59E0B;">AUTO</span></td>
-            <td>15 Days (₹199)</td>
-            <td>28/09/2026</td>
-            <td><span class="badge badge-approved status-badge"><i class="fa-solid fa-circle-check"></i> Active</span></td>
-            <td>
-              <button type="button" class="btn btn-danger btn-sm toggle-status-btn" data-status="active" onclick="toggleDriverStatus(this)" title="Click to Deactivate driver">
-                <i class="fa-solid fa-toggle-on"></i> Deactivate
-              </button>
-            </td>
-          </tr>
-          <tr id="noDriversRow" style="display: none;">
-            <td colspan="9" style="text-align: center; padding: 24px; color: var(--text-dim);">
-              <i class="fa-solid fa-user-slash" style="font-size: 20px; margin-bottom: 8px; display: block; opacity: 0.5;"></i>
-              No drivers found matching name, mobile, city, or state.
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div style="overflow-x: auto;">
+        <table id="driversTable">
+          <thead>
+            <tr>
+              <th>Driver Partner</th>
+              <th>Mobile / Email</th>
+              <th>City</th>
+              <th>State</th>
+              <th>Vehicle</th>
+              <th>Active Plan</th>
+              <th>Expiry</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="driversTableBody">
+            <tr id="driversLoadingRow">
+              <td colspan="9" style="text-align: center; padding: 36px; color: var(--text-dim);">
+                <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 24px; color: var(--accent); margin-bottom: 10px; display: block;"></i>
+                Streaming live drivers from Firestore /users...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- 3. Plans & UPI Settings Panel -->
     <div id="pricing" class="panel">
       <h2 class="panel-title"><i class="fa-solid fa-credit-card" style="color: var(--accent);"></i> UPI Payment Configuration</h2>
-      <p class="panel-desc">Configure the payment receiving address and driver subscription pricing.</p>
+      <p class="panel-desc">Configure the payment receiving address and driver subscription pricing in Firestore `/settings/global`.</p>
       
       <div class="form-group" style="margin-top: 16px;">
         <label>Admin UPI ID</label>
-        <input type="text" id="upiIdInput" value="gpay-11189725657@okaxis">
+        <input type="text" id="upiIdInput" placeholder="e.g. gpay-11189725657@okaxis">
       </div>
       <div class="form-group">
         <label>Account Beneficiary Name</label>
-        <input type="text" value="SmartDrivo">
+        <input type="text" id="beneficiaryNameInput" placeholder="e.g. SmartDrivo">
       </div>
-      <button class="btn" onclick="alert('UPI Settings updated in Firebase!')">
+      <button class="btn" id="saveUpiBtn" onclick="saveUpiDetails()">
         <i class="fa-solid fa-floppy-disk"></i> Save UPI Details
       </button>
 
@@ -483,22 +437,22 @@
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 14px;">
         <div class="card">
           <label>3 Days Plan (₹)</label>
-          <input type="number" value="59">
+          <input type="number" id="price3Days" value="59">
         </div>
         <div class="card">
           <label>7 Days Plan (₹)</label>
-          <input type="number" value="129">
+          <input type="number" id="price7Days" value="129">
         </div>
         <div class="card">
           <label>15 Days Plan (₹)</label>
-          <input type="number" value="199">
+          <input type="number" id="price15Days" value="199">
         </div>
         <div class="card">
           <label>1 Month Plan (₹)</label>
-          <input type="number" value="329">
+          <input type="number" id="price1Month" value="329">
         </div>
       </div>
-      <button class="btn" style="margin-top: 14px;" onclick="alert('Plan pricing updated successfully!')">
+      <button class="btn" style="margin-top: 14px;" id="savePricesBtn" onclick="savePlanPrices()">
         <i class="fa-solid fa-floppy-disk"></i> Save Plan Prices
       </button>
     </div>
@@ -506,21 +460,21 @@
     <!-- 4. Community Links Panel -->
     <div id="community" class="panel">
       <h2 class="panel-title"><i class="fa-solid fa-comments" style="color: var(--accent);"></i> Social & Driver Community Links</h2>
-      <p class="panel-desc">Manage the direct support and community links accessible from the mobile app.</p>
+      <p class="panel-desc">Manage the direct support and community links synced live with the mobile app.</p>
       
       <div class="form-group" style="margin-top: 16px;">
         <label><i class="fa-brands fa-whatsapp" style="color:#25D366;"></i> WhatsApp Driver Group Link</label>
-        <input type="text" value="https://chat.whatsapp.com/smartdrivo">
+        <input type="text" id="whatsappInput" placeholder="https://chat.whatsapp.com/...">
       </div>
       <div class="form-group">
         <label><i class="fa-brands fa-telegram" style="color:#229ED9;"></i> Telegram Channel URL</label>
-        <input type="text" value="https://t.me/smartdrivo_riders">
+        <input type="text" id="telegramInput" placeholder="https://t.me/...">
       </div>
       <div class="form-group">
         <label><i class="fa-brands fa-instagram" style="color:#E1306C;"></i> Instagram Page Link</label>
-        <input type="text" value="https://instagram.com/smartdrivo">
+        <input type="text" id="instagramInput" placeholder="https://instagram.com/...">
       </div>
-      <button class="btn" onclick="alert('Community links updated!')">
+      <button class="btn" id="saveLinksBtn" onclick="saveCommunityLinks()">
         <i class="fa-solid fa-floppy-disk"></i> Save Links
       </button>
     </div>
@@ -529,84 +483,430 @@
     <div id="logs" class="panel">
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <div>
-          <h2 class="panel-title"><i class="fa-solid fa-microchip" style="color: var(--accent);"></i> Accessibility & Detection Debug Logs</h2>
-          <p class="panel-desc">Real-time driver app automation and order accept telemetry.</p>
+          <h2 class="panel-title"><i class="fa-solid fa-microchip" style="color: var(--accent);"></i> System & Admin Audit Logs</h2>
+          <p class="panel-desc">Real-time admin activities, Firestore sync telemetry and driver approvals.</p>
         </div>
-        <button class="btn btn-danger" onclick="document.getElementById('logContent').innerHTML='[System] Debug logs cleared by admin.';">
+        <button class="btn btn-danger btn-sm" onclick="clearLogs()">
           <i class="fa-solid fa-trash-can"></i> Clear Logs
         </button>
       </div>
-      <div id="logContent" style="margin-top: 10px; background: #000; padding: 16px; border-radius: 8px; font-family: 'SF Mono', Consolas, Monaco, monospace; font-size: 12px; color: #10B981; line-height: 1.8; border: 1px solid var(--border); overflow-x: auto;">
-        [12:30:15] Rapido package detected: com.rapido.rider<br>
-        [12:30:15] Match candidate: Fare ₹145, Drop Distance 7.2km<br>
-        [12:30:16] Action Click successful on com.rapido.rider:id/btn_accept_order<br>
-        [12:30:17] Confirmation verified: 'accepted!' found<br>
-        [12:30:17] Floating overlay popup triggered (Auto-dismiss in 5 mins)<br>
+      <div id="logContent" style="margin-top: 10px; background: #000; padding: 16px; border-radius: 8px; font-family: 'SF Mono', Consolas, Monaco, monospace; font-size: 12px; color: #10B981; line-height: 1.8; border: 1px solid var(--border); overflow-x: auto; max-height: 480px; overflow-y: auto;">
+        [System] Initializing SmartDrivo Admin Control Center...<br>
       </div>
     </div>
   </div>
 
+  <!-- Firebase Compatibility SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
   <script>
-    // Tab Switching
+    // Real Firebase Configuration matching project smartdrivo
+    const firebaseConfig = {
+      apiKey: "AIzaSyCBC-GSydq4ZgJF_nP9-p1zPdelhZRIvsc",
+      authDomain: "smartdrivo.firebaseapp.com",
+      projectId: "smartdrivo",
+      storageBucket: "smartdrivo.firebasestorage.app",
+      messagingSenderId: "726018491881",
+      appId: "1:726018491881:web:smartdrivo"
+    };
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    // App State
+    let currentAdminUid = sessionStorage.getItem('smartdrivo_admin_uid') || '';
+    let currentAdminEmail = sessionStorage.getItem('smartdrivo_admin_email') || '';
+    let liveDrivers = [];
+    let livePayments = [];
+    let activePaymentFilter = 'PENDING'; // 'PENDING' or 'ALL'
+
+    // Tab Navigation
     function showTab(tabId, ev) {
       document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.getElementById(tabId).classList.add('active');
+      const targetPanel = document.getElementById(tabId);
+      if (targetPanel) targetPanel.classList.add('active');
       if (ev && ev.currentTarget) {
         ev.currentTarget.classList.add('active');
       }
     }
 
-    // Set logged in username if stored
-    const storedUser = sessionStorage.getItem('smartdrivo_admin_user');
-    if (storedUser) {
-      const userLabel = document.getElementById('adminUserLabel');
-      if (userLabel) userLabel.textContent = storedUser;
+    // Toast notifications
+    function showToast(message, type = 'info') {
+      const toast = document.getElementById('toastNotification');
+      if (!toast) return;
+      toast.className = `toast-${type}`;
+      let icon = 'fa-info-circle';
+      if (type === 'success') icon = 'fa-circle-check';
+      else if (type === 'error') icon = 'fa-triangle-exclamation';
+      else if (type === 'warning') icon = 'fa-circle-exclamation';
+      toast.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${escapeHtml(message)}</span>`;
+      toast.style.display = 'flex';
+      setTimeout(() => {
+        toast.style.display = 'none';
+      }, 4000);
     }
 
-    // Admin Logout Functionality
-    function adminLogout() {
-      if (confirm('Are you sure you want to log out of the SmartDrivo Admin Panel?')) {
-        sessionStorage.removeItem('smartdrivo_admin_auth');
-        sessionStorage.removeItem('smartdrivo_admin_user');
-        sessionStorage.removeItem('smartdrivo_admin_logged_at');
+    function logMessage(msg) {
+      const logBox = document.getElementById('logContent');
+      if (logBox) {
+        const time = new Date().toLocaleTimeString('en-GB');
+        logBox.innerHTML += `[${time}] ${escapeHtml(msg)}<br>`;
+        logBox.scrollTop = logBox.scrollHeight;
+      }
+    }
+
+    function clearLogs() {
+      const logBox = document.getElementById('logContent');
+      if (logBox) {
+        logBox.innerHTML = `[${new Date().toLocaleTimeString('en-GB')}] Log cleared by admin.<br>`;
+      }
+    }
+
+    // Escape helper
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // Format timestamp
+    function formatTime(ts) {
+      if (!ts) return 'N/A';
+      try {
+        const d = new Date(Number(ts));
+        if (isNaN(d.getTime())) return 'N/A';
+        return d.toLocaleString('en-IN', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        });
+      } catch (e) {
+        return 'N/A';
+      }
+    }
+
+    function formatExpiry(expiryMillis, isAdmin) {
+      if (isAdmin) {
+        return '<strong style="color: #60A5FA;">Unlimited (Admin)</strong>';
+      }
+      if (!expiryMillis || Number(expiryMillis) <= 0) {
+        return '<span style="color: var(--text-dim);">Not Activated</span>';
+      }
+      const exp = Number(expiryMillis);
+      const isExpired = exp < Date.now();
+      const dateStr = new Date(exp).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      if (isExpired) {
+        return `<span style="color: var(--error);">${dateStr} (Expired)</span>`;
+      }
+      return `<span style="color: var(--success); font-weight: 600;">${dateStr}</span>`;
+    }
+
+    // Logout
+    async function adminLogout() {
+      if (confirm('Are you sure you want to log out of the SmartDrivo Admin Control Center?')) {
+        try {
+          await auth.signOut();
+        } catch (e) {
+          console.warn("SignOut warning:", e);
+        }
         sessionStorage.clear();
         window.location.replace('login.html');
       }
     }
 
-    // 1. Search Box: Filter Registered Drivers by Name, Mobile, City, or State
-    function filterDrivers() {
-      const input = document.getElementById('driverSearchInput');
-      const query = input ? input.value.toLowerCase().trim() : '';
-      const clearBtn = document.getElementById('clearSearchBtn');
-      if (clearBtn) {
-        clearBtn.style.display = query.length > 0 ? 'block' : 'none';
+    // 1. AUTH GUARD & REALTIME LISTENER INITIALIZATION
+    auth.onAuthStateChanged(async (user) => {
+      if (!user) {
+        logMessage("No authenticated user found. Redirecting to login...");
+        sessionStorage.clear();
+        window.location.replace('login.html');
+        return;
       }
 
-      const rows = document.querySelectorAll('#driversTable tbody tr');
-      let visibleCount = 0;
+      currentAdminUid = user.uid;
+      currentAdminEmail = user.email || '';
 
-      rows.forEach(row => {
-        if (row.id === 'noDriversRow') return;
-        // Search in Driver Name (0), Mobile/Email (1), City (2), State (3)
-        const driverName = row.cells[0] ? row.cells[0].textContent.toLowerCase() : '';
-        const phoneEmail = row.cells[1] ? row.cells[1].textContent.toLowerCase() : '';
-        const city = row.cells[2] ? row.cells[2].textContent.toLowerCase() : '';
-        const state = row.cells[3] ? row.cells[3].textContent.toLowerCase() : '';
+      try {
+        logMessage(`Verifying admin credentials for UID: ${user.uid} (${user.email || 'N/A'})...`);
+        const userDoc = await db.collection('users').doc(user.uid).get();
+        let isAdmin = false;
+        let userData = null;
 
-        if (!query || driverName.includes(query) || phoneEmail.includes(query) || city.includes(query) || state.includes(query)) {
-          row.style.display = '';
-          visibleCount++;
+        if (userDoc.exists) {
+          userData = userDoc.data();
+          isAdmin = (userData.isAdmin === true);
         } else {
-          row.style.display = 'none';
+          // Fallback by email query
+          if (user.email) {
+            const snap = await db.collection('users').where('email', '==', user.email).limit(1).get();
+            if (!snap.empty) {
+              userData = snap.docs[0].data();
+              isAdmin = (userData.isAdmin === true);
+            }
+          }
         }
+
+        if (!isAdmin) {
+          logMessage("Access Denied: Logged in user does not have admin permissions.");
+          alert("Access Denied: Your account does not have Administrator privileges.");
+          await auth.signOut();
+          sessionStorage.clear();
+          window.location.replace('login.html');
+          return;
+        }
+
+        // Show real admin identity in header
+        const label = document.getElementById('adminUserLabel');
+        const adminDisplayName = (userData && userData.name) ? userData.name : (user.email || 'Admin');
+        if (label) label.textContent = adminDisplayName;
+        sessionStorage.setItem('smartdrivo_admin_auth', 'true');
+        sessionStorage.setItem('smartdrivo_admin_user', adminDisplayName);
+
+        logMessage(`Admin Access Confirmed. Active admin: ${adminDisplayName}`);
+        
+        // Start live snapshot listeners
+        startRealtimeListeners();
+
+      } catch (err) {
+        console.error("Auth verification error:", err);
+        logMessage(`Auth check error: ${err.message}`);
+        showToast("Error verifying admin credentials: " + err.message, "error");
+      }
+    });
+
+    // 2. REALTIME LISTENERS
+    function startRealtimeListeners() {
+      // A. Listen to /users collection
+      db.collection('users').onSnapshot((snapshot) => {
+        logMessage(`Live sync: ${snapshot.docs.length} driver documents received from Firestore /users.`);
+        liveDrivers = [];
+        snapshot.forEach((doc) => {
+          const d = doc.data();
+          liveDrivers.push({
+            uid: doc.id,
+            name: d.name || 'Unnamed Driver',
+            email: d.email || '',
+            phone: d.phone || d.mobile || '',
+            city: d.city || 'N/A',
+            state: d.state || 'N/A',
+            vehicleType: (d.vehicleType || 'AUTO').toUpperCase(),
+            plan: d.plan || 'NONE',
+            planPrice: Number(d.planPrice) || 0,
+            planExpireMillis: Number(d.planExpireMillis) || 0,
+            isApproved: (d.isApproved === true),
+            isActive: (d.isActive !== false), // default active unless explicitly false
+            isAdmin: (d.isAdmin === true),
+            createdAt: Number(d.createdAt) || Date.now()
+          });
+        });
+
+        // Update counts
+        const total = liveDrivers.length;
+        const activeCount = liveDrivers.count ? liveDrivers.count(d => d.isActive) : liveDrivers.filter(d => d.isActive).length;
+        const inactiveCount = total - activeCount;
+
+        const countBadge = document.getElementById('driversCountBadge');
+        if (countBadge) countBadge.textContent = total;
+
+        const activeBadge = document.getElementById('activeDriversCountBadge');
+        if (activeBadge) activeBadge.textContent = `${activeCount} Active`;
+
+        const inactiveBadge = document.getElementById('inactiveDriversCountBadge');
+        if (inactiveBadge) inactiveBadge.textContent = `${inactiveCount} Inactive`;
+
+        // Render drivers table
+        renderDriversTable();
+
+      }, (error) => {
+        console.error("Firestore users listener error:", error);
+        logMessage(`Firestore /users listener error: ${error.message}`);
+        showToast("Error streaming drivers: " + error.message, "error");
       });
 
-      const noDriversRow = document.getElementById('noDriversRow');
-      if (noDriversRow) {
-        noDriversRow.style.display = (visibleCount === 0) ? '' : 'none';
+      // B. Listen to /payments collection
+      db.collection('payments').onSnapshot((snapshot) => {
+        logMessage(`Live sync: ${snapshot.docs.length} payment documents received from Firestore /payments.`);
+        livePayments = [];
+        snapshot.forEach((doc) => {
+          const d = doc.data();
+          livePayments.push({
+            paymentId: doc.id,
+            uid: d.uid || '',
+            userName: d.userName || d.name || 'Driver',
+            utrNumber: d.utrNumber || 'N/A',
+            planSelected: (d.planSelected || '7DAYS').toUpperCase(),
+            amount: Number(d.amount) || 0,
+            status: (d.status || 'PENDING').toUpperCase(),
+            submittedAt: Number(d.submittedAt) || Date.now(),
+            approvedAt: d.approvedAt ? Number(d.approvedAt) : null,
+            rejectedAt: d.rejectedAt ? Number(d.rejectedAt) : null,
+            note: d.note || ''
+          });
+        });
+
+        // Sort descending by submittedAt
+        livePayments.sort((a, b) => b.submittedAt - a.submittedAt);
+
+        // Update pending count badge
+        const pendingCount = livePayments.filter(p => p.status === 'PENDING').length;
+        const pendingBadge = document.getElementById('pendingBadge');
+        if (pendingBadge) {
+          pendingBadge.textContent = pendingCount;
+          pendingBadge.style.display = pendingCount > 0 ? 'inline-flex' : 'none';
+        }
+
+        // Render payments queue
+        renderPaymentsQueue();
+
+      }, (error) => {
+        console.error("Firestore payments listener error:", error);
+        logMessage(`Firestore /payments listener error: ${error.message}`);
+        showToast("Error streaming payments: " + error.message, "error");
+      });
+
+      // C. Listen to /settings/global document
+      db.collection('settings').doc('global').onSnapshot((doc) => {
+        if (doc.exists) {
+          const data = doc.data();
+          if (data.upiId) document.getElementById('upiIdInput').value = data.upiId;
+          if (data.beneficiaryName) document.getElementById('beneficiaryNameInput').value = data.beneficiaryName;
+          
+          if (data.planPrices) {
+            if (data.planPrices.plan3Days) document.getElementById('price3Days').value = data.planPrices.plan3Days;
+            if (data.planPrices.plan7Days) document.getElementById('price7Days').value = data.planPrices.plan7Days;
+            if (data.planPrices.plan15Days) document.getElementById('price15Days').value = data.planPrices.plan15Days;
+            if (data.planPrices.plan1Month) document.getElementById('price1Month').value = data.planPrices.plan1Month;
+          }
+
+          if (data.whatsapp) document.getElementById('whatsappInput').value = data.whatsapp;
+          if (data.telegram) document.getElementById('telegramInput').value = data.telegram;
+          if (data.instagram) document.getElementById('instagramInput').value = data.instagram;
+
+          logMessage("Settings synchronized with Firestore /settings/global.");
+        }
+      }, (error) => {
+        console.warn("Global settings listener notice:", error.message);
+      });
+    }
+
+    // 3. RENDER DRIVERS DIRECTORY
+    function renderDriversTable() {
+      const tbody = document.getElementById('driversTableBody');
+      if (!tbody) return;
+
+      const searchInput = document.getElementById('driverSearchInput');
+      const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+
+      const filtered = liveDrivers.filter(d => {
+        if (!query) return true;
+        const name = (d.name || '').toLowerCase();
+        const phone = (d.phone || '').toLowerCase();
+        const email = (d.email || '').toLowerCase();
+        const city = (d.city || '').toLowerCase();
+        const state = (d.state || '').toLowerCase();
+        const vehicle = (d.vehicleType || '').toLowerCase();
+        return name.includes(query) || phone.includes(query) || email.includes(query) || city.includes(query) || state.includes(query) || vehicle.includes(query);
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="9" style="text-align: center; padding: 32px; color: var(--text-dim);">
+              <i class="fa-solid fa-user-slash" style="font-size: 24px; margin-bottom: 10px; display: block; opacity: 0.5;"></i>
+              ${query ? 'No registered drivers matching your search criteria.' : 'No registered drivers found in Firestore /users collection.'}
+            </td>
+          </tr>
+        `;
+        return;
       }
+
+      let html = '';
+      filtered.forEach(driver => {
+        const isCurrentAdmin = (driver.isAdmin === true || driver.uid === currentAdminUid);
+
+        // Vehicle badge style
+        let vehicleBg = '#172554';
+        let vehicleColor = '#60A5FA';
+        if (driver.vehicleType === 'AUTO') {
+          vehicleBg = '#2C2215';
+          vehicleColor = '#F59E0B';
+        } else if (driver.vehicleType === 'BIKE') {
+          vehicleBg = '#064E3B';
+          vehicleColor = '#34D399';
+        }
+
+        // Action Button: Protected for admin, toggle for regular users
+        let actionCell = '';
+        if (isCurrentAdmin) {
+          actionCell = `
+            <span class="badge" style="background: rgba(37,99,235,0.15); color: #60A5FA; border: 1px solid rgba(37,99,235,0.3);">
+              <i class="fa-solid fa-shield-halved"></i> Protected
+            </span>
+          `;
+        } else {
+          if (driver.isActive) {
+            actionCell = `
+              <button type="button" class="btn btn-danger btn-sm" onclick="toggleDriverActive('${driver.uid}', true, '${escapeHtml(driver.name)}')" title="Click to Deactivate driver">
+                <i class="fa-solid fa-toggle-on"></i> Deactivate
+              </button>
+            `;
+          } else {
+            actionCell = `
+              <button type="button" class="btn btn-success btn-sm" onclick="toggleDriverActive('${driver.uid}', false, '${escapeHtml(driver.name)}')" title="Click to Activate driver">
+                <i class="fa-solid fa-toggle-off"></i> Activate
+              </button>
+            `;
+          }
+        }
+
+        html += `
+          <tr>
+            <td>
+              <strong>${escapeHtml(driver.name)}</strong>
+              ${driver.isAdmin ? '<span class="badge" style="background: rgba(37,99,235,0.2); color: #60A5FA; font-size: 10px; margin-left: 6px;">ADMIN</span>' : ''}
+            </td>
+            <td>
+              <div><strong>${escapeHtml(driver.phone || 'No Phone')}</strong></div>
+              <div style="font-size: 11px; color: var(--text-dim);">${escapeHtml(driver.email || '')}</div>
+            </td>
+            <td><span style="color: #F8FAFC; font-weight: 600;">${escapeHtml(driver.city)}</span></td>
+            <td><span style="color: #94A3B8;">${escapeHtml(driver.state)}</span></td>
+            <td><span class="badge" style="background: ${vehicleBg}; color: ${vehicleColor};">${escapeHtml(driver.vehicleType)}</span></td>
+            <td><strong>${escapeHtml(driver.plan)}</strong> <span style="font-size: 11px; color: var(--text-dim);">${driver.planPrice ? `(₹${driver.planPrice})` : ''}</span></td>
+            <td>${formatExpiry(driver.planExpireMillis, driver.isAdmin)}</td>
+            <td>
+              ${driver.isActive ? 
+                '<span class="badge badge-approved"><i class="fa-solid fa-circle-check"></i> Active</span>' : 
+                '<span class="badge badge-rejected"><i class="fa-solid fa-circle-xmark"></i> Inactive</span>'
+              }
+            </td>
+            <td>${actionCell}</td>
+          </tr>
+        `;
+      });
+
+      tbody.innerHTML = html;
+    }
+
+    function filterDrivers() {
+      const input = document.getElementById('driverSearchInput');
+      const query = input ? input.value.trim() : '';
+      const clearBtn = document.getElementById('clearSearchBtn');
+      if (clearBtn) clearBtn.style.display = query.length > 0 ? 'block' : 'none';
+      renderDriversTable();
     }
 
     function clearDriverSearch() {
@@ -618,36 +918,313 @@
       }
     }
 
-    // 2. Active/Deactivate Toggle Button for each user
-    function toggleDriverStatus(button) {
-      const row = button.closest('tr');
-      if (!row) return;
+    // 4. TOGGLE DRIVER STATUS (REAL FIRESTORE WRITE)
+    async function toggleDriverActive(uid, currentlyActive, driverName) {
+      // Safeguard against admin deactivation
+      const target = liveDrivers.find(d => d.uid === uid);
+      if (target && target.isAdmin) {
+        alert("Protection Guard: Administrator accounts cannot be deactivated!");
+        return;
+      }
 
-      const statusBadge = row.querySelector('.status-badge');
-      const currentStatus = button.getAttribute('data-status');
+      const targetStatus = !currentlyActive;
+      const action = targetStatus ? 'activate' : 'deactivate';
+      if (!confirm(`Are you sure you want to ${action} ${driverName || 'this driver'}?`)) return;
 
-      if (currentStatus === 'active') {
-        // Toggle to Deactivated
-        button.setAttribute('data-status', 'deactivated');
-        button.className = 'btn btn-success btn-sm toggle-status-btn';
-        button.innerHTML = '<i class="fa-solid fa-toggle-off"></i> Activate';
-        button.title = 'Click to Activate driver';
+      try {
+        logMessage(`Writing to Firestore: /users/${uid} isActive -> ${targetStatus}...`);
+        await db.collection('users').doc(uid).update({
+          isActive: targetStatus,
+          updatedAt: Date.now()
+        });
+        showToast(`Driver successfully ${targetStatus ? 'activated' : 'deactivated'} in Firestore.`, 'success');
+        logMessage(`Successfully updated status for driver ${driverName} (${uid}).`);
+      } catch (err) {
+        console.error("Firestore status toggle failed:", err);
+        logMessage(`Error updating driver status: ${err.message}`);
+        showToast(`Error updating driver: ${err.message}`, 'error');
+      }
+    }
 
-        if (statusBadge) {
-          statusBadge.className = 'badge badge-rejected status-badge';
-          statusBadge.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> Deactivated';
-        }
+    // 5. RENDER PAYMENTS QUEUE
+    function setPaymentFilter(filter) {
+      activePaymentFilter = filter;
+      const pendingBtn = document.getElementById('filterPendingBtn');
+      const allBtn = document.getElementById('filterAllPaymentsBtn');
+
+      if (filter === 'PENDING') {
+        if (pendingBtn) { pendingBtn.style.background = 'var(--accent)'; pendingBtn.style.color = '#FFF'; }
+        if (allBtn) { allBtn.style.background = '#202632'; allBtn.style.color = 'var(--text-dim)'; }
       } else {
-        // Toggle to Active
-        button.setAttribute('data-status', 'active');
-        button.className = 'btn btn-danger btn-sm toggle-status-btn';
-        button.innerHTML = '<i class="fa-solid fa-toggle-on"></i> Deactivate';
-        button.title = 'Click to Deactivate driver';
+        if (allBtn) { allBtn.style.background = 'var(--accent)'; allBtn.style.color = '#FFF'; }
+        if (pendingBtn) { pendingBtn.style.background = '#202632'; pendingBtn.style.color = 'var(--text-dim)'; }
+      }
+      renderPaymentsQueue();
+    }
 
-        if (statusBadge) {
-          statusBadge.className = 'badge badge-approved status-badge';
-          statusBadge.innerHTML = '<i class="fa-solid fa-circle-check"></i> Active';
+    function renderPaymentsQueue() {
+      const container = document.getElementById('paymentsList');
+      if (!container) return;
+
+      const filtered = livePayments.filter(p => {
+        if (activePaymentFilter === 'PENDING') return p.status === 'PENDING';
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="card" style="text-align: center; padding: 40px; color: var(--text-dim);">
+            <i class="fa-solid fa-circle-check" style="font-size: 32px; color: var(--success); margin-bottom: 12px; display: block;"></i>
+            <h3 style="color: #FFF; font-size: 16px; margin-bottom: 6px;">
+              ${activePaymentFilter === 'PENDING' ? 'No Pending Payments in Queue' : 'No Payment Submissions Recorded'}
+            </h3>
+            <p style="font-size: 13px;">${activePaymentFilter === 'PENDING' ? 'All driver subscription payments have been processed!' : 'Submitted payments from drivers will appear here live.'}</p>
+          </div>
+        `;
+        return;
+      }
+
+      let html = '';
+      filtered.forEach(sub => {
+        // Status badge
+        let badgeClass = 'badge-pending';
+        if (sub.status === 'APPROVED') badgeClass = 'badge-approved';
+        else if (sub.status === 'REJECTED') badgeClass = 'badge-rejected';
+
+        // Action buttons
+        let actionsHtml = '';
+        if (sub.status === 'PENDING') {
+          actionsHtml = `
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-success" onclick="approvePayment('${escapeHtml(sub.paymentId)}', '${escapeHtml(sub.uid)}', '${escapeHtml(sub.planSelected)}', ${sub.amount}, '${escapeHtml(sub.utrNumber)}')">
+                <i class="fa-solid fa-check"></i> Approve
+              </button>
+              <button class="btn btn-danger" onclick="rejectPayment('${escapeHtml(sub.paymentId)}', '${escapeHtml(sub.utrNumber)}')">
+                <i class="fa-solid fa-xmark"></i> Reject
+              </button>
+            </div>
+          `;
+        } else {
+          actionsHtml = `
+            <div style="font-size: 12px; color: var(--text-dim);">
+              Processed on: <strong style="color: #FFF;">${formatTime(sub.approvedAt || sub.rejectedAt)}</strong>
+            </div>
+          `;
         }
+
+        html += `
+          <div class="card" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+            <div>
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+                <strong style="font-size: 15px; color: #FFF;">${escapeHtml(sub.userName)}</strong>
+                <span class="badge ${badgeClass}">${escapeHtml(sub.status)}</span>
+              </div>
+              <div style="font-size: 13px; color: var(--text-dim); line-height: 1.6;">
+                UTR: <strong style="color: #FFF; letter-spacing: 0.5px;">${escapeHtml(sub.utrNumber)}</strong> &nbsp;|&nbsp; 
+                Plan: <strong style="color: var(--accent);">${escapeHtml(sub.planSelected)} (₹${sub.amount})</strong> &nbsp;|&nbsp; 
+                Submitted: <span>${formatTime(sub.submittedAt)}</span>
+                ${sub.note ? `<br><span style="font-style: italic; color: #94A3B8;">Note: "${escapeHtml(sub.note)}"</span>` : ''}
+              </div>
+            </div>
+            ${actionsHtml}
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+    }
+
+    // 6. APPROVE PAYMENT (REAL FIRESTORE BATCH WRITE)
+    async function approvePayment(paymentId, uid, planSelected, amount, utrNumber) {
+      const cleanUtr = (utrNumber || '').trim();
+      if (!confirm(`Approve payment UTR #${cleanUtr} for ₹${amount} and activate ${planSelected} plan for driver?`)) {
+        return;
+      }
+
+      try {
+        logMessage(`Approving payment #${paymentId} for driver UID: ${uid}...`);
+
+        // Compute days to add
+        let daysToAdd = 7;
+        const p = (planSelected || '').toUpperCase();
+        if (p.includes('3DAY')) daysToAdd = 3;
+        else if (p.includes('7DAY')) daysToAdd = 7;
+        else if (p.includes('15DAY')) daysToAdd = 15;
+        else if (p.includes('1MONTH') || p.includes('30DAY')) daysToAdd = 30;
+
+        const now = Date.now();
+        let baseTime = now;
+
+        // Fetch driver's existing expiry if available
+        if (uid) {
+          try {
+            const userSnap = await db.collection('users').doc(uid).get();
+            if (userSnap.exists) {
+              const uData = userSnap.data();
+              if (uData.planExpireMillis && Number(uData.planExpireMillis) > now) {
+                baseTime = Number(uData.planExpireMillis);
+              }
+            }
+          } catch (fetchErr) {
+            console.warn("Could not read current driver expiry, using now:", fetchErr);
+          }
+        }
+
+        const newExpiry = baseTime + (daysToAdd * 86400000);
+
+        // Batch update: Payment document + Driver document
+        const batch = db.batch();
+
+        // 1. Payment document in /payments
+        const paymentRef = db.collection('payments').doc(paymentId);
+        batch.update(paymentRef, {
+          status: 'APPROVED',
+          approvedAt: now,
+          approvedBy: currentAdminEmail || currentAdminUid
+        });
+
+        // 2. User document in /users
+        if (uid) {
+          const userRef = db.collection('users').doc(uid);
+          batch.update(userRef, {
+            plan: planSelected || '7DAYS',
+            planPrice: Number(amount) || 0,
+            planExpireMillis: newExpiry,
+            isApproved: true,
+            isActive: true,
+            updatedAt: now
+          });
+        }
+
+        await batch.commit();
+
+        showToast(`✓ Payment approved! Driver plan activated for ${daysToAdd} days.`, 'success');
+        logMessage(`Payment #${paymentId} approved successfully in Firestore.`);
+
+      } catch (err) {
+        console.error("Payment approval error:", err);
+        logMessage(`Payment approval failed: ${err.message}`);
+        showToast(`Error approving payment: ${err.message}`, 'error');
+      }
+    }
+
+    // 7. REJECT PAYMENT (REAL FIRESTORE WRITE)
+    async function rejectPayment(paymentId, utrNumber) {
+      if (!confirm(`Are you sure you want to reject payment submission for UTR #${utrNumber}?`)) {
+        return;
+      }
+
+      try {
+        logMessage(`Rejecting payment #${paymentId}...`);
+        await db.collection('payments').doc(paymentId).update({
+          status: 'REJECTED',
+          rejectedAt: Date.now(),
+          rejectedBy: currentAdminEmail || currentAdminUid
+        });
+
+        showToast("Payment marked as REJECTED in Firestore.", 'warning');
+        logMessage(`Payment #${paymentId} marked as REJECTED.`);
+      } catch (err) {
+        console.error("Payment rejection error:", err);
+        logMessage(`Payment rejection failed: ${err.message}`);
+        showToast(`Error rejecting payment: ${err.message}`, 'error');
+      }
+    }
+
+    // 8. SAVE UPI DETAILS
+    async function saveUpiDetails() {
+      const upiId = document.getElementById('upiIdInput').value.trim();
+      const beneficiaryName = document.getElementById('beneficiaryNameInput').value.trim();
+
+      if (!upiId) {
+        alert("Please enter a valid UPI ID.");
+        return;
+      }
+
+      const saveBtn = document.getElementById('saveUpiBtn');
+      saveBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Saving...';
+      saveBtn.disabled = true;
+
+      try {
+        await db.collection('settings').doc('global').set({
+          upiId: upiId,
+          beneficiaryName: beneficiaryName,
+          updatedAt: Date.now(),
+          updatedBy: currentAdminEmail || currentAdminUid
+        }, { merge: true });
+
+        showToast("UPI details updated in Firestore /settings/global!", 'success');
+        logMessage(`UPI ID updated to ${upiId}`);
+      } catch (err) {
+        console.error("Save UPI error:", err);
+        showToast(`Error saving UPI: ${err.message}`, 'error');
+      } finally {
+        saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save UPI Details';
+        saveBtn.disabled = false;
+      }
+    }
+
+    // 9. SAVE PLAN PRICES
+    async function savePlanPrices() {
+      const price3 = Number(document.getElementById('price3Days').value) || 59;
+      const price7 = Number(document.getElementById('price7Days').value) || 129;
+      const price15 = Number(document.getElementById('price15Days').value) || 199;
+      const price30 = Number(document.getElementById('price1Month').value) || 329;
+
+      const saveBtn = document.getElementById('savePricesBtn');
+      saveBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Saving...';
+      saveBtn.disabled = true;
+
+      try {
+        await db.collection('settings').doc('global').set({
+          planPrices: {
+            plan3Days: price3,
+            plan7Days: price7,
+            plan15Days: price15,
+            plan1Month: price30
+          },
+          updatedAt: Date.now(),
+          updatedBy: currentAdminEmail || currentAdminUid
+        }, { merge: true });
+
+        showToast("Plan pricing updated successfully in Firestore!", 'success');
+        logMessage(`Membership prices saved: 3D=₹${price3}, 7D=₹${price7}, 15D=₹${price15}, 30D=₹${price30}`);
+      } catch (err) {
+        console.error("Save plan prices error:", err);
+        showToast(`Error saving prices: ${err.message}`, 'error');
+      } finally {
+        saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save Plan Prices';
+        saveBtn.disabled = false;
+      }
+    }
+
+    // 10. SAVE COMMUNITY LINKS
+    async function saveCommunityLinks() {
+      const whatsapp = document.getElementById('whatsappInput').value.trim();
+      const telegram = document.getElementById('telegramInput').value.trim();
+      const instagram = document.getElementById('instagramInput').value.trim();
+
+      const saveBtn = document.getElementById('saveLinksBtn');
+      saveBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Saving...';
+      saveBtn.disabled = true;
+
+      try {
+        await db.collection('settings').doc('global').set({
+          whatsapp: whatsapp,
+          telegram: telegram,
+          instagram: instagram,
+          updatedAt: Date.now(),
+          updatedBy: currentAdminEmail || currentAdminUid
+        }, { merge: true });
+
+        showToast("Community links updated in Firestore!", 'success');
+        logMessage("Community social links saved to Firestore.");
+      } catch (err) {
+        console.error("Save community links error:", err);
+        showToast(`Error saving links: ${err.message}`, 'error');
+      } finally {
+        saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save Links';
+        saveBtn.disabled = false;
       }
     }
   </script>

@@ -6,11 +6,14 @@ import com.example.model.AreaGroup
 import com.example.model.AreaType
 import com.example.model.MembershipPlan
 import com.example.model.OrderHistoryItem
+import com.example.model.PaymentStatus
 import com.example.model.PaymentSubmission
 import com.example.model.UserProfile
+import com.example.model.VehicleType
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -323,6 +326,230 @@ class FirebaseRepository(
                 )
             } catch (e: Exception) {
                 // Ignore log failures
+            }
+        }
+    }
+
+    // --- Realtime Firestore Sync for Admin (Users & Payments) ---
+    fun listenToAllUsers(onUsersChanged: ((List<UserProfile>) -> Unit)? = null): ListenerRegistration? {
+        val fs = firestore ?: return null
+        return try {
+            fs.collection("users").addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w("FirebaseRepo", "Realtime listen to /users error: ${error.message}")
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val list = mutableListOf<UserProfile>()
+                    for (doc in snapshot.documents) {
+                        try {
+                            val uid = doc.id
+                            val name = doc.getString("name") ?: ""
+                            val email = doc.getString("email") ?: ""
+                            val phone = doc.getString("phone") ?: doc.getString("mobile") ?: ""
+                            val city = doc.getString("city") ?: ""
+                            val state = doc.getString("state") ?: ""
+                            val vehicleStr = doc.getString("vehicleType") ?: "AUTO"
+                            val plan = doc.getString("plan") ?: "7DAYS"
+                            val planPrice = doc.getLong("planPrice")?.toInt() ?: 129
+                            val planExpireMillis = doc.getLong("planExpireMillis") ?: System.currentTimeMillis()
+                            val isApproved = doc.getBoolean("isApproved") ?: false
+                            val isAdmin = doc.getBoolean("isAdmin") ?: false
+                            val isActive = doc.getBoolean("isActive") ?: true
+                            val referralCode = doc.getString("referralCode") ?: "SMART50"
+                            val createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
+
+                            list.add(
+                                UserProfile(
+                                    uid = uid,
+                                    name = name,
+                                    email = email,
+                                    phone = phone,
+                                    city = city,
+                                    state = state,
+                                    vehicleType = VehicleType.fromString(vehicleStr),
+                                    plan = plan,
+                                    planPrice = planPrice,
+                                    planExpireMillis = planExpireMillis,
+                                    isApproved = isApproved,
+                                    isAdmin = isAdmin,
+                                    isActive = isActive,
+                                    referralCode = referralCode,
+                                    createdAt = createdAt
+                                )
+                            )
+                        } catch (e: Exception) {
+                            Log.w("FirebaseRepo", "Error parsing user doc ${doc.id}: ${e.message}")
+                        }
+                    }
+                    prefs.setAllUsers(list)
+                    onUsersChanged?.invoke(list)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("FirebaseRepo", "Failed to attach users listener: ${e.message}")
+            null
+        }
+    }
+
+    fun listenToAllPayments(onPaymentsChanged: ((List<PaymentSubmission>) -> Unit)? = null): ListenerRegistration? {
+        val fs = firestore ?: return null
+        return try {
+            fs.collection("payments").addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w("FirebaseRepo", "Realtime listen to /payments error: ${error.message}")
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val list = mutableListOf<PaymentSubmission>()
+                    for (doc in snapshot.documents) {
+                        try {
+                            val paymentId = doc.getString("paymentId") ?: doc.id
+                            val uid = doc.getString("uid") ?: ""
+                            val userName = doc.getString("userName") ?: ""
+                            val utrNumber = doc.getString("utrNumber") ?: ""
+                            val planSelected = doc.getString("planSelected") ?: "7DAYS"
+                            val amount = doc.getLong("amount")?.toInt() ?: 129
+                            val statusStr = doc.getString("status") ?: "PENDING"
+                            val status = try { PaymentStatus.valueOf(statusStr) } catch (e: Exception) { PaymentStatus.PENDING }
+                            val submittedAt = doc.getLong("submittedAt") ?: System.currentTimeMillis()
+                            val approvedAt = doc.getLong("approvedAt")
+                            val note = doc.getString("note") ?: ""
+
+                            list.add(
+                                PaymentSubmission(
+                                    paymentId = paymentId,
+                                    uid = uid,
+                                    userName = userName,
+                                    utrNumber = utrNumber,
+                                    planSelected = planSelected,
+                                    amount = amount,
+                                    status = status,
+                                    submittedAt = submittedAt,
+                                    approvedAt = approvedAt,
+                                    note = note
+                                )
+                            )
+                        } catch (e: Exception) {
+                            Log.w("FirebaseRepo", "Error parsing payment doc ${doc.id}: ${e.message}")
+                        }
+                    }
+                    val sorted = list.sortedByDescending { it.submittedAt }
+                    prefs.setPaymentSubmissions(sorted)
+                    onPaymentsChanged?.invoke(sorted)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("FirebaseRepo", "Failed to attach payments listener: ${e.message}")
+            null
+        }
+    }
+
+    fun adminToggleUserActiveStatus(uid: String, currentActive: Boolean, onComplete: ((Boolean) -> Unit)? = null) {
+        val newActive = !currentActive
+        prefs.toggleUserActiveStatus(uid)
+        scope.launch {
+            try {
+                firestore?.collection("users")?.document(uid)?.update(
+                    mapOf(
+                        "isActive" to newActive,
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                )?.await()
+                onComplete?.invoke(true)
+            } catch (e: Exception) {
+                Log.w("FirebaseRepo", "Firestore toggleUserActiveStatus failed: ${e.message}")
+                onComplete?.invoke(false)
+            }
+        }
+    }
+
+    fun adminApprovePayment(submission: PaymentSubmission, daysToAdd: Int, onComplete: ((Boolean) -> Unit)? = null) {
+        prefs.updatePaymentStatus(submission.paymentId, PaymentStatus.APPROVED)
+        prefs.extendUserPlan(submission.uid, daysToAdd, submission.planSelected, submission.amount)
+        scope.launch {
+            try {
+                val now = System.currentTimeMillis()
+                val fs = firestore ?: return@launch
+
+                // 1. Update payments collection in Firestore
+                fs.collection("payments").document(submission.paymentId).update(
+                    mapOf(
+                        "status" to PaymentStatus.APPROVED.name,
+                        "approvedAt" to now
+                    )
+                ).await()
+
+                // 2. Extend driver plan in users collection in Firestore
+                if (submission.uid.isNotBlank()) {
+                    val userDoc = fs.collection("users").document(submission.uid).get().await()
+                    val currentExpiry = userDoc.getLong("planExpireMillis") ?: 0L
+                    val baseTime = if (currentExpiry > now) currentExpiry else now
+                    val newExpiry = baseTime + (daysToAdd * 86400000L)
+
+                    fs.collection("users").document(submission.uid).update(
+                        mapOf(
+                            "plan" to submission.planSelected,
+                            "planPrice" to submission.amount,
+                            "planExpireMillis" to newExpiry,
+                            "isApproved" to true,
+                            "isActive" to true,
+                            "updatedAt" to now
+                        )
+                    ).await()
+                }
+                onComplete?.invoke(true)
+            } catch (e: Exception) {
+                Log.w("FirebaseRepo", "Firestore adminApprovePayment failed: ${e.message}")
+                onComplete?.invoke(false)
+            }
+        }
+    }
+
+    fun adminRejectPayment(paymentId: String, onComplete: ((Boolean) -> Unit)? = null) {
+        prefs.updatePaymentStatus(paymentId, PaymentStatus.REJECTED)
+        scope.launch {
+            try {
+                val now = System.currentTimeMillis()
+                firestore?.collection("payments")?.document(paymentId)?.update(
+                    mapOf(
+                        "status" to PaymentStatus.REJECTED.name,
+                        "rejectedAt" to now
+                    )
+                )?.await()
+                onComplete?.invoke(true)
+            } catch (e: Exception) {
+                Log.w("FirebaseRepo", "Firestore adminRejectPayment failed: ${e.message}")
+                onComplete?.invoke(false)
+            }
+        }
+    }
+
+    fun adminExtendUserPlan(uid: String, daysToAdd: Int, planLabel: String, price: Int, onComplete: ((Boolean) -> Unit)? = null) {
+        prefs.extendUserPlan(uid, daysToAdd, planLabel, price)
+        scope.launch {
+            try {
+                val now = System.currentTimeMillis()
+                val fs = firestore ?: return@launch
+                val userDoc = fs.collection("users").document(uid).get().await()
+                val currentExpiry = userDoc.getLong("planExpireMillis") ?: 0L
+                val baseTime = if (currentExpiry > now) currentExpiry else now
+                val newExpiry = baseTime + (daysToAdd * 86400000L)
+
+                fs.collection("users").document(uid).update(
+                    mapOf(
+                        "plan" to planLabel,
+                        "planPrice" to price,
+                        "planExpireMillis" to newExpiry,
+                        "isApproved" to true,
+                        "isActive" to true,
+                        "updatedAt" to now
+                    )
+                ).await()
+                onComplete?.invoke(true)
+            } catch (e: Exception) {
+                Log.w("FirebaseRepo", "Firestore adminExtendUserPlan failed: ${e.message}")
+                onComplete?.invoke(false)
             }
         }
     }

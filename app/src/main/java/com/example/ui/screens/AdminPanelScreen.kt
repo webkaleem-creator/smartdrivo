@@ -123,6 +123,16 @@ fun AdminPanelScreen(
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Users, 1: Payments, 2: UPI & QR, 3: Community
 
+    // Attach Realtime Firestore Listeners to /users and /payments for live 2-way sync
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        val usersListener = repository.listenToAllUsers()
+        val paymentsListener = repository.listenToAllPayments()
+        onDispose {
+            usersListener?.remove()
+            paymentsListener?.remove()
+        }
+    }
+
     // KPI Counters
     val totalUsersCount = allUsers.size
     val activeUsersCount = allUsers.count { it.isActive }
@@ -311,9 +321,14 @@ fun AdminPanelScreen(
                         statusFilter = userStatusFilter,
                         onStatusFilterChange = { userStatusFilter = it },
                         onToggleActive = { user ->
-                            prefs.toggleUserActiveStatus(user.uid)
-                            val updatedStatus = if (user.isActive) "Inactive" else "Active"
-                            Toast.makeText(context, "${user.name} marked as $updatedStatus", Toast.LENGTH_SHORT).show()
+                            if (user.isAdmin) {
+                                Toast.makeText(context, "Cannot deactivate Administrator account! Admin access is protected.", Toast.LENGTH_SHORT).show()
+                            } else {
+                                repository.adminToggleUserActiveStatus(user.uid, user.isActive) { success ->
+                                    val updatedStatus = if (user.isActive) "Inactive" else "Active"
+                                    Toast.makeText(context, "${user.name} marked as $updatedStatus in Firestore", Toast.LENGTH_SHORT).show()
+                                }
+                            }
                         },
                         onOpenPlanEdit = { user ->
                             userForPlanEdit = user
@@ -353,9 +368,6 @@ fun AdminPanelScreen(
                                 return@PaymentApprovalsSection
                             }
 
-                            // Update payment status to APPROVED
-                            prefs.updatePaymentStatus(sub.paymentId, PaymentStatus.APPROVED)
-
                             // Add days based on plan
                             val daysToAdd = when (sub.planSelected.uppercase()) {
                                 "3DAYS" -> 3
@@ -365,31 +377,19 @@ fun AdminPanelScreen(
                                 else -> 7
                             }
 
-                            // Update matching user in allUsers
-                            prefs.extendUserPlan(sub.uid, daysToAdd, sub.planSelected, sub.amount)
-
-                            // If this was the current user, update current user too
-                            if (currentUserProfile.uid == sub.uid || currentUserProfile.phone == sub.userName || currentUserProfile.name == sub.userName) {
-                                val newExpiry = System.currentTimeMillis() + (daysToAdd * 86400000L)
-                                val updatedProfile = currentUserProfile.copy(
-                                    plan = sub.planSelected,
-                                    planPrice = sub.amount,
-                                    planExpireMillis = newExpiry,
-                                    isApproved = true,
-                                    isActive = true
-                                )
-                                repository.adminUpdateUserProfile(updatedProfile)
+                            // Update payment & user in Firestore and locally
+                            repository.adminApprovePayment(sub, daysToAdd) { success ->
+                                Toast.makeText(
+                                    context,
+                                    "✓ Payment Approved! Driver membership activated for $daysToAdd days with 12-digit UTR ($cleanUtr).",
+                                    Toast.LENGTH_LONG
+                                ).show()
                             }
-
-                            Toast.makeText(
-                                context,
-                                "✓ Payment Approved! Driver membership activated for $daysToAdd days with 12-digit UTR ($cleanUtr).",
-                                Toast.LENGTH_LONG
-                            ).show()
                         },
                         onReject = { sub ->
-                            prefs.updatePaymentStatus(sub.paymentId, PaymentStatus.REJECTED)
-                            Toast.makeText(context, "Payment marked as REJECTED", Toast.LENGTH_SHORT).show()
+                            repository.adminRejectPayment(sub.paymentId) {
+                                Toast.makeText(context, "Payment marked as REJECTED in Firestore", Toast.LENGTH_SHORT).show()
+                            }
                         },
                         onEditUtr = { sub ->
                             paymentForUtrEdit = sub

@@ -241,14 +241,14 @@
 
       <form id="loginForm" onsubmit="handleAdminLogin(event)">
         <div class="form-group">
-          <label for="username">Admin Username</label>
+          <label for="username">Admin Email / Username</label>
           <div class="input-wrapper">
             <input 
-              type="text" 
+              type="email" 
               id="username" 
               class="form-input" 
-              placeholder="Enter admin username"
-              autocomplete="username"
+              placeholder="Enter admin email address"
+              autocomplete="email"
               required 
               autofocus
             >
@@ -287,17 +287,34 @@
 
       <div class="security-note">
         <div class="security-badge">
-          <i class="fa-solid fa-lock"></i> End-to-End Protected Session
+          <i class="fa-solid fa-lock"></i> Firebase Secured Admin Portal
         </div>
-        <p>Session automatically expires when this browser tab is closed.</p>
+        <p>Protected by Firebase Authentication & Firestore RBAC.</p>
       </div>
     </div>
   </div>
 
+  <!-- Firebase Compatibility SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
   <script>
-    // Hardcoded credentials
-    const ADMIN_USER = 'kkaleem4u';
-    const ADMIN_PASS = 'k@leem4yoU';
+    // Real Firebase Configuration matching project smartdrivo
+    const firebaseConfig = {
+      apiKey: "AIzaSyCBC-GSydq4ZgJF_nP9-p1zPdelhZRIvsc",
+      authDomain: "smartdrivo.firebaseapp.com",
+      projectId: "smartdrivo",
+      storageBucket: "smartdrivo.firebasestorage.app",
+      messagingSenderId: "726018491881",
+      appId: "1:726018491881:web:smartdrivo"
+    };
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const auth = firebase.auth();
+    const db = firebase.firestore();
 
     function togglePasswordVisibility() {
       const passInput = document.getElementById('password');
@@ -313,7 +330,7 @@
       }
     }
 
-    function handleAdminLogin(e) {
+    async function handleAdminLogin(e) {
       e.preventDefault();
       
       const usernameInput = document.getElementById('username');
@@ -322,28 +339,84 @@
       const errorText = document.getElementById('errorText');
       const loginBtn = document.getElementById('loginBtn');
 
-      const user = usernameInput.value.trim();
+      const email = usernameInput.value.trim();
       const pass = passwordInput.value;
 
-      if (user === ADMIN_USER && pass === ADMIN_PASS) {
-        // Successful login
-        errorBox.style.display = 'none';
-        loginBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Authenticating...';
-        loginBtn.disabled = true;
+      errorBox.style.display = 'none';
+      loginBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Authenticating...';
+      loginBtn.disabled = true;
 
-        // Save session authentication in sessionStorage (cleared when browser/tab closes)
+      try {
+        // 1. Sign in with real Firebase Authentication
+        const userCredential = await auth.signInWithEmailAndPassword(email, pass);
+        const user = userCredential.user;
+
+        if (!user) {
+          throw new Error("Unable to authenticate with Firebase.");
+        }
+
+        loginBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Verifying Admin Access...';
+
+        // 2. Fetch and verify /users/{uid} document in Firestore
+        let isAdmin = false;
+        let adminData = null;
+
+        const userDoc = await db.collection('users').doc(user.uid).get();
+        if (userDoc.exists) {
+          adminData = userDoc.data();
+          isAdmin = (adminData.isAdmin === true);
+        } else {
+          // Fallback: check query by email if document ID is different
+          const querySnap = await db.collection('users').where('email', '==', email).limit(1).get();
+          if (!querySnap.empty) {
+            adminData = querySnap.docs[0].data();
+            isAdmin = (adminData.isAdmin === true);
+          }
+        }
+
+        // 3. Strict Admin Access Gate
+        if (!isAdmin) {
+          await auth.signOut();
+          sessionStorage.clear();
+          errorText.textContent = `Access Denied: Account (${email}) does not have Administrator privileges. Access is restricted to SmartDrivo admins.`;
+          errorBox.style.display = 'flex';
+          loginBtn.innerHTML = '<i class="fa-solid fa-shield-halved"></i> <span>Login to Admin Panel</span>';
+          loginBtn.disabled = false;
+          return;
+        }
+
+        // 4. Save session authentication in sessionStorage
         sessionStorage.setItem('smartdrivo_admin_auth', 'true');
-        sessionStorage.setItem('smartdrivo_admin_user', user);
+        sessionStorage.setItem('smartdrivo_admin_uid', user.uid);
+        sessionStorage.setItem('smartdrivo_admin_email', user.email || email);
+        sessionStorage.setItem('smartdrivo_admin_user', (adminData && adminData.name) ? adminData.name : (user.email || 'Admin'));
         sessionStorage.setItem('smartdrivo_admin_logged_at', new Date().toISOString());
 
+        loginBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> <span>Access Granted! Loading...</span>';
+
         setTimeout(() => {
-          // Redirect to dashboard
           window.location.replace('index.html');
         }, 350);
-      } else {
-        // Failed login
-        errorText.textContent = 'Invalid credentials. Please enter correct username and password.';
+
+      } catch (err) {
+        console.error("Firebase Admin Login Error:", err);
+        let message = "Authentication failed. Please check your credentials.";
+        if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+          message = "Invalid email or password. Please verify your admin credentials.";
+        } else if (err.code === 'auth/invalid-email') {
+          message = "Please enter a valid email address.";
+        } else if (err.code === 'auth/user-disabled') {
+          message = "This admin account has been disabled by security policy.";
+        } else if (err.code === 'auth/too-many-requests') {
+          message = "Too many failed attempts. Please try again in a few minutes.";
+        } else if (err.message) {
+          message = err.message;
+        }
+
+        errorText.textContent = message;
         errorBox.style.display = 'flex';
+        loginBtn.innerHTML = '<i class="fa-solid fa-shield-halved"></i> <span>Login to Admin Panel</span>';
+        loginBtn.disabled = false;
         passwordInput.value = '';
         passwordInput.focus();
       }
