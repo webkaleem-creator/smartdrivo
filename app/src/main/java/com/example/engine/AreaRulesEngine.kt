@@ -104,14 +104,24 @@ object AreaRulesEngine {
                 var firstFailure: String? = null
 
                 for (matchedGroup in matchingGroups) {
+                    // Backward compatibility:
+                    // Old GO TO groups stored this value in maxFare.
+                    // Until that group is saved again, treat it as Minimum Fare.
+                    val effectiveMinFare =
+                        if (matchedGroup.maxFare > 0f) {
+                            matchedGroup.maxFare
+                        } else {
+                            matchedGroup.minFare
+                        }
+
                     if (
-                        matchedGroup.maxFare > 0f &&
+                        effectiveMinFare > 0f &&
                         fare != null &&
-                        fare > matchedGroup.maxFare
+                        fare < effectiveMinFare
                     ) {
                         if (firstFailure == null) {
                             firstFailure =
-                                "Go-To '${matchedGroup.name}': fare ₹${fare.toInt()} exceeds max ₹${matchedGroup.maxFare.toInt()}"
+                                "Go-To '${matchedGroup.name}': fare ₹${fare.toInt()} is below minimum ₹${effectiveMinFare.toInt()}"
                         }
                         continue
                     }

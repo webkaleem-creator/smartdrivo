@@ -12,6 +12,7 @@ import com.example.model.UserProfile
 import com.example.model.VehicleType
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
@@ -29,6 +30,10 @@ class FirebaseRepository(
     private var firestore: FirebaseFirestore? = null
     private var realtimeDb: FirebaseDatabase? = null
     private var auth: FirebaseAuth? = null
+    private var ownUserListener: ListenerRegistration? = null
+    private var ownPaymentsListener: ListenerRegistration? = null
+    private var adminUsersListener: ListenerRegistration? = null
+    private var adminPaymentsListener: ListenerRegistration? = null
 
     init {
         try {
@@ -48,6 +53,163 @@ class FirebaseRepository(
         }
     }
 
+    private fun userFromDocument(doc: DocumentSnapshot): UserProfile {
+        val vehicle = try {
+            com.example.model.VehicleType.valueOf(
+                (doc.getString("vehicleType") ?: "AUTO").uppercase()
+            )
+        } catch (_: Exception) {
+            com.example.model.VehicleType.AUTO
+        }
+
+        return UserProfile(
+            uid = doc.id,
+            name = doc.getString("name") ?: "",
+            email = doc.getString("email") ?: "",
+            phone = doc.getString("phone")
+                ?: doc.getString("mobile")
+                ?: doc.getString("mobileNumber")
+                ?: "",
+            city = doc.getString("city") ?: "",
+            state = doc.getString("state") ?: "",
+            vehicleType = vehicle,
+            plan = doc.getString("plan") ?: "NONE",
+            planPrice = doc.getLong("planPrice")?.toInt() ?: 0,
+            planExpireMillis = doc.getLong("planExpireMillis") ?: 0L,
+            isApproved = doc.getBoolean("isApproved") ?: false,
+            isAdmin = doc.getBoolean("isAdmin") ?: false,
+            isActive = doc.getBoolean("isActive") ?: true,
+            referralCode = doc.getString("referralCode") ?: "",
+            createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
+        )
+    }
+
+    private fun paymentFromDocument(doc: DocumentSnapshot): PaymentSubmission {
+        val status = try {
+            com.example.model.PaymentStatus.valueOf(
+                (doc.getString("status") ?: "PENDING").uppercase()
+            )
+        } catch (_: Exception) {
+            com.example.model.PaymentStatus.PENDING
+        }
+
+        return PaymentSubmission(
+            paymentId = doc.id,
+            uid = doc.getString("uid") ?: "",
+            userName = doc.getString("userName") ?: "",
+            utrNumber = doc.getString("utrNumber") ?: "",
+            planSelected = doc.getString("planSelected") ?: "7DAYS",
+            amount = doc.getLong("amount")?.toInt() ?: 0,
+            status = status,
+            submittedAt = doc.getLong("submittedAt") ?: 0L,
+            approvedAt = doc.getLong("approvedAt"),
+            note = doc.getString("note") ?: ""
+        )
+    }
+
+    fun startOwnMembershipSync() {
+        val uid = auth?.currentUser?.uid ?: return
+        val fs = firestore ?: return
+
+        ownUserListener?.remove()
+        ownPaymentsListener?.remove()
+
+        ownUserListener = fs.collection("users").document(uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w("FirebaseRepo", "Own membership listener error: ${error.message}")
+                    return@addSnapshotListener
+                }
+
+                if (snapshot != null && snapshot.exists()) {
+                    val remote = userFromDocument(snapshot)
+                    val local = prefs.userProfile.value
+
+                    val merged = remote.copy(
+                        name = remote.name.ifBlank { local.name },
+                        email = remote.email.ifBlank { local.email },
+                        phone = remote.phone.ifBlank { local.phone },
+                        city = remote.city.ifBlank { local.city },
+                        state = remote.state.ifBlank { local.state },
+                        referralCode = remote.referralCode.ifBlank { local.referralCode }
+                    )
+
+                    prefs.saveUserProfile(merged)
+
+                    if (!merged.isPlanValid && !merged.isAdmin) {
+                        prefs.setAutoAcceptActive(false)
+                    }
+                }
+            }
+
+        ownPaymentsListener = fs.collection("payments")
+            .whereEqualTo("uid", uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w("FirebaseRepo", "Own payments listener error: ${error.message}")
+                    return@addSnapshotListener
+                }
+
+                prefs.replacePaymentSubmissionsFromRemote(
+                    snapshot?.documents
+                        ?.map { paymentFromDocument(it) }
+                        ?.sortedByDescending { it.submittedAt }
+                        ?: emptyList()
+                )
+            }
+    }
+
+    fun stopOwnMembershipSync() {
+        ownUserListener?.remove()
+        ownPaymentsListener?.remove()
+        ownUserListener = null
+        ownPaymentsListener = null
+    }
+
+    fun startAdminBackendSync() {
+        val fs = firestore ?: return
+        if (!prefs.userProfile.value.isAdmin) return
+
+        adminUsersListener?.remove()
+        adminPaymentsListener?.remove()
+
+        adminUsersListener = fs.collection("users")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w("FirebaseRepo", "Admin users listener error: ${error.message}")
+                    return@addSnapshotListener
+                }
+
+                prefs.replaceAllUsersFromRemote(
+                    snapshot?.documents
+                        ?.map { userFromDocument(it) }
+                        ?.sortedByDescending { it.createdAt }
+                        ?: emptyList()
+                )
+            }
+
+        adminPaymentsListener = fs.collection("payments")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w("FirebaseRepo", "Admin payments listener error: ${error.message}")
+                    return@addSnapshotListener
+                }
+
+                prefs.replacePaymentSubmissionsFromRemote(
+                    snapshot?.documents
+                        ?.map { paymentFromDocument(it) }
+                        ?.sortedByDescending { it.submittedAt }
+                        ?: emptyList()
+                )
+            }
+    }
+
+    fun stopAdminBackendSync() {
+        adminUsersListener?.remove()
+        adminPaymentsListener?.remove()
+        adminUsersListener = null
+        adminPaymentsListener = null
+    }
     // --- User Profile Sync ---
     fun saveUserProfile(profile: UserProfile, onComplete: ((Boolean) -> Unit)? = null) {
         prefs.saveUserProfile(profile)
@@ -141,7 +303,7 @@ class FirebaseRepository(
                 val planExpireMillis = doc.getLong("planExpireMillis") ?: 0L
                 val isApproved = doc.getBoolean("isApproved") ?: false
                 val isAdmin = doc.getBoolean("isAdmin") ?: false
-                val isActive = doc.getBoolean("isActive") ?: false
+                val isActive = doc.getBoolean("isActive") ?: true
                 val referralCode = doc.getString("referralCode") ?: ""
                 val createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
                 val vehicleTypeStr = doc.getString("vehicleType") ?: "AUTO"
@@ -227,35 +389,207 @@ class FirebaseRepository(
 
     // --- Payment Submission Sync ---
     fun submitPayment(submission: PaymentSubmission, onComplete: (Boolean) -> Unit) {
-        val accepted = prefs.addPaymentSubmission(submission)
-        if (!accepted) {
+        val fs = firestore
+        val authUid = auth?.currentUser?.uid
+
+        if (fs == null || authUid.isNullOrBlank()) {
+            Log.e("FirebaseRepo", "Payment submit blocked: Firebase/Auth unavailable")
             onComplete(false)
             return
         }
+
+        val cleanUtr = submission.utrNumber.trim()
+        if (cleanUtr.length != 12 || !cleanUtr.all { it.isDigit() }) {
+            Log.e("FirebaseRepo", "Payment submit blocked: invalid 12-digit UTR")
+            onComplete(false)
+            return
+        }
+
+        val normalized = submission.copy(
+            uid = authUid,
+            utrNumber = cleanUtr,
+            status = com.example.model.PaymentStatus.PENDING,
+            approvedAt = null
+        )
+
         scope.launch {
             try {
-                firestore?.collection("payments")?.document(submission.paymentId)?.set(
+                fs.collection("payments").document(normalized.paymentId).set(
                     mapOf(
-                        "paymentId" to submission.paymentId,
-                        "uid" to submission.uid,
-                        "userName" to submission.userName,
-                        "utrNumber" to submission.utrNumber,
-                        "planSelected" to submission.planSelected,
-                        "amount" to submission.amount,
-                        "status" to submission.status.name,
-                        "submittedAt" to submission.submittedAt,
-                        "approvedAt" to submission.approvedAt
+                        "paymentId" to normalized.paymentId,
+                        "uid" to normalized.uid,
+                        "userName" to normalized.userName,
+                        "utrNumber" to normalized.utrNumber,
+                        "planSelected" to normalized.planSelected,
+                        "amount" to normalized.amount,
+                        "status" to "PENDING",
+                        "submittedAt" to normalized.submittedAt,
+                        "approvedAt" to null,
+                        "note" to normalized.note
                     )
-                )?.await()
-                onComplete(true)
+                ).await()
+
+                prefs.addPaymentSubmission(normalized)
+
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    onComplete(true)
+                }
             } catch (e: Exception) {
-                Log.w("FirebaseRepo", "Payment submission firestore fallback: ${e.message}")
-                // Still notify success locally
-                onComplete(true)
+                Log.e("FirebaseRepo", "Payment submission FAILED: ${e.message}")
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    onComplete(false)
+                }
             }
         }
     }
 
+    fun adminApprovePayment(
+        submission: PaymentSubmission,
+        onComplete: (Boolean, String) -> Unit
+    ) {
+        val fs = firestore
+        val adminUid = auth?.currentUser?.uid
+
+        if (fs == null || adminUid.isNullOrBlank() || !prefs.userProfile.value.isAdmin) {
+            onComplete(false, "Admin authorization unavailable")
+            return
+        }
+
+        val cleanUtr = submission.utrNumber.trim()
+        if (cleanUtr.length != 12 || !cleanUtr.all { it.isDigit() }) {
+            onComplete(false, "UTR must be exactly 12 numeric digits")
+            return
+        }
+
+        val daysToAdd = when (submission.planSelected.uppercase()) {
+            "3DAYS" -> 3
+            "7DAYS" -> 7
+            "15DAYS" -> 15
+            "1MONTH", "30DAYS" -> 30
+            else -> 7
+        }
+
+        scope.launch {
+            try {
+                val paymentRef = fs.collection("payments").document(submission.paymentId)
+                val userRef = fs.collection("users").document(submission.uid)
+                val utrRef = fs.collection("paymentUtrs").document(cleanUtr)
+                val now = System.currentTimeMillis()
+
+                fs.runTransaction { tx ->
+                    val paymentDoc = tx.get(paymentRef)
+                    if (!paymentDoc.exists()) {
+                        throw IllegalStateException("Payment record not found")
+                    }
+
+                    if ((paymentDoc.getString("status") ?: "PENDING") == "APPROVED") {
+                        throw IllegalStateException("Payment already approved")
+                    }
+
+                    val utrDoc = tx.get(utrRef)
+                    if (utrDoc.exists()) {
+                        throw IllegalStateException("This UTR was already approved")
+                    }
+
+                    val userDoc = tx.get(userRef)
+                    if (!userDoc.exists()) {
+                        throw IllegalStateException("Driver account not found")
+                    }
+
+                    val oldExpiry = userDoc.getLong("planExpireMillis") ?: 0L
+                    val base = if (oldExpiry > now) oldExpiry else now
+                    val newExpiry = base + (daysToAdd * 86400000L)
+
+                    tx.update(
+                        paymentRef,
+                        mapOf(
+                            "status" to "APPROVED",
+                            "approvedAt" to now,
+                            "approvedBy" to adminUid
+                        )
+                    )
+
+                    tx.set(
+                        userRef,
+                        mapOf(
+                            "plan" to submission.planSelected,
+                            "planPrice" to submission.amount,
+                            "planExpireMillis" to newExpiry,
+                            "isApproved" to true,
+                            "isActive" to true,
+                            "updatedAt" to now
+                        ),
+                        SetOptions.merge()
+                    )
+
+                    tx.set(
+                        utrRef,
+                        mapOf(
+                            "utrNumber" to cleanUtr,
+                            "paymentId" to submission.paymentId,
+                            "uid" to submission.uid,
+                            "approvedBy" to adminUid,
+                            "approvedAt" to now
+                        )
+                    )
+                }.await()
+
+                prefs.updatePaymentStatus(
+                    submission.paymentId,
+                    com.example.model.PaymentStatus.APPROVED
+                )
+
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    onComplete(true, "Membership activated for $daysToAdd days")
+                }
+            } catch (e: Exception) {
+                Log.e("FirebaseRepo", "Admin approval failed: ${e.message}")
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    onComplete(false, e.message ?: "Approval failed")
+                }
+            }
+        }
+    }
+
+    fun adminRejectPayment(
+        submission: PaymentSubmission,
+        onComplete: (Boolean, String) -> Unit
+    ) {
+        val fs = firestore
+        val adminUid = auth?.currentUser?.uid
+
+        if (fs == null || adminUid.isNullOrBlank() || !prefs.userProfile.value.isAdmin) {
+            onComplete(false, "Admin authorization unavailable")
+            return
+        }
+
+        scope.launch {
+            try {
+                fs.collection("payments").document(submission.paymentId).update(
+                    mapOf(
+                        "status" to "REJECTED",
+                        "approvedAt" to null,
+                        "rejectedAt" to System.currentTimeMillis(),
+                        "rejectedBy" to adminUid
+                    )
+                ).await()
+
+                prefs.updatePaymentStatus(
+                    submission.paymentId,
+                    com.example.model.PaymentStatus.REJECTED
+                )
+
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    onComplete(true, "Payment rejected")
+                }
+            } catch (e: Exception) {
+                Log.e("FirebaseRepo", "Admin rejection failed: ${e.message}")
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    onComplete(false, e.message ?: "Rejection failed")
+                }
+            }
+        }
+    }
     // --- Area Groups Sync ---
     fun syncAreas(areas: List<AreaGroup>) {
         prefs.saveAreaGroups(areas)
@@ -274,6 +608,8 @@ class FirebaseRepository(
                         "id" to a.id,
                         "name" to a.name,
                         "isEnabled" to a.isEnabled,
+                        "minFare" to a.minFare,
+                        // Keep legacy field for older data readers.
                         "maxFare" to a.maxFare,
                         "minPickupKm" to a.minPickupKm,
                         "maxPickupKm" to a.maxPickupKm,

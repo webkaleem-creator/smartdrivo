@@ -636,14 +636,17 @@ private fun CompactAreaGroupCard(
             }
 
             if (isGoTo) {
+                val goToMinFare =
+                    if (group.maxFare > 0f) group.maxFare else group.minFare
+
                 Spacer(Modifier.height(7.dp))
                 Surface(
                     color = GoToGreenBg.copy(alpha = 0.7f),
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
-                        text = "Max Fare: ${
-                            if (group.maxFare > 0f) "₹${group.maxFare.toInt()}" else "No limit"
+                        text = "Minimum Fare: ${
+                            if (goToMinFare > 0f) "₹${goToMinFare.toInt()}" else "No minimum"
                         }   •   Pickup: ${
                             if (group.maxPickupKm > 0f) "${group.maxPickupKm} km" else "No limit"
                         }   •   Drop: ${
@@ -675,11 +678,17 @@ private fun GroupEditorDialog(
     var name by remember(group?.id, type) {
         mutableStateOf(group?.name.orEmpty())
     }
-    var maxFareText by remember(group?.id, type) {
+    var minFareText by remember(group?.id, type) {
         mutableStateOf(
-            group?.maxFare
+            group
+                ?.let { saved ->
+                    if (saved.maxFare > 0f) saved.maxFare else saved.minFare
+                }
                 ?.takeIf { it > 0f }
-                ?.let { if (it % 1f == 0f) it.toInt().toString() else it.toString() }
+                ?.let {
+                    if (it % 1f == 0f) it.toInt().toString()
+                    else it.toString()
+                }
                 .orEmpty()
         )
     }
@@ -787,14 +796,14 @@ private fun GroupEditorDialog(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         OutlinedTextField(
-                            value = maxFareText,
+                            value = minFareText,
                             onValueChange = { input ->
                                 if (input.isEmpty() || input.matches(Regex("""^\d*\.?\d*$"""))) {
-                                    maxFareText = input
+                                    minFareText = input
                                 }
                             },
-                            label = { Text("Max Fare", fontSize = 10.sp) },
-                            placeholder = { Text("No limit", fontSize = 10.sp) },
+                            label = { Text("Minimum Fare", fontSize = 10.sp) },
+                            placeholder = { Text("No minimum", fontSize = 10.sp) },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.weight(1f),
@@ -812,7 +821,7 @@ private fun GroupEditorDialog(
                                     maxPickupText = input
                                 }
                             },
-                            label = { Text("Max Pickup", fontSize = 10.sp) },
+                            label = { Text("Maximum Pickup", fontSize = 10.sp) },
                             placeholder = { Text("km", fontSize = 10.sp) },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -993,9 +1002,15 @@ private fun GroupEditorDialog(
                                         }
                                         .distinctBy { it.lowercase() },
                                     filtersEnabled = false,
-                                    minFare = group?.minFare ?: 50f,
+                                    minFare = if (isGoTo) {
+                                        minFareText.toFloatOrNull() ?: 0f
+                                    } else {
+                                        group?.minFare ?: 0f
+                                    },
+                                    // maxFare is legacy for GO TO. Clear it after
+                                    // saving so Minimum Fare becomes authoritative.
                                     maxFare = if (isGoTo) {
-                                        maxFareText.toFloatOrNull() ?: 0f
+                                        0f
                                     } else {
                                         group?.maxFare ?: 0f
                                     },
