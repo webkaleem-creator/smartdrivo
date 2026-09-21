@@ -434,15 +434,15 @@ class ExampleUnitTest {
         val reject = decision as DecisionResult.Reject
         assertTrue("Reason should mention drop distance: ${reject.reason}", reject.reason.contains("Drop", ignoreCase = true) && reject.reason.contains("exceeds", ignoreCase = true))
 
-        // Also test with FilterMode.FARE_ONLY to ensure drop distance is not bypassed
-        val fareOnlySettings = settings.copy(filterMode = FilterMode.FARE_ONLY)
-        val decisionFareOnly = AreaRulesEngine.evaluateRide(
+        // Also test with FilterMode.DISTANCE_ONLY to ensure drop distance is not bypassed
+        val distanceOnlySettings = settings.copy(filterMode = FilterMode.DISTANCE_ONLY)
+        val decisionDistanceOnly = AreaRulesEngine.evaluateRide(
             candidate = candidateExceedingDrop,
-            settings = fareOnlySettings,
+            settings = distanceOnlySettings,
             goToAreas = emptyList<String>(),
             noGoAreas = emptyList<String>()
         )
-        assertTrue(decisionFareOnly is DecisionResult.Reject)
+        assertTrue(decisionDistanceOnly is DecisionResult.Reject)
     }
 
     @Test

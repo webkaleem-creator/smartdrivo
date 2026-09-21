@@ -304,7 +304,16 @@
   <!-- Global Notification Toast -->
   <div id="toastNotification"></div>
 
-  <div class="container">
+  <!-- Authoritative Auth Verification Spinner -->
+  <div id="authVerifyingSpinner" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 70vh; gap: 16px; text-align: center; color: var(--text-dim);">
+    <div style="width: 56px; height: 56px; background: rgba(255, 102, 0, 0.15); border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 24px; color: var(--accent);">
+      <i class="fa-solid fa-circle-notch fa-spin"></i>
+    </div>
+    <h2 style="color: #FFF; font-size: 18px; font-weight: 700;">Verifying Administrator Security...</h2>
+    <p style="font-size: 13px; max-width: 360px; line-height: 1.5;">Authenticating session with Firebase & verifying admin permissions from Firestore.</p>
+  </div>
+
+  <div class="container" id="adminContainer" style="display: none;">
     <header>
       <div class="brand">
         <div class="logo"><i class="fa-solid fa-bolt"></i></div>
@@ -643,11 +652,13 @@
         logMessage(`Verifying admin credentials for UID: ${user.uid} (${user.email || 'N/A'})...`);
         const userDoc = await db.collection('users').doc(user.uid).get();
         let isAdmin = false;
+        let isActive = false;
         let userData = null;
 
         if (userDoc.exists) {
           userData = userDoc.data();
           isAdmin = (userData.isAdmin === true);
+          isActive = (userData.isActive === true || (userData.isActive !== false && userData.isAdmin === true));
         } else {
           // Fallback by email query
           if (user.email) {
@@ -655,24 +666,33 @@
             if (!snap.empty) {
               userData = snap.docs[0].data();
               isAdmin = (userData.isAdmin === true);
+              isActive = (userData.isActive === true || (userData.isActive !== false && userData.isAdmin === true));
             }
           }
         }
 
-        if (!isAdmin) {
-          logMessage("Access Denied: Logged in user does not have admin permissions.");
-          alert("Access Denied: Your account does not have Administrator privileges.");
+        if (!isAdmin || !isActive) {
+          logMessage("Access Denied: Logged in user does not have active admin permissions.");
+          alert("Access Denied: Your account does not have active Administrator privileges.");
           await auth.signOut();
           sessionStorage.clear();
           window.location.replace('login.html');
           return;
         }
 
+        // Unhide verified admin dashboard
+        const spinner = document.getElementById('authVerifyingSpinner');
+        if (spinner) spinner.style.display = 'none';
+        const container = document.getElementById('adminContainer');
+        if (container) container.style.display = 'block';
+
         // Show real admin identity in header
         const label = document.getElementById('adminUserLabel');
-        const adminDisplayName = (userData && userData.name) ? userData.name : (user.email || 'Admin');
+        const adminDisplayName = (userData && userData.name) ? userData.name : (user.displayName || user.email || 'Admin');
         if (label) label.textContent = adminDisplayName;
         sessionStorage.setItem('smartdrivo_admin_auth', 'true');
+        sessionStorage.setItem('smartdrivo_admin_uid', user.uid);
+        sessionStorage.setItem('smartdrivo_admin_email', user.email || '');
         sessionStorage.setItem('smartdrivo_admin_user', adminDisplayName);
 
         logMessage(`Admin Access Confirmed. Active admin: ${adminDisplayName}`);

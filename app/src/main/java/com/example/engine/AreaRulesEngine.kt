@@ -94,7 +94,7 @@ object AreaRulesEngine {
 
                 if (matchingGroups.isEmpty()) {
                     return DecisionResult.Reject(
-                        "Go-To Area: destination not found in any active Go-To area"
+                        "Go-To Area Filter: destination not found in any active Go-To area"
                     )
                 }
 

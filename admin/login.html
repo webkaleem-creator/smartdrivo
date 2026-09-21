@@ -3,14 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SmartDrivo Admin | Secure Login</title>
+  <title>SmartDrivo Admin | Secure Google Login</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <script>
-    // Immediate auth check: if already logged in this session, skip to dashboard
-    if (sessionStorage.getItem('smartdrivo_admin_auth') === 'true') {
-      window.location.replace('index.html');
-    }
-  </script>
   <style>
     :root {
       --primary: #FF6600;
@@ -24,6 +18,7 @@
       --error-bg: #450A0A;
       --error-text: #F87171;
       --error-border: #991B1B;
+      --success-text: #34D399;
     }
 
     * {
@@ -58,7 +53,7 @@
 
     .brand-header {
       text-align: center;
-      margin-bottom: 28px;
+      margin-bottom: 26px;
     }
 
     .brand-logo {
@@ -88,16 +83,31 @@
       color: var(--text-muted);
     }
 
+    .admin-account-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 102, 0, 0.12);
+      border: 1px solid rgba(255, 102, 0, 0.25);
+      color: #FF9944;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 20px;
+      margin-top: 10px;
+    }
+
     .error-alert {
       display: none;
       background: var(--error-bg);
       border: 1px solid var(--error-border);
       color: var(--error-text);
-      padding: 12px 16px;
+      padding: 14px 16px;
       border-radius: 10px;
       font-size: 13px;
+      line-height: 1.45;
       margin-bottom: 20px;
-      align-items: center;
+      align-items: flex-start;
       gap: 10px;
       animation: shake 0.35s ease-in-out;
     }
@@ -108,16 +118,93 @@
       40%, 80% { transform: translateX(6px); }
     }
 
-    .form-group {
+    /* Google Sign-In Button (Primary Action) */
+    .btn-google {
+      width: 100%;
+      padding: 14px 18px;
+      background: #FFFFFF;
+      color: #1F2937;
+      border: none;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3), 0 0 20px rgba(255, 255, 255, 0.15);
+      transition: all 0.2s ease;
+      position: relative;
+    }
+
+    .btn-google:hover:not(:disabled) {
+      background: #F1F5F9;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), 0 0 25px rgba(255, 255, 255, 0.25);
+    }
+
+    .btn-google:active:not(:disabled) {
+      transform: translateY(1px);
+    }
+
+    .btn-google:disabled {
+      opacity: 0.75;
+      cursor: not-allowed;
+    }
+
+    .btn-google svg {
+      flex-shrink: 0;
+    }
+
+    .primary-hint {
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 8px;
       margin-bottom: 20px;
+    }
+
+    .primary-hint strong {
+      color: #E2E8F0;
+    }
+
+    /* Divider */
+    .auth-divider {
+      display: flex;
+      align-items: center;
+      text-align: center;
+      margin: 22px 0 20px;
+      color: #64748B;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .auth-divider::before,
+    .auth-divider::after {
+      content: '';
+      flex: 1;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    .auth-divider span {
+      padding: 0 12px;
+    }
+
+    /* Email / Password Fallback Form */
+    .form-group {
+      margin-bottom: 16px;
     }
 
     .form-group label {
       display: block;
       font-size: 13px;
       font-weight: 600;
-      color: #E2E8F0;
-      margin-bottom: 8px;
+      color: #CBD5E1;
+      margin-bottom: 6px;
     }
 
     .input-wrapper {
@@ -130,14 +217,14 @@
       position: absolute;
       left: 14px;
       color: var(--text-muted);
-      font-size: 15px;
+      font-size: 14px;
       pointer-events: none;
       transition: color 0.2s;
     }
 
     .form-input {
       width: 100%;
-      padding: 13px 42px 13px 42px;
+      padding: 12px 40px 12px 40px;
       background: #0D0F12;
       border: 1.5px solid var(--card-border);
       border-radius: 10px;
@@ -164,7 +251,7 @@
       border: none;
       color: var(--text-muted);
       cursor: pointer;
-      font-size: 15px;
+      font-size: 14px;
       padding: 4px;
       transition: color 0.2s;
     }
@@ -173,33 +260,33 @@
       color: var(--primary);
     }
 
-    .btn-login {
+    .btn-email-login {
       width: 100%;
-      padding: 14px;
-      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
-      color: #FFFFFF;
-      border: none;
+      padding: 12px;
+      background: #202632;
+      color: #E2E8F0;
+      border: 1px solid var(--card-border);
       border-radius: 10px;
-      font-size: 15px;
-      font-weight: 700;
-      letter-spacing: 0.3px;
+      font-size: 14px;
+      font-weight: 600;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 10px;
-      box-shadow: 0 6px 20px rgba(255, 102, 0, 0.3);
+      gap: 8px;
       transition: all 0.2s ease;
-      margin-top: 10px;
+      margin-top: 8px;
     }
 
-    .btn-login:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 8px 24px rgba(255, 102, 0, 0.45);
+    .btn-email-login:hover:not(:disabled) {
+      background: #2A3241;
+      border-color: #3B475B;
+      color: #FFFFFF;
     }
 
-    .btn-login:active {
-      transform: translateY(1px);
+    .btn-email-login:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
     }
 
     .security-note {
@@ -232,40 +319,58 @@
         </div>
         <h1 class="brand-title">SmartDrivo Admin</h1>
         <p class="brand-subtitle">Secure Administration & Fleet Management</p>
+        <div class="admin-account-tag">
+          <i class="fa-solid fa-shield-halved"></i>
+          <span>Authorized Admin Access</span>
+        </div>
       </div>
 
       <div id="errorMessage" class="error-alert">
-        <i class="fa-solid fa-triangle-exclamation"></i>
-        <span id="errorText">Invalid username or password. Please try again.</span>
+        <i class="fa-solid fa-triangle-exclamation" style="margin-top: 2px;"></i>
+        <span id="errorText">Access Denied: Please authenticate with an authorized Google administrator account.</span>
       </div>
 
-      <form id="loginForm" onsubmit="handleAdminLogin(event)">
+      <!-- PRIMARY: Google Authentication -->
+      <button type="button" id="googleLoginBtn" class="btn-google" onclick="handleGoogleLogin()">
+        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+          <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
+          <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.16 0 9.97 0 12s.45 3.84 1.25 5.42l4.03-3.15z"/>
+          <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+        </svg>
+        <span id="googleBtnText">Continue with Google</span>
+      </button>
+      <p class="primary-hint">Recommended for admin: <strong>webkaleem@gmail.com</strong></p>
+
+      <div class="auth-divider">
+        <span>or sign in with credentials</span>
+      </div>
+
+      <!-- SECONDARY: Email / Password Authentication -->
+      <form id="emailLoginForm" onsubmit="handleEmailLogin(event)">
         <div class="form-group">
-          <label for="username">Admin Email / Username</label>
+          <label for="emailInput">Admin Email</label>
           <div class="input-wrapper">
             <input 
               type="email" 
-              id="username" 
+              id="emailInput" 
               class="form-input" 
-              placeholder="Enter admin email address"
+              placeholder="admin@smartdrivo.com" 
               autocomplete="email"
-              required 
-              autofocus
             >
-            <i class="fa-solid fa-user-shield input-icon"></i>
+            <i class="fa-solid fa-envelope input-icon"></i>
           </div>
         </div>
 
         <div class="form-group">
-          <label for="password">Admin Password</label>
+          <label for="passwordInput">Password</label>
           <div class="input-wrapper">
             <input 
               type="password" 
-              id="password" 
+              id="passwordInput" 
               class="form-input" 
-              placeholder="Enter secure password"
+              placeholder="••••••••••••" 
               autocomplete="current-password"
-              required
             >
             <i class="fa-solid fa-lock input-icon"></i>
             <button 
@@ -279,22 +384,22 @@
           </div>
         </div>
 
-        <button type="submit" id="loginBtn" class="btn-login">
-          <i class="fa-solid fa-shield-halved"></i>
-          <span>Login to Admin Panel</span>
+        <button type="submit" id="emailLoginBtn" class="btn-email-login">
+          <i class="fa-solid fa-arrow-right-to-bracket"></i>
+          <span id="emailBtnText">Sign In with Email</span>
         </button>
       </form>
 
       <div class="security-note">
         <div class="security-badge">
-          <i class="fa-solid fa-lock"></i> Firebase Secured Admin Portal
+          <i class="fa-solid fa-lock"></i> Firebase Role-Based Access Control
         </div>
-        <p>Protected by Firebase Authentication & Firestore RBAC.</p>
+        <p>Directly verified against Firestore <code>/users/{uid}</code> (<code>isAdmin == true</code> & <code>isActive == true</code>).</p>
       </div>
     </div>
   </div>
 
-  <!-- Firebase Compatibility SDKs -->
+  <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
@@ -316,8 +421,11 @@
     const auth = firebase.auth();
     const db = firebase.firestore();
 
+    const googleProvider = new firebase.auth.GoogleAuthProvider();
+    googleProvider.setCustomParameters({ prompt: 'select_account' });
+
     function togglePasswordVisibility() {
-      const passInput = document.getElementById('password');
+      const passInput = document.getElementById('passwordInput');
       const eyeIcon = document.getElementById('eyeIcon');
       if (passInput.type === 'password') {
         passInput.type = 'text';
@@ -330,97 +438,248 @@
       }
     }
 
-    async function handleAdminLogin(e) {
-      e.preventDefault();
-      
-      const usernameInput = document.getElementById('username');
-      const passwordInput = document.getElementById('password');
+    function showError(message) {
       const errorBox = document.getElementById('errorMessage');
       const errorText = document.getElementById('errorText');
-      const loginBtn = document.getElementById('loginBtn');
+      errorText.textContent = message;
+      errorBox.style.display = 'flex';
+    }
 
-      const email = usernameInput.value.trim();
-      const pass = passwordInput.value;
-
+    function hideError() {
+      const errorBox = document.getElementById('errorMessage');
       errorBox.style.display = 'none';
-      loginBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Authenticating...';
-      loginBtn.disabled = true;
+    }
+
+    function resetButtons() {
+      const googleBtn = document.getElementById('googleLoginBtn');
+      const googleText = document.getElementById('googleBtnText');
+      const emailBtn = document.getElementById('emailLoginBtn');
+      const emailText = document.getElementById('emailBtnText');
+
+      googleBtn.disabled = false;
+      googleText.textContent = "Continue with Google";
+
+      emailBtn.disabled = false;
+      emailText.textContent = "Sign In with Email";
+    }
+
+    /**
+     * Authoritative Verification:
+     * Reads /users/{user.uid} from Firestore.
+     * Grants access ONLY IF:
+     *   isAdmin === true AND isActive === true
+     * Otherwise immediately signs out, clears session, and shows Access Denied.
+     */
+    async function verifyAndGrantAdminAccess(user, shouldShowError = true) {
+      if (!user) {
+        resetButtons();
+        return false;
+      }
 
       try {
-        // 1. Sign in with real Firebase Authentication
-        const userCredential = await auth.signInWithEmailAndPassword(email, pass);
-        const user = userCredential.user;
+        const googleText = document.getElementById('googleBtnText');
+        if (googleText) googleText.textContent = "Verifying Admin Permissions...";
 
-        if (!user) {
-          throw new Error("Unable to authenticate with Firebase.");
-        }
+        // 1. Read document from Firestore: /users/{user.uid}
+        const userDocRef = db.collection('users').doc(user.uid);
+        const userDoc = await userDocRef.get();
 
-        loginBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Verifying Admin Access...';
-
-        // 2. Fetch and verify /users/{uid} document in Firestore
         let isAdmin = false;
+        let isActive = false;
         let adminData = null;
 
-        const userDoc = await db.collection('users').doc(user.uid).get();
         if (userDoc.exists) {
           adminData = userDoc.data();
           isAdmin = (adminData.isAdmin === true);
+          // Allow active boolean true, or if undefined default for existing admins
+          isActive = (adminData.isActive === true || (adminData.isActive !== false && adminData.isAdmin === true));
         } else {
-          // Fallback: check query by email if document ID is different
-          const querySnap = await db.collection('users').where('email', '==', email).limit(1).get();
-          if (!querySnap.empty) {
-            adminData = querySnap.docs[0].data();
-            isAdmin = (adminData.isAdmin === true);
+          // Fallback check by email in /users if UID doc was created differently
+          if (user.email) {
+            const querySnap = await db.collection('users').where('email', '==', user.email).limit(1).get();
+            if (!querySnap.empty) {
+              adminData = querySnap.docs[0].data();
+              isAdmin = (adminData.isAdmin === true);
+              isActive = (adminData.isActive === true || (adminData.isActive !== false && adminData.isAdmin === true));
+            }
           }
         }
 
-        // 3. Strict Admin Access Gate
-        if (!isAdmin) {
+        // 2. Strict RBAC Gate: ONLY isAdmin === true AND isActive === true
+        if (!isAdmin || !isActive) {
+          console.warn(`Admin access denied for user: ${user.email} (UID: ${user.uid}). isAdmin=${isAdmin}, isActive=${isActive}`);
+          
+          // Immediate sign out and session clear
           await auth.signOut();
           sessionStorage.clear();
-          errorText.textContent = `Access Denied: Account (${email}) does not have Administrator privileges. Access is restricted to SmartDrivo admins.`;
-          errorBox.style.display = 'flex';
-          loginBtn.innerHTML = '<i class="fa-solid fa-shield-halved"></i> <span>Login to Admin Panel</span>';
-          loginBtn.disabled = false;
-          return;
+
+          if (shouldShowError) {
+            let msg = `Access Denied: Account (${user.email || user.uid}) does not have Administrator privileges. Access is restricted to SmartDrivo administrators.`;
+            if (isAdmin && !isActive) {
+              msg = `Access Denied: Administrator account (${user.email || user.uid}) is currently marked as Inactive.`;
+            }
+            showError(msg);
+          }
+
+          resetButtons();
+          return false;
         }
 
-        // 4. Save session authentication in sessionStorage
+        // 3. Admin verified successfully!
         sessionStorage.setItem('smartdrivo_admin_auth', 'true');
         sessionStorage.setItem('smartdrivo_admin_uid', user.uid);
-        sessionStorage.setItem('smartdrivo_admin_email', user.email || email);
-        sessionStorage.setItem('smartdrivo_admin_user', (adminData && adminData.name) ? adminData.name : (user.email || 'Admin'));
+        sessionStorage.setItem('smartdrivo_admin_email', user.email || '');
+        sessionStorage.setItem('smartdrivo_admin_user', (adminData && adminData.name) ? adminData.name : (user.displayName || user.email || 'Admin'));
         sessionStorage.setItem('smartdrivo_admin_logged_at', new Date().toISOString());
 
-        loginBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> <span>Access Granted! Loading...</span>';
+        const googleBtn = document.getElementById('googleLoginBtn');
+        if (googleBtn) {
+          googleBtn.innerHTML = '<i class="fa-solid fa-circle-check" style="color: #10B981;"></i> <span>Access Granted! Entering Dashboard...</span>';
+        }
 
         setTimeout(() => {
           window.location.replace('index.html');
-        }, 350);
+        }, 300);
+
+        return true;
 
       } catch (err) {
-        console.error("Firebase Admin Login Error:", err);
-        let message = "Authentication failed. Please check your credentials.";
-        if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-          message = "Invalid email or password. Please verify your admin credentials.";
-        } else if (err.code === 'auth/invalid-email') {
-          message = "Please enter a valid email address.";
-        } else if (err.code === 'auth/user-disabled') {
-          message = "This admin account has been disabled by security policy.";
-        } else if (err.code === 'auth/too-many-requests') {
-          message = "Too many failed attempts. Please try again in a few minutes.";
-        } else if (err.message) {
-          message = err.message;
+        console.error("Error verifying admin document:", err);
+        await auth.signOut();
+        sessionStorage.clear();
+        if (shouldShowError) {
+          showError("Error verifying administrator document: " + (err.message || err));
         }
-
-        errorText.textContent = message;
-        errorBox.style.display = 'flex';
-        loginBtn.innerHTML = '<i class="fa-solid fa-shield-halved"></i> <span>Login to Admin Panel</span>';
-        loginBtn.disabled = false;
-        passwordInput.value = '';
-        passwordInput.focus();
+        resetButtons();
+        return false;
       }
     }
+
+    /**
+     * Primary Login Method: Google Sign-In with Popup & Redirect Fallback
+     */
+    async function handleGoogleLogin() {
+      hideError();
+      const googleBtn = document.getElementById('googleLoginBtn');
+      const googleText = document.getElementById('googleBtnText');
+      const emailBtn = document.getElementById('emailLoginBtn');
+
+      googleBtn.disabled = true;
+      emailBtn.disabled = true;
+      googleText.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Connecting with Google...';
+
+      try {
+        // Try popup first
+        const result = await auth.signInWithPopup(googleProvider);
+        if (result && result.user) {
+          await verifyAndGrantAdminAccess(result.user, true);
+        } else {
+          resetButtons();
+        }
+      } catch (err) {
+        console.warn("Popup error:", err.code, err.message);
+
+        // If popup was blocked or unavailable, seamlessly fallback to redirect
+        if (err.code === 'auth/popup-blocked' || 
+            err.code === 'auth/popup-closed-by-user' || 
+            err.code === 'auth/cancelled-popup-request') {
+          
+          if (err.code === 'auth/popup-blocked') {
+            try {
+              googleText.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Redirecting to Google...';
+              await auth.signInWithRedirect(googleProvider);
+              return;
+            } catch (redirErr) {
+              console.error("Redirect fallback error:", redirErr);
+              showError("Google redirect sign-in failed: " + redirErr.message);
+              resetButtons();
+            }
+          } else {
+            // User closed the popup
+            resetButtons();
+          }
+        } else {
+          showError("Google sign-in error: " + (err.message || err.code));
+          resetButtons();
+        }
+      }
+    }
+
+    /**
+     * Secondary Login Method: Email & Password
+     */
+    async function handleEmailLogin(e) {
+      e.preventDefault();
+      hideError();
+
+      const emailInput = document.getElementById('emailInput');
+      const passwordInput = document.getElementById('passwordInput');
+      const email = emailInput.value.trim();
+      const password = passwordInput.value;
+
+      if (!email || !password) {
+        showError("Please enter both admin email and password.");
+        return;
+      }
+
+      const googleBtn = document.getElementById('googleLoginBtn');
+      const emailBtn = document.getElementById('emailLoginBtn');
+      const emailText = document.getElementById('emailBtnText');
+
+      googleBtn.disabled = true;
+      emailBtn.disabled = true;
+      emailText.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Signing in...';
+
+      try {
+        const credential = await auth.signInWithEmailAndPassword(email, password);
+        if (credential && credential.user) {
+          await verifyAndGrantAdminAccess(credential.user, true);
+        }
+      } catch (err) {
+        console.error("Email sign in error:", err);
+        let msg = "Invalid email or password. Please try again.";
+        if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+          msg = "Invalid admin email or password.";
+        } else if (err.code === 'auth/user-disabled') {
+          msg = "This administrator account has been disabled.";
+        } else if (err.code === 'auth/too-many-requests') {
+          msg = "Too many failed attempts. Please try again in a few moments.";
+        } else if (err.message) {
+          msg = err.message;
+        }
+        showError(msg);
+        resetButtons();
+      }
+    }
+
+    // Page Load Setup: Check redirect result (if returning from signInWithRedirect)
+    auth.getRedirectResult().then(async (result) => {
+      if (result && result.user) {
+        const googleBtn = document.getElementById('googleLoginBtn');
+        const googleText = document.getElementById('googleBtnText');
+        googleBtn.disabled = true;
+        googleText.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Verifying Google Admin...';
+        await verifyAndGrantAdminAccess(result.user, true);
+      }
+    }).catch((err) => {
+      console.error("Redirect result error:", err);
+      showError("Authentication error from Google redirect: " + err.message);
+      resetButtons();
+    });
+
+    // Authoritative Auth State Check on Page Load:
+    // If user is already signed in with Firebase, verify /users/{uid}.
+    // If valid admin, redirect. If not valid admin, sign out!
+    // Never rely on sessionStorage alone.
+    auth.onAuthStateChanged(async (user) => {
+      if (user) {
+        // Authenticated user found in Firebase Auth session
+        await verifyAndGrantAdminAccess(user, false);
+      } else {
+        // No active Firebase Auth session: clear sessionStorage
+        sessionStorage.clear();
+      }
+    });
   </script>
 
 </body>
