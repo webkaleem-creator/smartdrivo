@@ -3965,21 +3965,19 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             resetProcessing()
             return
         }
-
-        if (!canExecuteClick()) {
-            onOrderDecisionFast(
-                recordId = recordId,
-                candidate = candidate,
-                status = OrderStatus.IGNORED,
-                reasonCode = "AUTO_REJECT_CLICK_BLOCKED",
-                reasonText =
-                    "$reason • Auto-Reject click blocked by click cooldown"
-            )
-            resetProcessing()
-            return
-        }
-
-        notifyClickInitiated()
+        // AUTO-REJECT RAPID-ORDER FIX:
+        // The generic 3-second click cooldown is intentionally NOT used here.
+        // It was blocking a second genuine Rapido offer arriving within 3 seconds
+        // of the previous verified action. This path is already protected by:
+        // 1) genuine Rapido popup validation,
+        // 2) verified Rapido-owned skip/reject control,
+        // 3) activeRapidoPopupOrderId duplicate suppression for the SAME popup.
+        //
+        // Auto-Accept and all other click paths keep their original cooldown/rate limits.
+        Log.d(
+            TAG,
+            "⛔ [Rapido Auto-Reject] verified unique popup: bypassing generic 3s cross-order cooldown"
+        )
 
         val clicked =
             rejectNode.isClickable &&
