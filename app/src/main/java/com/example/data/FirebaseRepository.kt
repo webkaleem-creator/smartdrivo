@@ -150,7 +150,7 @@ class FirebaseRepository(
                     return@addSnapshotListener
                 }
 
-                prefs.replacePaymentSubmissionsFromRemote(
+                prefs.setPaymentSubmissions(
                     snapshot?.documents
                         ?.map { paymentFromDocument(it) }
                         ?.sortedByDescending { it.submittedAt }
@@ -180,7 +180,7 @@ class FirebaseRepository(
                     return@addSnapshotListener
                 }
 
-                prefs.replaceAllUsersFromRemote(
+                prefs.setAllUsers(
                     snapshot?.documents
                         ?.map { userFromDocument(it) }
                         ?.sortedByDescending { it.createdAt }
@@ -195,7 +195,7 @@ class FirebaseRepository(
                     return@addSnapshotListener
                 }
 
-                prefs.replacePaymentSubmissionsFromRemote(
+                prefs.setPaymentSubmissions(
                     snapshot?.documents
                         ?.map { paymentFromDocument(it) }
                         ?.sortedByDescending { it.submittedAt }
