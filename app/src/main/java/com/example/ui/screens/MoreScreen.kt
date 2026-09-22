@@ -8,6 +8,8 @@ import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -342,8 +345,8 @@ fun MoreScreen(
                     Column {
                         MoreCardRow(
                             icon = Icons.Default.School,
-                            title = "Driver Tutorial",
-                            subtitle = "3-step guide to filters & areas",
+                            title = "SmartDrivo Driver Guide",
+                            subtitle = "Complete guide to all SmartDrivo features",
                             onClick = { showTutorialDialog = true }
                         )
                         HorizontalDivider(
@@ -354,7 +357,7 @@ fun MoreScreen(
                         MoreCardRow(
                             icon = Icons.Default.HeadsetMic,
                             title = "Contact SmartDrivo",
-                            subtitle = "Telegram community (@SmartDrivoSupport) & help",
+                            subtitle = "WhatsApp Channel & driver support",
                             onClick = onNavigateToCommunity
                         )
                     }
@@ -514,59 +517,150 @@ fun MoreScreen(
             }
         }
     }
-
-    // Driver Tutorial Dialog
+    // Complete SmartDrivo Driver Guide
     if (showTutorialDialog) {
+
         AlertDialog(
-            onDismissRequest = { showTutorialDialog = false },
-            title = {
-                Text(
-                    text = "Driver Tutorial",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp,
-                    color = TextDarkPrimary
-                )
+            onDismissRequest = {
+                showTutorialDialog = false
             },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+
+            title = {
+                Column {
                     Text(
-                        text = "1. Configure Filters",
+                        text = "SmartDrivo Driver Guide",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
+                        fontSize = 20.sp,
                         color = TextDarkPrimary
                     )
-                    Text(
-                        text = "Set your minimum fare, pickup, and drop distance or turn on Fastest Mode for high-speed auto-acceptance.",
-                        fontSize = 14.sp,
-                        color = TextDarkSecondary
+
+                    Spacer(
+                        modifier = Modifier.height(3.dp)
                     )
+
                     Text(
-                        text = "2. Setup Areas",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = TextDarkPrimary
-                    )
-                    Text(
-                        text = "Define Go-To areas you want to head towards, or No-Go areas to avoid congested or low-fare zones.",
-                        fontSize = 14.sp,
-                        color = TextDarkSecondary
-                    )
-                    Text(
-                        text = "3. Activate Auto-Accept",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = TextDarkPrimary
-                    )
-                    Text(
-                        text = "Turn on the Auto-Accept toggle on the Home screen to let SmartDrivo automatically accept rides.",
-                        fontSize = 14.sp,
+                        text = "Complete guide to features & controls",
+                        fontSize = 12.sp,
                         color = TextDarkSecondary
                     )
                 }
             },
+
+            text = {
+
+                val guideItems = listOf(
+
+                    "1. Auto Accept — Master Switch" to
+                        "Auto Accept is the main SmartDrivo switch. When ON, SmartDrivo can monitor eligible ride offers and use your saved settings. When OFF, live ride processing, Auto Reject, Bundle processing, area rules, automatic actions and new ride-history processing stay paused.",
+
+                    "2. Auto Reject — No Condition Match" to
+                        "When Auto Accept is ON and Auto Reject is also ON, an order that fails your active conditions can be skipped or rejected using the verified platform reject/skip control. If Auto Reject is OFF, unmatched orders are left for manual action.",
+
+                    "3. Fare / Distance / Both Filters" to
+                        "Choose how SmartDrivo evaluates normal ride offers. Fare mode checks your saved fare range. Distance mode checks pickup and drop distance limits. Both mode requires the active fare and distance conditions to match together.",
+
+                    "4. Fastest Mode" to
+                        "Fastest Mode is designed for quicker eligible-order processing. It prioritizes the Maximum Pickup Distance rule so nearby eligible rides can be handled with minimum delay. Your main fare and distance values are managed from the Home screen.",
+
+                    "5. Bundle Order" to
+                        "Bundle Order has its own ON/OFF control. When ON, detected bundle rides continue through your normal Go-To, No-Go, Fare, Distance or Both rules. When OFF, SmartDrivo will never auto-accept the bundle. If Auto Reject is ON it may be skipped; if Auto Reject is OFF it stays for manual action.",
+
+                    "6. Supported Platforms" to
+                        "Use the Filters screen to enable or disable Rapido, Uber and Ola individually. SmartDrivo processes only the platforms you have enabled.",
+
+                    "7. Go-To Areas" to
+                        "Create Go-To areas for locations you prefer to travel towards. When Go-To filtering is enabled, SmartDrivo compares the detected ride destination with your saved area rules and conditions.",
+
+                    "8. No-Go Areas" to
+                        "Create No-Go areas for destinations you want to avoid. Enabled No-Go rules can block an otherwise matching ride when its detected destination matches one of your saved restricted areas.",
+
+                    "9. Ride History" to
+                        "History keeps the processed ride result along with useful details such as platform, fare, pickup/drop distance, status and decision reason. It helps you understand why a ride was accepted, rejected or ignored.",
+
+                    "10. Accepted Ride Overlay" to
+                        "After a successful supported ride acceptance, SmartDrivo can show the compact floating overlay with platform, fare, pickup distance, drop distance and destination information. The overlay can also be closed manually.",
+
+                    "11. SmartDrivo Notification" to
+                        "When Auto Accept is ON, the notification panel shows SmartDrivo Active — Monitoring orders. When Auto Accept is OFF, SmartDrivo live automation is paused and the persistent active notification is removed.",
+
+                    "12. Membership & Renewal" to
+                        "My Membership shows your current plan, remaining days and expiry date. Available renewal plans and prices are loaded from SmartDrivo admin settings, so updated plan pricing can appear in the app automatically.",
+
+                    "13. UPI & QR Payment" to
+                        "After selecting a membership plan, SmartDrivo shows the admin UPI payment QR and a Pay with UPI Apps button. The selected plan amount is included in the payment request. After payment, enter the 12-digit UTR and submit it for admin approval.",
+
+                    "14. Payment History" to
+                        "Payment History shows your submitted membership payments and their current status, such as Pending, Approved or Rejected. Membership days are activated or extended after payment approval.",
+                )
+
+
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 520.dp)
+                        .verticalScroll(
+                            rememberScrollState()
+                        ),
+                    verticalArrangement =
+                        Arrangement.spacedBy(8.dp)
+                ) {
+
+                    Text(
+                        text = "SmartDrivo helps drivers apply their own ride preferences consistently across supported driver apps.",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = BluePrimary
+                    )
+
+                    Spacer(
+                        modifier = Modifier.height(4.dp)
+                    )
+
+
+                    guideItems.forEach { item ->
+
+                        Text(
+                            text = item.first,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = TextDarkPrimary
+                        )
+
+                        Text(
+                            text = item.second,
+                            fontSize = 12.5.sp,
+                            color = TextDarkSecondary
+                        )
+
+                        Spacer(
+                            modifier = Modifier.height(4.dp)
+                        )
+                    }
+
+                    Spacer(
+                        modifier = Modifier.height(6.dp)
+                    )
+
+                    Text(
+                        text = "Note: SmartDrivo Accessibility Service must be enabled for supported live ride monitoring. Auto Accept remains the master ON/OFF control for SmartDrivo's live order processing.",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextDarkSecondary
+                    )
+                }
+            },
+
             confirmButton = {
-                TextButton(onClick = { showTutorialDialog = false }) {
-                    Text("Got it", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = BluePrimary)
+                TextButton(
+                    onClick = {
+                        showTutorialDialog = false
+                    }
+                ) {
+                    Text(
+                        text = "Got it",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = BluePrimary
+                    )
                 }
             }
         )

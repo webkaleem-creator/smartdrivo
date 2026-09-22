@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -16,7 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -30,6 +31,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -52,52 +55,120 @@ fun CommunityScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val links by prefs.communityLinks.collectAsState()
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Driver Community & Support", fontWeight = FontWeight.Bold) },
+                title = {
+                    Text(
+                        text = "SmartDrivo Support",
+                        fontWeight = FontWeight.Bold
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back"
+                        )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.White
+                )
             )
-        }
+        },
+        containerColor = LightBackground
     ) { padding ->
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(LightBackground)
                 .padding(padding)
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = CardBackground)
+                colors = CardDefaults.cardColors(
+                    containerColor = CardBackground
+                )
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Group, contentDescription = null, tint = BluePrimary, modifier = Modifier.size(28.dp))
+                Column(
+                    modifier = Modifier.padding(20.dp)
+                ) {
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Campaign,
+                            contentDescription = null,
+                            tint = AccentGreen,
+                            modifier = Modifier.size(28.dp)
+                        )
+
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text("WhatsApp Community", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextDarkPrimary)
+
+                        Text(
+                            text = "WhatsApp Channel",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextDarkPrimary
+                        )
                     }
+
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Join 5,000+ SmartDrivo captains on WhatsApp for daily tips, surge zones, and updates.", fontSize = 13.sp, color = TextDarkSecondary)
+
+                    Text(
+                        text = "Follow the official SmartDrivo WhatsApp Channel for app updates, new features and important announcements.",
+                        fontSize = 13.sp,
+                        color = TextDarkSecondary
+                    )
+
                     Spacer(modifier = Modifier.height(16.dp))
+
                     Button(
                         onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://chat.whatsapp.com/"))
-                            try { context.startActivity(intent) } catch (e: Exception) {}
+                            val url = links.whatsappUrl.trim()
+
+                            if (url.isBlank()) {
+                                Toast.makeText(
+                                    context,
+                                    "WhatsApp Channel link is not available.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            } else {
+                                try {
+                                    context.startActivity(
+                                        Intent(
+                                            Intent.ACTION_VIEW,
+                                            Uri.parse(url)
+                                        )
+                                    )
+                                } catch (_: Exception) {
+                                    Toast.makeText(
+                                        context,
+                                        "Unable to open WhatsApp Channel.",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+                        modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AccentGreen,
+                            contentColor = Color.White
+                        )
                     ) {
-                        Text("Join WhatsApp Group", fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Follow WhatsApp Channel",
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
@@ -105,27 +176,72 @@ fun CommunityScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = CardBackground)
+                colors = CardDefaults.cardColors(
+                    containerColor = CardBackground
+                )
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.SupportAgent, contentDescription = null, tint = BluePrimary, modifier = Modifier.size(28.dp))
+                Column(
+                    modifier = Modifier.padding(20.dp)
+                ) {
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SupportAgent,
+                            contentDescription = null,
+                            tint = BluePrimary,
+                            modifier = Modifier.size(28.dp)
+                        )
+
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text("Customer Support", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextDarkPrimary)
+
+                        Text(
+                            text = "Customer Support",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextDarkPrimary
+                        )
                     }
+
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Have questions regarding subscription, payment verification, or app configuration?", fontSize = 13.sp, color = TextDarkSecondary)
+
+                    Text(
+                        text = "Need help with membership, payment verification, app settings or SmartDrivo features?",
+                        fontSize = 13.sp,
+                        color = TextDarkSecondary
+                    )
+
                     Spacer(modifier = Modifier.height(16.dp))
+
                     Button(
                         onClick = {
-                            val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:support@smartdrivo.com"))
-                            try { context.startActivity(intent) } catch (e: Exception) {}
+                            try {
+                                context.startActivity(
+                                    Intent(
+                                        Intent.ACTION_SENDTO,
+                                        Uri.parse("mailto:support@smartdrivo.com")
+                                    )
+                                )
+                            } catch (_: Exception) {
+                                Toast.makeText(
+                                    context,
+                                    "No email app found.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
+                        modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BluePrimary,
+                            contentColor = Color.White
+                        )
                     ) {
-                        Text("Email Support", fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Contact Support",
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
