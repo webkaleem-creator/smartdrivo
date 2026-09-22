@@ -940,8 +940,8 @@ val goToAreas by prefs.goToAreas.collectAsState()
 
                         val distanceSection: @Composable () -> Unit = {
                             Column(
-                                modifier = Modifier.padding(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                                modifier = Modifier.padding(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -966,12 +966,48 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                             )
                                         }
 
-                                        Text(
-                                            text = "Distance Criteria",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.sp,
-                                            color = TextDarkPrimary
-                                        )
+                                        Column {
+                                            Column {
+                                            Text(
+                                                text = "Distance Criteria",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp,
+                                                color = TextDarkPrimary
+                                            )
+
+                                            val savedPickupText =
+                                                if (settings.maxPickupDistanceKm % 1f == 0f) {
+                                                    settings.maxPickupDistanceKm.toInt().toString()
+                                                } else {
+                                                    settings.maxPickupDistanceKm.toString()
+                                                }
+
+                                            val savedDropText =
+                                                if (settings.maxDropDistanceKm % 1f == 0f) {
+                                                    settings.maxDropDistanceKm.toInt().toString()
+                                                } else {
+                                                    settings.maxDropDistanceKm.toString()
+                                                }
+
+                                            Text(
+                                                text = "Accept ₹$savedPickupText km to ₹$savedDropText km",
+                                                fontSize = 12.sp,
+                                                color = BluePrimary
+                                            )
+                                        }
+
+                                            val savedPickupText =
+                                                if (settings.maxPickupDistanceKm % 1f == 0f)
+                                                    settings.maxPickupDistanceKm.toInt().toString()
+                                                else
+                                                    settings.maxPickupDistanceKm.toString()
+
+                                            val savedDropText =
+                                                if (settings.maxDropDistanceKm % 1f == 0f)
+                                                    settings.maxDropDistanceKm.toInt().toString()
+                                                else
+                                                    settings.maxDropDistanceKm.toString()
+                                        }
                                     }
 
                                     Text(

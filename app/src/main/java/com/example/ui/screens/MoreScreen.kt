@@ -1,10 +1,5 @@
 package com.example.ui.screens
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.content.Intent
-import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -65,7 +60,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -97,7 +91,6 @@ fun MoreScreen(
     onLogout: () -> Unit,
     onBack: () -> Unit = {}
 ) {
-    val context = LocalContext.current
     val userProfile by prefs.userProfile.collectAsState()
     var showTutorialDialog by remember { mutableStateOf(false) }
 
@@ -364,92 +357,8 @@ fun MoreScreen(
                 }
             }
 
-            // 4. SHARE SMARTDRIVO APP
-            item {
-                SectionHeader("SHARE SMARTDRIVO APP")
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = CardBackground),
-                    border = BorderStroke(1.dp, CardBorderDefault)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(10.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .background(Color(0xFFDCFCE7), RoundedCornerShape(10.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("📲", fontSize = 16.sp)
-                            }
-                            Spacer(modifier = Modifier.width(9.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Share SmartDrivo App",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    color = TextDarkPrimary
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Share with other drivers on WhatsApp",
-                                    fontSize = 11.sp,
-                                    color = TextDarkSecondary
-                                )
-                            }
-                        }
 
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        val shareText = "SmartDrivo - Auto Accept karo Rapido/Uber/Ola orders automatically!\nApp download link coming soon. Contact: webkaleem@gmail.com"
-
-                        Button(
-                            onClick = {
-                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    setPackage("com.whatsapp")
-                                    putExtra(Intent.EXTRA_TEXT, shareText)
-                                }
-                                try {
-                                    context.startActivity(sendIntent)
-                                } catch (e: Exception) {
-                                    val chooser = Intent(Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(Intent.EXTRA_TEXT, shareText)
-                                    }
-                                    context.startActivity(Intent.createChooser(chooser, "Share SmartDrivo App"))
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(40.dp),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF25D366),
-                                contentColor = Color.White
-                            )
-                        ) {
-                            Text("💬", fontSize = 16.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Share via WhatsApp",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 5. ADMINISTRATIVE (Only if user has Admin privileges)
+            // 4. ADMINISTRATIVE (Only if user has Admin privileges)
             if (userProfile.isAdmin) {
                 item {
                     SectionHeader("ADMINISTRATIVE")
@@ -469,7 +378,7 @@ fun MoreScreen(
                 }
             }
 
-            // 6. Log Out Button
+            // 5. Log Out Button
             item {
                 Spacer(modifier = Modifier.height(4.dp))
                 Button(
@@ -498,7 +407,7 @@ fun MoreScreen(
                 }
             }
 
-            // 7. Footer
+            // 6. Footer
             item {
                 Box(
                     modifier = Modifier

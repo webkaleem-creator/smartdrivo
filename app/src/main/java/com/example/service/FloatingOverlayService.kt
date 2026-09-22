@@ -35,7 +35,7 @@ class FloatingOverlayService : Service() {
     private var overlayView: View? = null
     private val handler = Handler(Looper.getMainLooper())
     private var countdownRunnable: Runnable? = null
-    private var remainingSeconds = 300 // 5 minutes
+    private var remainingSeconds = 600 // 10 minutes
 
     companion object {
         private const val TAG = "FloatingOverlayService"
@@ -284,7 +284,7 @@ class FloatingOverlayService : Service() {
         })
 
         val countdownBadge = TextView(this).apply {
-            text = "⏳ 05:00"
+            text = "⏳ 10:00"
             setTextColor(Color.WHITE)
             textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
@@ -477,50 +477,216 @@ class FloatingOverlayService : Service() {
 
         card.addView(addressRow)
 
-        // Drag listener so driver can reposition the card anywhere on screen (both X and Y axes)
-        var initialX = 0
-        var initialY = 0
-        var initialTouchX = 0f
-        var initialTouchY = 0f
-        val dragListener = View.OnTouchListener { v, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    initialX = params.x
-                    initialY = params.y
-                    initialTouchX = event.rawX
-                    initialTouchY = event.rawY
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val deltaX = (event.rawX - initialTouchX).toInt()
-                    val deltaY = (event.rawY - initialTouchY).toInt()
-                    params.x = (initialX + deltaX).coerceAtLeast(0)
-                    params.y = (initialY + deltaY).coerceAtLeast(0)
-                    try {
-                        windowManager?.updateViewLayout(overlayView, params)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error moving overlay: ${e.message}")
-                    }
-                    true
-                }
-                MotionEvent.ACTION_UP -> {
-                    v.performClick()
-                    true
-                }
-                else -> false
-            }
-        }
-        card.setOnTouchListener(dragListener)
+        // ---------------------------------------------------------
+        // OVERLAY MINIMIZE / EXPAND
+        //
+        // Tap full card -> small floating ball
+        // Tap ball -> restore full card
+        // Drag works in both modes
+        // Timer continues while minimized
+        // ---------------------------------------------------------
 
-        // Container
+        val bubbleSize = dpToPx(62)
+
+        val minimizedBubble = TextView(this).apply {
+            text =
+                if (amount > 0f) {
+                    "₹${amount.toInt()}"
+                } else {
+                    "SD"
+                }
+
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            contentDescription = "Expand SmartDrivo Overlay"
+            elevation = dpToPxf(12f)
+
+            background = RippleDrawable(
+                ColorStateList.valueOf(0x44FFFFFF),
+                GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(0xFF1E88E5.toInt())
+                    setStroke(dpToPx(2), Color.WHITE)
+                },
+                null
+            )
+
+            visibility = View.GONE
+            isClickable = true
+            isFocusable = true
+        }
+
         val container = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT
             )
+
             addView(card)
+
+            addView(
+                minimizedBubble,
+                FrameLayout.LayoutParams(
+                    bubbleSize,
+                    bubbleSize
+                )
+            )
         }
 
+        var isMinimized = false
+
+        fun setOverlayMinimized(minimize: Boolean) {
+            if (isMinimized == minimize) return
+
+            isMinimized = minimize
+
+            if (minimize) {
+                val bubbleX =
+                    dpToPx(12)
+
+                card.visibility = View.GONE
+                minimizedBubble.visibility = View.VISIBLE
+
+                params.width = bubbleSize
+                params.height = bubbleSize
+
+                params.x = bubbleX.coerceIn(
+                    0,
+                    (displayWidth - bubbleSize).coerceAtLeast(0)
+                )
+            } else {
+                minimizedBubble.visibility = View.GONE
+                card.visibility = View.VISIBLE
+
+                params.width = cardWidth
+                params.height =
+                    WindowManager.LayoutParams.WRAP_CONTENT
+
+                params.x = params.x.coerceIn(
+                    0,
+                    (displayWidth - cardWidth).coerceAtLeast(0)
+                )
+            }
+
+            try {
+                windowManager?.updateViewLayout(
+                    container,
+                    params
+                )
+            } catch (e: Exception) {
+                Log.w(
+                    TAG,
+                    "Overlay minimize/expand error: ${e.message}"
+                )
+            }
+        }
+
+
+        // ---------------------------------------------------------
+        // TAP
+        // ---------------------------------------------------------
+
+        card.isClickable = true
+
+        card.setOnClickListener {
+            setOverlayMinimized(true)
+        }
+
+        minimizedBubble.setOnClickListener {
+            setOverlayMinimized(false)
+        }
+
+
+        // ---------------------------------------------------------
+        // DRAG
+        // ---------------------------------------------------------
+
+        var initialX = 0
+        var initialY = 0
+        var initialTouchX = 0f
+        var initialTouchY = 0f
+        var hasMoved = false
+
+        val movementThreshold = dpToPx(6)
+
+        val dragListener = View.OnTouchListener { view, event ->
+
+            when (event.action) {
+
+                MotionEvent.ACTION_DOWN -> {
+                    initialX = params.x
+                    initialY = params.y
+
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+
+                    hasMoved = false
+                    true
+                }
+
+                MotionEvent.ACTION_MOVE -> {
+                    val deltaX =
+                        (event.rawX - initialTouchX).toInt()
+
+                    val deltaY =
+                        (event.rawY - initialTouchY).toInt()
+
+                    if (
+                        kotlin.math.abs(deltaX) > movementThreshold ||
+                        kotlin.math.abs(deltaY) > movementThreshold
+                    ) {
+                        hasMoved = true
+                    }
+
+                    if (hasMoved) {
+                        val activeWidth =
+                            if (isMinimized) bubbleSize
+                            else cardWidth
+
+                        params.x =
+                            (initialX + deltaX).coerceIn(
+                                0,
+                                (displayWidth - activeWidth)
+                                    .coerceAtLeast(0)
+                            )
+
+                        params.y =
+                            (initialY + deltaY)
+                                .coerceAtLeast(0)
+
+                        try {
+                            windowManager?.updateViewLayout(
+                                container,
+                                params
+                            )
+                        } catch (e: Exception) {
+                            Log.w(
+                                TAG,
+                                "Overlay drag error: ${e.message}"
+                            )
+                        }
+                    }
+
+                    true
+                }
+
+                MotionEvent.ACTION_UP -> {
+                    if (!hasMoved) {
+                        view.performClick()
+                    }
+                    true
+                }
+
+                MotionEvent.ACTION_CANCEL -> true
+
+                else -> false
+            }
+        }
+
+        card.setOnTouchListener(dragListener)
+        minimizedBubble.setOnTouchListener(dragListener)
         overlayView = container
 
         try {
@@ -532,8 +698,8 @@ class FloatingOverlayService : Service() {
             return
         }
 
-        // --- 3. 5-MINUTE LIVE COUNTDOWN TIMER (300 seconds) ---
-        remainingSeconds = 300
+        // --- 3. 10-MINUTE LIVE COUNTDOWN TIMER (600 seconds) ---
+        remainingSeconds = 600
         countdownRunnable?.let { handler.removeCallbacks(it) }
 
         countdownRunnable = object : Runnable {
