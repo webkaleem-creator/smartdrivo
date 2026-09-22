@@ -34,7 +34,8 @@ class FirebaseRepository(
     private var ownPaymentsListener: ListenerRegistration? = null
     private var adminUsersListener: ListenerRegistration? = null
     private var adminPaymentsListener: ListenerRegistration? = null
-
+
+    private var globalSettingsListener: ListenerRegistration? = null
     init {
         try {
             auth = FirebaseAuth.getInstance()
@@ -630,24 +631,180 @@ class FirebaseRepository(
         }
     }
 
-    // --- Realtime / Remote Plan & Settings Sync ---
-    fun fetchGlobalSettings() {
+    /**
+     * Publish the administrator UPI ID to Firestore global settings.
+     * All logged-in drivers receive this value through fetchGlobalSettings().
+     */
+    fun adminPublishUpiId(
+        upiId: String,
+        onComplete: (Boolean) -> Unit
+    ) {
+        val cleanUpi = upiId.trim()
+
+        if (
+            cleanUpi.isBlank() ||
+            !prefs.userProfile.value.isAdmin
+        ) {
+            onComplete(false)
+            return
+        }
+
         scope.launch {
             try {
-                val doc = firestore?.collection("settings")?.document("global")?.get()?.await()
-                if (doc != null && doc.exists()) {
-                    doc.getString("upiId")?.let { if (it.isNotEmpty()) prefs.updateUpiId(it) }
-                    doc.getString("qrImageUrl")?.let { prefs.updateQrImageUrl(it) }
-                    val wa = doc.getString("whatsapp") ?: "https://chat.whatsapp.com/smartdrivo"
-                    val tg = doc.getString("telegram") ?: "https://t.me/smartdrivo_riders"
-                    val ig = doc.getString("instagram") ?: "https://instagram.com/smartdrivo"
-                    prefs.updateCommunityLinks(wa, tg, ig)
+
+                val fs = firestore
+                    ?: throw IllegalStateException(
+                        "Firestore unavailable"
+                    )
+
+                fs.collection("settings")
+                    .document("global")
+                    .set(
+                        mapOf(
+                            "upiId" to cleanUpi,
+                            "updatedAt" to
+                                System.currentTimeMillis()
+                        ),
+                        SetOptions.merge()
+                    )
+                    .await()
+
+                prefs.updateUpiId(cleanUpi)
+
+                kotlinx.coroutines.withContext(
+                    Dispatchers.Main
+                ) {
+                    onComplete(true)
                 }
+
             } catch (e: Exception) {
-                Log.w("FirebaseRepo", "Global settings fetch skipped: ${e.message}")
+
+                Log.e(
+                    "FirebaseRepo",
+                    "Failed to publish admin UPI ID: ${e.message}"
+                )
+
+                kotlinx.coroutines.withContext(
+                    Dispatchers.Main
+                ) {
+                    onComplete(false)
+                }
             }
         }
     }
+    // --- Realtime / Remote Plan & Settings Sync ---
+    fun fetchGlobalSettings() {
+        val fs = firestore ?: return
+
+        globalSettingsListener?.remove()
+
+        globalSettingsListener =
+            fs.collection("settings")
+                .document("global")
+                .addSnapshotListener {
+                    doc,
+                    error ->
+
+                    if (error != null) {
+                        Log.w(
+                            "FirebaseRepo",
+                            "Global settings error: ${error.message}"
+                        )
+                        return@addSnapshotListener
+                    }
+
+                    if (
+                        doc == null ||
+                        !doc.exists()
+                    ) {
+                        return@addSnapshotListener
+                    }
+
+                    doc.getString("upiId")
+                        ?.takeIf {
+                            it.isNotBlank()
+                        }
+                        ?.let {
+                            prefs.updateUpiId(it)
+                        }
+
+                    doc.getString("qrImageUrl")
+                        ?.let {
+                            prefs.updateQrImageUrl(it)
+                        }
+
+                    val wa =
+                        doc.getString("whatsapp")
+                            ?: "https://chat.whatsapp.com/smartdrivo"
+
+                    val tg =
+                        doc.getString("telegram")
+                            ?: "https://t.me/smartdrivo_riders"
+
+                    val ig =
+                        doc.getString("instagram")
+                            ?: "https://instagram.com/smartdrivo"
+
+                    prefs.updateCommunityLinks(
+                        wa,
+                        tg,
+                        ig
+                    )
+
+                    val prices =
+                        doc.get("planPrices")
+                            as? Map<*, *>
+
+                    fun planPrice(
+                        key: String,
+                        fallback: Int
+                    ): Int {
+                        val raw =
+                            prices?.get(key)
+
+                        return when (raw) {
+                            is Number ->
+                                raw.toInt()
+
+                            is String ->
+                                raw.toIntOrNull()
+                                    ?: fallback
+
+                            else ->
+                                fallback
+                        }
+                    }
+
+                    prefs.updateMembershipPlanPrices(
+                        price3 =
+                            planPrice(
+                                "plan3Days",
+                                59
+                            ),
+                        price7 =
+                            planPrice(
+                                "plan7Days",
+                                129
+                            ),
+                        price15 =
+                            planPrice(
+                                "plan15Days",
+                                199
+                            ),
+                        price30 =
+                            planPrice(
+                                "plan1Month",
+                                329
+                            )
+                    )
+
+                    Log.i(
+                        "FirebaseRepo",
+                        "Global pricing updated live"
+                    )
+                }
+    }
+
 
     fun writeDebugLog(message: String) {
         val uid = getCurrentUid()

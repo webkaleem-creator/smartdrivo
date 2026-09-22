@@ -137,6 +137,13 @@ class PreferencesManager(private val context: Context) {
     private val _allUsers = MutableStateFlow(loadAllUsers())
     val allUsers: StateFlow<List<UserProfile>> = _allUsers.asStateFlow()
 
+
+    private val _membershipPlans =
+        MutableStateFlow(loadMembershipPlans())
+
+    val membershipPlans:
+        StateFlow<List<MembershipPlan>> =
+        _membershipPlans.asStateFlow()
     private val _upiId = MutableStateFlow(prefs.getString(KEY_UPI_ID, DEFAULT_UPI_ID) ?: DEFAULT_UPI_ID)
     val upiId: StateFlow<String> = _upiId.asStateFlow()
 
@@ -1046,6 +1053,101 @@ class PreferencesManager(private val context: Context) {
         return emptyList()
     }
 
+
+    private fun buildMembershipPlans(
+        price3: Int,
+        price7: Int,
+        price15: Int,
+        price30: Int
+    ): List<MembershipPlan> {
+        return listOf(
+            MembershipPlan(
+                "3DAYS",
+                3,
+                price3,
+                "3 Days Pass",
+                "Quick trial pass for new drivers"
+            ),
+            MembershipPlan(
+                "7DAYS",
+                7,
+                price7,
+                "7 Days Pass",
+                "Most popular weekly pass"
+            ),
+            MembershipPlan(
+                "15DAYS",
+                15,
+                price15,
+                "15 Days Pass",
+                "Best bi-weekly discount pack"
+            ),
+            MembershipPlan(
+                "1MONTH",
+                30,
+                price30,
+                "1 Month Pass",
+                "Full monthly unlimited pass"
+            )
+        )
+    }
+
+    private fun loadMembershipPlans():
+        List<MembershipPlan> {
+
+        return buildMembershipPlans(
+            prefs.getInt(
+                KEY_GLOBAL_PLAN_3,
+                59
+            ),
+            prefs.getInt(
+                KEY_GLOBAL_PLAN_7,
+                129
+            ),
+            prefs.getInt(
+                KEY_GLOBAL_PLAN_15,
+                199
+            ),
+            prefs.getInt(
+                KEY_GLOBAL_PLAN_30,
+                329
+            )
+        )
+    }
+
+    fun updateMembershipPlanPrices(
+        price3: Int,
+        price7: Int,
+        price15: Int,
+        price30: Int
+    ) {
+        prefs.edit()
+            .putInt(
+                KEY_GLOBAL_PLAN_3,
+                price3
+            )
+            .putInt(
+                KEY_GLOBAL_PLAN_7,
+                price7
+            )
+            .putInt(
+                KEY_GLOBAL_PLAN_15,
+                price15
+            )
+            .putInt(
+                KEY_GLOBAL_PLAN_30,
+                price30
+            )
+            .apply()
+
+        _membershipPlans.value =
+            buildMembershipPlans(
+                price3,
+                price7,
+                price15,
+                price30
+            )
+    }
     // --- Global Admin Settings ---
     fun updateUpiId(newId: String) {
         prefs.edit().putString(KEY_UPI_ID, newId).apply()
@@ -1149,6 +1251,17 @@ class PreferencesManager(private val context: Context) {
         private const val KEY_LAST_ACCEPTED_FARE = "last_accepted_fare"
         private const val KEY_PAYMENTS = "payments_json"
         private const val KEY_ALL_USERS = "all_users_json"
+        private const val KEY_GLOBAL_PLAN_3 =
+            "global_plan_price_3"
+
+        private const val KEY_GLOBAL_PLAN_7 =
+            "global_plan_price_7"
+
+        private const val KEY_GLOBAL_PLAN_15 =
+            "global_plan_price_15"
+
+        private const val KEY_GLOBAL_PLAN_30 =
+            "global_plan_price_30"
         private const val KEY_UPI_ID = "global_upi_id"
         private const val KEY_QR_IMAGE_URL = "global_qr_url"
         private const val KEY_COMMUNITY_WHATSAPP = "comm_whatsapp"

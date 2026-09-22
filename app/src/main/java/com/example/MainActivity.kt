@@ -221,6 +221,8 @@ fun SmartDrivoApp(
 
     val userProfile by prefs.userProfile.collectAsState()
 
+    val membershipPlans by
+        prefs.membershipPlans.collectAsState()
     val isUserAdmin = userProfile.isAdmin
     val firebaseUser = PhoneAuthManager.getAuthInstance()?.currentUser
     val isLoggedIn = prefs.isLoggedIn && (firebaseUser != null || userProfile.email.isNotBlank() || userProfile.phone.isNotBlank())
@@ -230,6 +232,8 @@ fun SmartDrivoApp(
     // Verify profile with Firestore for existing users on startup
     LaunchedEffect(isLoggedIn) {
         if (isLoggedIn) {
+            // Refresh global pricing after login
+            repository.fetchGlobalSettings()
             val fUser = PhoneAuthManager.getAuthInstance()?.currentUser
             val uid = fUser?.uid ?: userProfile.uid
             val email = fUser?.email ?: userProfile.email
@@ -588,26 +592,41 @@ fun SmartDrivoApp(
             )
         }
 
-        // 5. Plan Selection Screen
+        // 5. Membership / Plan Selection Screen
         composable(Routes.PLAN_SELECTION) {
-            if (userProfile.isAdmin || userProfile.isPlanValid) {
-                LaunchedEffect(Unit) {
-                    val hasAllPermissions = checkAllPermissionsGranted()
-                    val dest = if (hasAllPermissions) Routes.HOME else Routes.FINISH_SETUP
-                    navController.navigate(dest) {
-                        popUpTo(Routes.PLAN_SELECTION) { inclusive = true }
+            PlanSelectionScreen(
+                plans = membershipPlans,
+                currentPlanId = userProfile.plan.ifEmpty { "7DAYS" },
+                currentPlanPrice = userProfile.planPrice,
+                planExpireMillis = userProfile.planExpireMillis,
+                isCurrentPlanActive =
+                    userProfile.isPlanValid &&
+                    userProfile.isActive,
+                isAdmin = userProfile.isAdmin,
+
+                onPlanSelected = { plan ->
+                    selectedPlanForPayment = plan
+                    navController.navigate(Routes.PAYMENT)
+                },
+
+                onBack =
+                    if (
+                        userProfile.isAdmin ||
+                        userProfile.isPlanValid
+                    ) {
+                        {
+                            if (!navController.popBackStack()) {
+                                navController.navigate(Routes.PROFILE) {
+                                    launchSingleTop = true
+                                }
+                            }
+                        }
+                    } else {
+                        null
                     }
-                }
-            } else {
-                PlanSelectionScreen(
-                    currentPlanId = userProfile.plan.ifEmpty { "7DAYS" },
-                    onPlanSelected = { plan ->
-                        selectedPlanForPayment = plan
-                        navController.navigate(Routes.PAYMENT)
-                    }
-                )
-            }
+            )
         }
+
 
         // 6. Payment Screen
         composable(Routes.PAYMENT) {

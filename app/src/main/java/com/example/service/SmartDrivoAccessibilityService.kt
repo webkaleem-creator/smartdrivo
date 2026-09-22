@@ -1138,14 +1138,11 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             // Fix 2: Vibrate only once per order using lastVibratedOrderId
             triggerOrderDetectedVibration(getOrderIdentifier(candidate))
 
-            val isVehicleAllowed = when (candidate.vehicleType) {
-                com.example.model.VehicleType.AUTO -> settings.autoEnabled
-                com.example.model.VehicleType.BIKE -> settings.bikeEnabled
-                com.example.model.VehicleType.CAR -> settings.carEnabled
-            }
+            val profileVehicle = prefs.userProfile.value.vehicleType
+            val isVehicleAllowed = candidate.vehicleType == profileVehicle
 
             if (!isVehicleAllowed) {
-                Log.d(TAG, "Vehicle type ${candidate.vehicleType} disabled in settings")
+                Log.d(TAG, "Vehicle ${candidate.vehicleType} does not match profile vehicle $profileVehicle")
                 resetProcessing()
                 return
             }
@@ -1649,14 +1646,11 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             // Fix 2: Vibrate only once per order using lastVibratedOrderId
             triggerOrderDetectedVibration(getOrderIdentifier(candidate))
 
-            val isVehicleAllowed = when (candidate.vehicleType) {
-                com.example.model.VehicleType.AUTO -> settings.autoEnabled
-                com.example.model.VehicleType.BIKE -> settings.bikeEnabled
-                com.example.model.VehicleType.CAR -> settings.carEnabled
-            }
+            val profileVehicle = prefs.userProfile.value.vehicleType
+            val isVehicleAllowed = candidate.vehicleType == profileVehicle
 
             if (!isVehicleAllowed) {
-                Log.d(TAG, "Vehicle type ${candidate.vehicleType} disabled in settings for Ola")
+                Log.d(TAG, "Vehicle ${candidate.vehicleType} does not match profile vehicle $profileVehicle for Ola")
                 resetProcessing()
                 setOlaState(OlaState.IDLE)
                 return
@@ -2722,15 +2716,12 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             // Fix 2: Vibrate only once per order using lastVibratedOrderId
             triggerOrderDetectedVibration(getOrderIdentifier(candidate))
 
-            val isVehicleAllowed = when (candidate.vehicleType) {
-                com.example.model.VehicleType.AUTO -> settings.autoEnabled
-                com.example.model.VehicleType.BIKE -> settings.bikeEnabled
-                com.example.model.VehicleType.CAR -> settings.carEnabled
-            }
+            val profileVehicle = prefs.userProfile.value.vehicleType
+            val isVehicleAllowed = candidate.vehicleType == profileVehicle
 
             if (!isVehicleAllowed) {
                 val reason =
-                    "Vehicle ${candidate.vehicleType} disabled in settings"
+                    "Vehicle ${candidate.vehicleType} does not match profile vehicle $profileVehicle"
 
                 Log.d(TAG, reason)
 
@@ -3423,14 +3414,11 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
             // Vehicle type filter & ride evaluation: load settings FRESH before evaluating every ride
             val settings = prefs.loadSettings()
-            val isVehicleAllowed = when (candidate.vehicleType) {
-                com.example.model.VehicleType.AUTO -> settings.autoEnabled
-                com.example.model.VehicleType.BIKE -> settings.bikeEnabled
-                com.example.model.VehicleType.CAR -> settings.carEnabled
-            }
+            val profileVehicle = prefs.userProfile.value.vehicleType
+            val isVehicleAllowed = candidate.vehicleType == profileVehicle
 
             if (!isVehicleAllowed) {
-                Log.d(TAG, "Vehicle type ${candidate.vehicleType} disabled in settings")
+                Log.d(TAG, "Vehicle ${candidate.vehicleType} does not match profile vehicle $profileVehicle")
                 resetProcessing()
                 return
             }

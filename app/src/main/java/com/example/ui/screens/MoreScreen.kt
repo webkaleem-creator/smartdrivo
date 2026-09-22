@@ -30,11 +30,7 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.DirectionsBike
-import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.ElectricRickshaw
 import androidx.compose.material.icons.filled.HeadsetMic
-import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.ReceiptLong
@@ -47,8 +43,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -75,11 +69,9 @@ import androidx.compose.ui.unit.sp
 import com.example.data.PreferencesManager
 import com.example.ui.theme.BlueContainer
 import com.example.ui.theme.BluePrimary
-import com.example.ui.theme.BlueSecondary
 import com.example.ui.theme.CardBackground
 import com.example.ui.theme.CardBorderDefault
 import com.example.ui.theme.LightBackground
-import com.example.ui.theme.PlatformRapido
 import com.example.ui.theme.StatusActiveGreen
 import com.example.ui.theme.StatusActiveGreenBg
 import com.example.ui.theme.StatusInactiveRed
@@ -104,7 +96,6 @@ fun MoreScreen(
 ) {
     val context = LocalContext.current
     val userProfile by prefs.userProfile.collectAsState()
-    val settings by prefs.appSettings.collectAsState()
     var showTutorialDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -134,7 +125,7 @@ fun MoreScreen(
                                 color = TextDarkPrimary
                             )
                             Text(
-                                text = "Account, filters & settings",
+                                text = "Account, membership & settings",
                                 fontSize = 14.sp,
                                 color = TextDarkSecondary
                             )
@@ -307,198 +298,8 @@ fun MoreScreen(
                 }
             }
 
-            // 2. PLATFORM & VEHICLE FILTERS (Moved from HomeScreen)
-            item {
-                SectionHeader("PLATFORM & VEHICLE")
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = CardBackground),
-                    border = BorderStroke(1.dp, CardBorderDefault)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        // Driver Platforms
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(30.dp)
-                                        .background(BlueContainer, RoundedCornerShape(10.dp)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Layers,
-                                        contentDescription = null,
-                                        tint = BluePrimary,
-                                        modifier = Modifier.size(17.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(9.dp))
-                                Column {
-                                    Text(
-                                        text = "Driver Platforms",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TextDarkPrimary
-                                    )
-                                    Text(
-                                        text = "Select partner apps to monitor",
-                                        fontSize = 11.sp,
-                                        color = TextDarkSecondary
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                FilterChip(
-                                    selected = settings.rapidoEnabled,
-                                    onClick = { prefs.saveAppSettings(settings.copy(rapidoEnabled = !settings.rapidoEnabled)) },
-                                    label = { Text("Rapido ✓", fontSize = 12.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = PlatformRapido,
-                                        selectedLabelColor = Color.White,
-                                        containerColor = Color.White,
-                                        labelColor = TextDarkPrimary
-                                    ),
-                                    border = FilterChipDefaults.filterChipBorder(
-                                        enabled = true,
-                                        selected = settings.rapidoEnabled,
-                                        borderColor = PlatformRapido,
-                                        selectedBorderColor = PlatformRapido
-                                    )
-                                )
-                                FilterChip(
-                                    selected = settings.uberEnabled,
-                                    onClick = { prefs.saveAppSettings(settings.copy(uberEnabled = !settings.uberEnabled)) },
-                                    label = { Text("Uber ✓", fontSize = 12.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = Color(0xFF212121),
-                                        selectedLabelColor = Color.White,
-                                        containerColor = Color.White,
-                                        labelColor = TextDarkPrimary
-                                    ),
-                                    border = FilterChipDefaults.filterChipBorder(
-                                        enabled = true,
-                                        selected = settings.uberEnabled,
-                                        borderColor = Color(0xFF757575),
-                                        selectedBorderColor = Color(0xFF212121)
-                                    )
-                                )
-                                FilterChip(
-                                    selected = settings.olaEnabled,
-                                    onClick = { prefs.saveAppSettings(settings.copy(olaEnabled = !settings.olaEnabled)) },
-                                    label = { Text("Ola ✓", fontSize = 12.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = StatusActiveGreen,
-                                        selectedLabelColor = Color.White,
-                                        containerColor = Color.White,
-                                        labelColor = TextDarkPrimary
-                                    ),
-                                    border = FilterChipDefaults.filterChipBorder(
-                                        enabled = true,
-                                        selected = settings.olaEnabled,
-                                        borderColor = StatusActiveGreen,
-                                        selectedBorderColor = StatusActiveGreen
-                                    )
-                                )
-                            }
-                        }
-
-                        HorizontalDivider(color = CardBorderDefault, thickness = 1.dp)
-
-                        // Vehicle Type Filters
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(30.dp)
-                                        .background(BlueContainer, RoundedCornerShape(10.dp)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.DirectionsCar,
-                                        contentDescription = null,
-                                        tint = BlueSecondary,
-                                        modifier = Modifier.size(17.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(9.dp))
-                                Column {
-                                    Text(
-                                        text = "Vehicle Type",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TextDarkPrimary
-                                    )
-                                    Text(
-                                        text = "Filter rides by vehicle category",
-                                        fontSize = 11.sp,
-                                        color = TextDarkSecondary
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                FilterChip(
-                                    selected = settings.bikeEnabled,
-                                    onClick = { prefs.saveAppSettings(settings.copy(bikeEnabled = !settings.bikeEnabled)) },
-                                    leadingIcon = {
-                                        Text("🏍️", fontSize = 12.sp)
-                                    },
-                                    label = { Text("Bike", fontSize = 11.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = BlueSecondary,
-                                        selectedLabelColor = Color.White,
-                                        containerColor = Color.White,
-                                        labelColor = TextDarkPrimary
-                                    )
-                                )
-                                FilterChip(
-                                    selected = settings.autoEnabled,
-                                    onClick = { prefs.saveAppSettings(settings.copy(autoEnabled = !settings.autoEnabled)) },
-                                    leadingIcon = {
-                                        Text("🛺", fontSize = 12.sp)
-                                    },
-                                    label = { Text("Auto Rickshaw", fontSize = 11.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = BlueSecondary,
-                                        selectedLabelColor = Color.White,
-                                        containerColor = Color.White,
-                                        labelColor = TextDarkPrimary
-                                    )
-                                )
-                                FilterChip(
-                                    selected = settings.carEnabled,
-                                    onClick = { prefs.saveAppSettings(settings.copy(carEnabled = !settings.carEnabled)) },
-                                    leadingIcon = {
-                                        Text("🚗", fontSize = 12.sp)
-                                    },
-                                    label = { Text("Car", fontSize = 11.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = BlueSecondary,
-                                        selectedLabelColor = Color.White,
-                                        containerColor = Color.White,
-                                        labelColor = TextDarkPrimary
-                                    )
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 3. MEMBERSHIP & BILLING (Unique options: Plans, Payment Receipts)
+            // 2. MEMBERSHIP & BILLING (Unique options: Plans, Payment Receipts)
             item {
                 SectionHeader("MEMBERSHIP & BILLING")
                 Card(
@@ -529,7 +330,7 @@ fun MoreScreen(
                 }
             }
 
-            // 4. SUPPORT & HELP (Unique options: Tutorial, Telegram Community)
+            // 3. SUPPORT & HELP (Unique options: Tutorial, Telegram Community)
             item {
                 SectionHeader("SUPPORT & HELP")
                 Card(
@@ -560,7 +361,7 @@ fun MoreScreen(
                 }
             }
 
-            // 5. SHARE SMARTDRIVO APP
+            // 4. SHARE SMARTDRIVO APP
             item {
                 SectionHeader("SHARE SMARTDRIVO APP")
                 Card(
@@ -645,7 +446,7 @@ fun MoreScreen(
                 }
             }
 
-            // 7. ADMINISTRATIVE (Only if user has Admin privileges)
+            // 5. ADMINISTRATIVE (Only if user has Admin privileges)
             if (userProfile.isAdmin) {
                 item {
                     SectionHeader("ADMINISTRATIVE")
@@ -665,7 +466,7 @@ fun MoreScreen(
                 }
             }
 
-            // 8. Log Out Button
+            // 6. Log Out Button
             item {
                 Spacer(modifier = Modifier.height(4.dp))
                 Button(
@@ -694,7 +495,7 @@ fun MoreScreen(
                 }
             }
 
-            // 8. Footer
+            // 7. Footer
             item {
                 Box(
                     modifier = Modifier

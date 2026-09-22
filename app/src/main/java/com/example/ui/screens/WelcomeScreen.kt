@@ -152,17 +152,11 @@ fun WelcomeScreen(
         PhoneAuthManager.init(context)
     }
 
-    // Plans & Payment
-    val welcomePlans = remember {
-        listOf(
-            MembershipPlan("3DAYS", 3, 59, "3 Days Pass", "Quick trial for new drivers"),
-            MembershipPlan("7DAYS", 7, 129, "7 Days Pass", "Most popular weekly plan"),
-            MembershipPlan("15DAYS", 15, 199, "15 Days Pass", "Best bi-weekly discount pack"),
-            MembershipPlan("1MONTH", 30, 329, "1 Month Pass", "Best value unlimited auto-accept")
-        )
-    }
+    // Plans & Payment — live prices from Firestore
+    val welcomePlans by
+        prefs.membershipPlans.collectAsState()
 
-    var selectedPlan by remember { mutableStateOf(welcomePlans[1]) }
+    var selectedPlan by remember(welcomePlans) { mutableStateOf(welcomePlans.firstOrNull { it.id == "7DAYS" } ?: welcomePlans.first()) }
     var utrNumber by remember { mutableStateOf("") }
     var isSubmittingPayment by remember { mutableStateOf(false) }
     var utrError by remember { mutableStateOf<String?>(null) }

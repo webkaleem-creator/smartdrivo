@@ -12,17 +12,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,160 +43,548 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.MembershipPlan
 import com.example.ui.theme.AccentGreen
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun PlanSelectionScreen(
+    plans: List<MembershipPlan> =
+        MembershipPlan.DEFAULT_PLANS,
     currentPlanId: String = "7DAYS",
-    onPlanSelected: (plan: MembershipPlan) -> Unit
+    currentPlanPrice: Int = 0,
+    planExpireMillis: Long = 0L,
+    isCurrentPlanActive: Boolean = false,
+    isAdmin: Boolean = false,
+    onPlanSelected: (plan: MembershipPlan) -> Unit,
+    onBack: (() -> Unit)? = null
 ) {
-    var selectedPlan by remember {
-        mutableStateOf(MembershipPlan.DEFAULT_PLANS.firstOrNull { it.id == currentPlanId } ?: MembershipPlan.DEFAULT_PLANS[1])
+    val currentPlan = plans.firstOrNull {
+        it.id == currentPlanId
     }
+
+    var selectedPlan by remember(currentPlanId, plans) {
+        mutableStateOf(
+            currentPlan ?: plans.firstOrNull { it.id == "7DAYS" } ?: plans.first()
+        )
+    }
+
+    val now = System.currentTimeMillis()
+    val oneDayMs = 24L * 60L * 60L * 1000L
+
+    val remainingDays = remember(planExpireMillis, isAdmin) {
+        if (isAdmin) {
+            -1
+        } else {
+            val diff = planExpireMillis - System.currentTimeMillis()
+
+            if (diff <= 0L) {
+                0
+            } else {
+                ((diff + oneDayMs - 1L) / oneDayMs).toInt()
+            }
+        }
+    }
+
+    val expiryText = remember(planExpireMillis) {
+        if (planExpireMillis > 0L) {
+            SimpleDateFormat(
+                "dd MMM yyyy",
+                Locale.getDefault()
+            ).format(Date(planExpireMillis))
+        } else {
+            "Not available"
+        }
+    }
+
+    val hasActiveMembership =
+        isAdmin || isCurrentPlanActive
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(14.dp)
+            .background(Color(0xFFF8FAFC))
     ) {
-        Spacer(modifier = Modifier.height(16.dp))
 
-        Text(
-            text = "Step 4 of 5",
-            fontSize = 9.5.sp,
-            color = AccentGreen,
-            fontWeight = FontWeight.Bold
-        )
+        // ----------------------------------------------------
+        // HEADER
+        // ----------------------------------------------------
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color.White)
+                .padding(
+                    horizontal = 12.dp,
+                    vertical = 12.dp
+                ),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (onBack != null) {
+                IconButton(
+                    onClick = { onBack.invoke() }
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color(0xFF0F172A)
+                    )
+                }
+            }
 
-        Spacer(modifier = Modifier.height(4.dp))
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = if (hasActiveMembership)
+                        "My Membership"
+                    else
+                        "Choose Membership",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
 
-        Text(
-            text = "Select Membership Plan",
-            fontSize = 19.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground
-        )
+                Text(
+                    text = if (hasActiveMembership)
+                        "Current plan, remaining days & renewal"
+                    else
+                        "Select a plan to activate SmartDrivo",
+                    fontSize = 13.sp,
+                    color = Color(0xFF64748B)
+                )
+            }
+        }
 
-        Text(
-            text = "Choose your plan duration to unlock auto-accept on Rapido, Uber & Ola.",
-            fontSize = 10.5.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 3.dp, bottom = 11.dp)
-        )
 
         LazyColumn(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(
-                items = MembershipPlan.DEFAULT_PLANS,
-                key = { it.id },
-                contentType = { "membership_plan" }
-            ) { plan ->
-                val isSelected = plan.id == selectedPlan.id
-                val borderColor = if (isSelected) AccentGreen else MaterialTheme.colorScheme.outline
-                val bgColor = if (isSelected) Color(0xFF0D2517) else MaterialTheme.colorScheme.surfaceVariant
 
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .border(if (isSelected) 2.dp else 1.dp, borderColor, RoundedCornerShape(16.dp))
-                        .clickable { selectedPlan = plan },
-                    colors = CardDefaults.cardColors(containerColor = bgColor)
-                ) {
-                    Column(modifier = Modifier.padding(12.5.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+
+
+            // ------------------------------------------------
+            // CURRENT ACTIVE MEMBERSHIP
+            // ------------------------------------------------
+            if (hasActiveMembership) {
+                item {
+
+                    Text(
+                        text = "CURRENT MEMBERSHIP",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF2196F3),
+                        modifier = Modifier.padding(
+                            top = 4.dp,
+                            bottom = 4.dp
+                        )
+                    )
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color.White
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp)
                         ) {
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = plan.label,
-                                        fontSize = 14.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onBackground
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .background(
+                                            Color(0xFFE8F5E9),
+                                            RoundedCornerShape(12.dp)
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.WorkspacePremium,
+                                        contentDescription = null,
+                                        tint = Color(0xFF16A34A),
+                                        modifier = Modifier.size(25.dp)
                                     )
-                                    if (plan.id == "15DAYS") {
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .background(Color(0xFFF59E0B), RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("SMART CHOICE", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                                        }
-                                    } else if (plan.id == "7DAYS") {
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .background(AccentGreen, RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("POPULAR", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                                        }
+                                }
+
+                                Spacer(
+                                    modifier = Modifier.width(12.dp)
+                                )
+
+                                Column(
+                                    modifier = Modifier.weight(1f)
+                                ) {
+
+                                    Text(
+                                        text = if (isAdmin)
+                                            "Admin Membership"
+                                        else
+                                            currentPlan?.label
+                                                ?: currentPlanId,
+                                        fontSize = 17.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF0F172A)
+                                    )
+
+                                    Spacer(
+                                        modifier = Modifier.height(2.dp)
+                                    )
+
+                                    Text(
+                                        text = if (isAdmin)
+                                            "Full SmartDrivo access"
+                                        else
+                                            "₹${if (currentPlanPrice > 0) currentPlanPrice else currentPlan?.price ?: 0} plan",
+                                        fontSize = 12.sp,
+                                        color = Color(0xFF64748B)
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            Color(0xFFDCFCE7),
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .padding(
+                                            horizontal = 10.dp,
+                                            vertical = 5.dp
+                                        )
+                                ) {
+                                    Text(
+                                        text = "● ACTIVE",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF16A34A)
+                                    )
+                                }
+                            }
+
+
+                            Spacer(
+                                modifier = Modifier.height(14.dp)
+                            )
+
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+
+                                Card(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = Color(0xFFF0F9FF)
+                                    )
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp)
+                                    ) {
+                                        Text(
+                                            text = "Remaining",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF64748B)
+                                        )
+
+                                        Text(
+                                            text = if (isAdmin)
+                                                "Unlimited"
+                                            else
+                                                "$remainingDays Days",
+                                            fontSize = 17.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF0284C7)
+                                        )
                                     }
                                 }
-                                Text(
-                                    text = "${plan.days} Days Unlimited Auto-Click",
-                                    fontSize = 9.5.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
 
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "₹${plan.price}",
-                                    fontSize = 19.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = AccentGreen
-                                )
-                                if (isSelected) {
-                                    Icon(
-                                        imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = "Selected",
-                                        tint = AccentGreen,
-                                        modifier = Modifier.padding(start = 5.5.dp)
+
+                                Card(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = Color(0xFFF8FAFC)
                                     )
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp)
+                                    ) {
+                                        Text(
+                                            text = "Valid Until",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF64748B)
+                                        )
+
+                                        Text(
+                                            text = if (isAdmin)
+                                                "No Expiry"
+                                            else
+                                                expiryText,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF0F172A)
+                                        )
+                                    }
                                 }
                             }
-                        }
 
-                        if (isSelected) {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Box(
-                                modifier = Modifier
-                                    .background(AccentGreen, RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 7.dp, vertical = 3.dp)
-                            ) {
+
+                            if (!isAdmin) {
+                                Spacer(
+                                    modifier = Modifier.height(10.dp)
+                                )
+
                                 Text(
-                                    text = "SELECTED MEMBERSHIP PLAN",
-                                    fontSize = 7.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.Black
+                                    text = "Your current membership keeps working while a renewal payment is waiting for admin approval.",
+                                    fontSize = 11.5.sp,
+                                    color = Color(0xFF64748B)
                                 )
                             }
                         }
                     }
                 }
             }
+
+
+            // ------------------------------------------------
+            // AVAILABLE PLANS
+            // ------------------------------------------------
+            item {
+                Text(
+                    text = if (hasActiveMembership)
+                        "RENEW OR CHANGE PLAN"
+                    else
+                        "MEMBERSHIP PLANS",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF2196F3),
+                    modifier = Modifier.padding(
+                        top = 8.dp,
+                        bottom = 2.dp
+                    )
+                )
+            }
+
+
+            items(
+                items = plans,
+                key = { it.id }
+            ) { plan ->
+
+                val isSelected =
+                    selectedPlan.id == plan.id
+
+                val isRunningPlan =
+                    hasActiveMembership &&
+                    !isAdmin &&
+                    plan.id == currentPlanId
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(
+                            RoundedCornerShape(15.dp)
+                        )
+                        .border(
+                            width = if (isSelected)
+                                2.dp
+                            else
+                                1.dp,
+                            color = if (isSelected)
+                                Color(0xFF2196F3)
+                            else
+                                Color(0xFFE2E8F0),
+                            shape = RoundedCornerShape(15.dp)
+                        )
+                        .clickable {
+                            selectedPlan = plan
+                        },
+                    shape = RoundedCornerShape(15.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color.White
+                    )
+                ) {
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+
+                                Text(
+                                    text = plan.label,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+
+
+                                if (isRunningPlan) {
+                                    Spacer(
+                                        modifier = Modifier.width(7.dp)
+                                    )
+
+                                    Box(
+                                        modifier = Modifier
+                                            .background(
+                                                Color(0xFFDCFCE7),
+                                                RoundedCornerShape(5.dp)
+                                            )
+                                            .padding(
+                                                horizontal = 6.dp,
+                                                vertical = 2.dp
+                                            )
+                                    ) {
+                                        Text(
+                                            text = "CURRENT",
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF16A34A)
+                                        )
+                                    }
+                                }
+
+
+                                if (plan.id == "7DAYS") {
+                                    Spacer(
+                                        modifier = Modifier.width(7.dp)
+                                    )
+
+                                    Box(
+                                        modifier = Modifier
+                                            .background(
+                                                Color(0xFFE0F2FE),
+                                                RoundedCornerShape(5.dp)
+                                            )
+                                            .padding(
+                                                horizontal = 6.dp,
+                                                vertical = 2.dp
+                                            )
+                                    ) {
+                                        Text(
+                                            text = "POPULAR",
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF0284C7)
+                                        )
+                                    }
+                                }
+                            }
+
+
+                            Spacer(
+                                modifier = Modifier.height(3.dp)
+                            )
+
+                            Text(
+                                text = "${plan.days} Days SmartDrivo Access",
+                                fontSize = 12.sp,
+                                color = Color(0xFF64748B)
+                            )
+
+                            if (plan.description.isNotBlank()) {
+                                Text(
+                                    text = plan.description,
+                                    fontSize = 10.5.sp,
+                                    color = Color(0xFF94A3B8)
+                                )
+                            }
+                        }
+
+
+                        Text(
+                            text = "₹${plan.price}",
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF2196F3)
+                        )
+
+
+                        if (isSelected) {
+                            Spacer(
+                                modifier = Modifier.width(7.dp)
+                            )
+
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = "Selected",
+                                tint = Color(0xFF2196F3),
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+
+            item {
+
+                Spacer(
+                    modifier = Modifier.height(4.dp)
+                )
+
+                Button(
+                    onClick = {
+                        onPlanSelected(selectedPlan)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF2196F3),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(13.dp)
+                ) {
+                    Text(
+                        text = if (hasActiveMembership)
+                            "Renew ${selectedPlan.label} • ₹${selectedPlan.price}"
+                        else
+                            "Continue • ₹${selectedPlan.price}",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+
+                Spacer(
+                    modifier = Modifier.height(8.dp)
+                )
+
+                Text(
+                    text = "After payment, enter the 12-digit UTR. Your renewal request will be sent to the SmartDrivo admin for approval.",
+                    fontSize = 11.5.sp,
+                    color = Color(0xFF64748B),
+                    modifier = Modifier.padding(
+                        horizontal = 4.dp
+                    )
+                )
+
+                Spacer(
+                    modifier = Modifier.height(18.dp)
+                )
+            }
         }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Button(
-            onClick = { onPlanSelected(selectedPlan) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = Color.Black),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Text("Pay ₹${selectedPlan.price} for ${selectedPlan.label}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
     }
 }
