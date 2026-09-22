@@ -20,3 +20,5 @@ debug.keystore
 my-upload-key.jks
 .build-outputs/
 *.apk
+
+app/google-services.json
