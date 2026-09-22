@@ -67,6 +67,12 @@ class RideHistoryRepository(
                 if (isRecent) {
                     val merged = existing.copy(
                         fare = if ((candidate.fare ?: 0f) > 0f) (candidate.fare ?: 0f) else existing.fare,
+                        baseFare = if ((candidate.fare ?: 0f) > 0f) {
+                            candidate.baseFare?.takeIf { it > 0f } ?: (candidate.fare ?: 0f)
+                        } else existing.baseFare,
+                        tipAmount = if ((candidate.fare ?: 0f) > 0f) {
+                            candidate.tipAmount ?: 0f
+                        } else existing.tipAmount,
                         pickupDistanceKm = if ((candidate.pickupDistKm ?: 0f) > 0f) (candidate.pickupDistKm ?: 0f) else existing.pickupDistanceKm,
                         dropDistanceKm = if ((candidate.dropDistKm ?: 0f) > 0f) (candidate.dropDistKm ?: 0f) else existing.dropDistanceKm,
                         pickupAddress = if (!(candidate.pickupAddress.isNullOrBlank())) (candidate.pickupAddress ?: "") else existing.pickupAddress,
