@@ -365,6 +365,7 @@ class PreferencesManager(private val context: Context) {
             putFloat(KEY_MAX_FARE, settings.maxFare)
             putString(KEY_OUT_OF_RANGE, settings.outOfRangeAction.name)
             putString(KEY_BUNDLE_ACTION, settings.bundleOrderAction.name)
+            putBoolean(KEY_BUNDLE_ENABLED, settings.isBundleOrderEnabled)
             putString(KEY_THEME_MODE, settings.themeMode.name)
             putBoolean(KEY_AUTOSTART, settings.autostartOnBoot)
             putBoolean(KEY_GOTO_ENABLED, settings.isGoToEnabled)
@@ -438,6 +439,7 @@ class PreferencesManager(private val context: Context) {
             bundleOrderAction = try {
                 BundleOrderAction.valueOf(prefs.getString(KEY_BUNDLE_ACTION, "AUTO_REJECT") ?: "AUTO_REJECT")
             } catch (e: Exception) { BundleOrderAction.AUTO_REJECT },
+            isBundleOrderEnabled = prefs.getBoolean(KEY_BUNDLE_ENABLED, false),
             themeMode = try {
                 AppThemeMode.valueOf(prefs.getString(KEY_THEME_MODE, "LIGHT") ?: "LIGHT")
             } catch (e: Exception) { AppThemeMode.LIGHT },
@@ -1127,6 +1129,7 @@ class PreferencesManager(private val context: Context) {
         private const val KEY_MAX_FARE = "setting_max_fare"
         private const val KEY_OUT_OF_RANGE = "setting_out_of_range"
         private const val KEY_BUNDLE_ACTION = "setting_bundle_action"
+        private const val KEY_BUNDLE_ENABLED = "setting_bundle_order_enabled"
         private const val KEY_THEME_MODE = "setting_theme_mode"
         private const val KEY_AUTOSTART = "setting_autostart"
         private const val KEY_PENDING_AUTO_ACCEPT = "key_pending_auto_accept"

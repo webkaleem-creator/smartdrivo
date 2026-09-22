@@ -39,9 +39,9 @@ object AreaRulesEngine {
                 .trim()
                 .lowercase()
 
-        if (candidate.isBundledOrder) {
-            return DecisionResult.Reject(
-                "Bundle Order Filter: Bundle order detected"
+        if (candidate.isBundledOrder && !settings.isBundleOrderEnabled) {
+            return DecisionResult.Ignore(
+                "Bundle Order OFF • Manual action"
             )
         }
 

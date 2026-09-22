@@ -408,9 +408,52 @@ fun SettingsScreen(
                     }
                 }
             }
-            // 2. SUPPORTED PLATFORMS (Rapido, Uber, Ola toggles)
+            // 2. BUNDLE ORDER
             item {
-                SectionHeader("2. SUPPORTED PLATFORMS")
+                SectionHeader("2. BUNDLE ORDER")
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = CardBackground),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, CardBorderDefault),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        SettingToggleRow(
+                            icon = Icons.Default.Layers,
+                            title = "Bundle Order",
+                            subtitle = if (settings.isBundleOrderEnabled) {
+                                "ON — Rapido bundle orders use saved Fare / Distance / Area filters"
+                            } else {
+                                "OFF — Bundle orders stay manual and will not be auto-accepted"
+                            },
+                            isChecked = settings.isBundleOrderEnabled,
+                            onCheckedChange = { enabled ->
+                                prefs.saveAppSettings(
+                                    settings.copy(isBundleOrderEnabled = enabled)
+                                )
+                                showSavedSnackbar()
+                            }
+                        )
+
+                        Text(
+                            text = if (settings.isBundleOrderEnabled) {
+                                "Bundle enabled: matching orders may be auto-accepted normally."
+                            } else {
+                                "Bundle disabled: even if other filters match, SmartDrivo will leave the order for manual action."
+                            },
+                            fontSize = 11.sp,
+                            color = TextDarkSecondary
+                        )
+                    }
+                }
+            }
+
+            // 3. SUPPORTED PLATFORMS (Rapido, Uber, Ola toggles)
+            item {
+                SectionHeader("3. SUPPORTED PLATFORMS")
                 Card(
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
                     shape = RoundedCornerShape(14.dp),

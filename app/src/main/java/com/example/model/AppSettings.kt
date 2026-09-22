@@ -85,6 +85,9 @@ data class AppSettings(
     val autostartOnBoot: Boolean = true,
     // Rules
     val outOfRangeAction: OutOfRangeAction = OutOfRangeAction.AUTO_REJECT,
+    // Bundle Order: OFF = manual only, ON = use normal saved filters.
+    val isBundleOrderEnabled: Boolean = false,
+    // Kept for backward compatibility with older saved settings.
     val bundleOrderAction: BundleOrderAction = BundleOrderAction.AUTO_REJECT,
     val themeMode: AppThemeMode = AppThemeMode.LIGHT,
     // Area filters

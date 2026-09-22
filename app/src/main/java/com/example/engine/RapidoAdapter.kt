@@ -398,6 +398,11 @@ object RapidoAdapter {
      * Pure text-based extraction for unit testing and reliable order parsing.
      */
     fun extractOrderDataFromTexts(texts: List<String>): RapidoOrderData {
+        val isBundleOrder = texts.any {
+            it.contains("Bundle Order", ignoreCase = true) ||
+            it.contains("Bundled Order", ignoreCase = true)
+        }
+
         // 1. Fare extraction:
         // - Base fare = FIRST ₹[number] found only
         // - Tip = FIRST +₹[number] immediately after base only
@@ -450,6 +455,30 @@ object RapidoAdapter {
             }
         }
 
+        // Bundle cards contain a top combined fare plus per-order component fares.
+        // Example: ₹104+ with Order 1 ₹52 and Order 2 ₹52+.
+        // Use the highest visible ₹ amount as the bundle total; never sum all component fares.
+        if (isBundleOrder) {
+            val bundleFareAmounts = mutableListOf<Float>()
+            for (i in texts.indices) {
+                if (isEarningsContext(texts, i)) continue
+                val bundleMatcher = rupeeMatcher.matcher(texts[i])
+                while (bundleMatcher.find()) {
+                    bundleMatcher.group(1)?.toFloatOrNull()?.let {
+                        if (it > 0f) bundleFareAmounts.add(it)
+                    }
+                }
+            }
+
+            val bundleTotal = bundleFareAmounts.maxOrNull()
+            if (bundleTotal != null && bundleTotal > 0f) {
+                baseFare = bundleTotal
+                tipAmount = 0f
+                totalFare = bundleTotal
+                logI(TAG, "📦 Bundle fare parsed from top/maximum visible amount: ₹$bundleTotal")
+            }
+        }
+
         // 2. Distance extraction: pattern [0-9.]+\s*km (excluding speed indicators)
         val kmMatches = mutableListOf<Pair<Int, Float>>()
         for (i in texts.indices) {
@@ -480,7 +509,7 @@ object RapidoAdapter {
 
         // BUG 1: If pickup distance is "Nearby" or unknown, do NOT assign a numeric value to pickupKm!
         val hasNearby = texts.any { it.trim().equals("nearby", ignoreCase = true) || it.contains("nearby", ignoreCase = true) }
-        val pickupKm: Float?
+        var pickupKm: Float?
         var dropKm: Float?
 
         if (explicitDropKm != null) {
@@ -498,6 +527,30 @@ object RapidoAdapter {
 
         if (dropKm == null) {
             dropKm = OrderDataExtractor.extractDropDistance(texts, texts.joinToString(" "))
+        }
+
+        // A Bundle Order can contain multiple pickup/trip distance pairs:
+        // Order 1 pickup, Order 1 trip, Order 2 pickup, Order 2 trip...
+        // Use the largest pickup and largest trip/drop so a distant bundled leg
+        // cannot be accidentally accepted because only Order 1 was inspected.
+        if (isBundleOrder && kmMatches.size >= 2) {
+            val bundleDistances = kmMatches.map { it.second }
+            val bundlePickup =
+                bundleDistances.filterIndexed { index, _ -> index % 2 == 0 }.maxOrNull()
+            val bundleDrop =
+                bundleDistances.filterIndexed { index, _ -> index % 2 == 1 }.maxOrNull()
+
+            if (bundlePickup != null && bundlePickup > 0f) {
+                pickupKm = bundlePickup
+            }
+            if (bundleDrop != null && bundleDrop > 0f) {
+                dropKm = bundleDrop
+            }
+
+            logI(
+                TAG,
+                "📦 Bundle distances parsed: maxPickup=${pickupKm}km, maxDrop=${dropKm}km"
+            )
         }
 
         // 3. Address extraction:

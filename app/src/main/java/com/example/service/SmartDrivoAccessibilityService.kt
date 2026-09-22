@@ -2084,6 +2084,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             platform = Platform.RAPIDO,
             vehicleType = detectedVehicle,
             bookingId = bookingId,
+            isBundledOrder = OrderDataExtractor.isBundleOrder(fullText),
             detectionTimeMs = System.currentTimeMillis(),
             baseFare = if (orderData.baseFare > 0f) orderData.baseFare else fare,
             tipAmount = orderData.tipAmount
@@ -2515,6 +2516,24 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             logOrderEvent(candidate, OrderStatus.IGNORED, "Rapido disabled in settings")
             Log.i(TAG, "📋 Rapido order logged as IGNORED: Rapido platform disabled in settings")
             resetProcessing()
+            return
+        }
+        // Bundle Order gate:
+        // OFF + Auto-Reject ON  -> automatically skip/reject using existing safe Rapido reject logic.
+        // OFF + Auto-Reject OFF -> leave order for manual action.
+        // ON -> continue normally through GO TO / NO GO / Fare / Distance / Both filters.
+        if (candidate.isBundledOrder && !settings.isBundleOrderEnabled) {
+            handleRapidoFilterFailure(
+                root = root,
+                candidate = candidate,
+                recordId = recordId,
+                reason = "Bundle Order OFF",
+                defaultStatus = OrderStatus.IGNORED
+            )
+            Log.i(
+                TAG,
+                "Bundle Order OFF - Auto-Reject setting decides skip or manual action"
+            )
             return
         }
 
