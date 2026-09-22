@@ -221,7 +221,9 @@ class FloatingOverlayService : Service() {
         }
 
         val displayWidth = resources.displayMetrics.widthPixels
-        val cardWidth = (displayWidth - dpToPx(24)).coerceAtLeast(dpToPx(280))
+        val cardWidth = (displayWidth * 0.82f).toInt()
+            .coerceAtLeast(dpToPx(280))
+            .coerceAtMost(displayWidth - dpToPx(20))
 
         val params = WindowManager.LayoutParams(
             cardWidth,
@@ -231,139 +233,249 @@ class FloatingOverlayService : Service() {
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = dpToPx(12)
-            y = dpToPx(72)
+                        gravity = Gravity.TOP or Gravity.START
+            x = ((displayWidth - cardWidth) / 2).coerceAtLeast(0)
+            y = dpToPx(78)
             windowAnimations = android.R.style.Animation_Translucent
-        }
-
-        // Main card with rounded corners and light blue background (#E3F2FD)
+        }        // Compact white floating card
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val bgDrawable = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = dpToPxf(18f)
-                setColor(0xFFE3F2FD.toInt()) // Background color & Card/body background: #E3F2FD (light blue)
-                setStroke(dpToPx(1), 0xFF90CAF9.toInt()) // Soft matching light blue border
+                cornerRadius = dpToPxf(16f)
+                setColor(Color.WHITE)
+                setStroke(dpToPx(1), 0xFF90CAF9.toInt())
             }
             background = bgDrawable
             elevation = dpToPxf(10f)
             clipToOutline = true
-            setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(14))
+            setPadding(0, 0, 0, dpToPx(8))
         }
-
-        // --- 1. TOP HEADER: Platform Badge, 5-Minute Countdown Timer, and 'X' Button ---
+        // --- COMPACT BLUE HEADER ---
         val headerView = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            val headerBgDrawable = GradientDrawable().apply {
+
+            background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = dpToPxf(10f)
-                setColor(0xFF1E88E5.toInt()) // Header background: #1E88E5 (blue)
+                setColor(0xFF1E88E5.toInt())
             }
-            background = headerBgDrawable
-            setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
+
+            setPadding(dpToPx(10), dpToPx(4), dpToPx(7), dpToPx(4))
+
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
+                dpToPx(46)
             )
         }
 
-        // Platform badge (e.g. "✅ RAPIDO ACCEPTED")
         val platformBadge = TextView(this).apply {
             text = "✅ ${style.displayName} ACCEPTED"
-            setTextColor(Color.WHITE) // Text color on header: white
-            textSize = 13.5f
+            setTextColor(Color.WHITE)
+            textSize = 12.5f
             typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER_VERTICAL
+            setSingleLine(true)
         }
         headerView.addView(platformBadge)
 
-        // Flexible spacing
-        val spacer = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(0, 0, 1f)
-        }
-        headerView.addView(spacer)
+        headerView.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+        })
 
-        // 5-Minute Countdown Timer Badge (e.g. "⏳ 05:00")
         val countdownBadge = TextView(this).apply {
             text = "⏳ 05:00"
-            setTextColor(Color.WHITE) // Text color on header: white
-            textSize = 13.5f
+            setTextColor(Color.WHITE)
+            textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(dpToPx(8), dpToPx(4), dpToPx(8), dpToPx(4))
+
+            background = GradientDrawable().apply {
+                cornerRadius = dpToPxf(18f)
+                setColor(0x22FFFFFF)
+            }
         }
         headerView.addView(countdownBadge)
 
-        // Close 'X' Dismiss Button (touch target >= 48dp x 48dp via padding)
         val closeBtn = TextView(this).apply {
             text = "✕"
-            setTextColor(Color.WHITE) // Text color on header: white
-            textSize = 18f
+            setTextColor(Color.WHITE)
+            textSize = 16f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             contentDescription = "Dismiss Overlay"
-            val btnSize = dpToPx(48)
-            layoutParams = LinearLayout.LayoutParams(btnSize, btnSize).apply {
-                marginStart = dpToPx(6)
+
+            val size = dpToPx(38)
+            layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                marginStart = dpToPx(5)
             }
+
             val circle = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(0x22FFFFFF)
             }
-            background = RippleDrawable(ColorStateList.valueOf(0x44FFFFFF), circle, null)
+
+            background = RippleDrawable(
+                ColorStateList.valueOf(0x44FFFFFF),
+                circle,
+                null
+            )
+
             isClickable = true
             isFocusable = true
-            setOnClickListener {
-                removeCurrentOverlay()
-            }
+            setOnClickListener { removeCurrentOverlay() }
         }
+
         headerView.addView(closeBtn)
         card.addView(headerView)
+        // --- COMPACT FARE / PICKUP / DROP ---
+        val metrics = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dpToPx(10), dpToPx(8), dpToPx(10), dpToPx(6))
+        }
 
-        // --- 2. CARD CONTENT: Summary Line (Fare, Pickup km, Drop km) & Drop Full Address ---
-        val fareText = if (amount > 0) "₹${amount.toInt()}" else "₹ --"
-        val pickupText = if (pickupDist > 0) String.format(Locale.US, "Pickup %.1f km", pickupDist) else "Pickup Nearby"
-        val dropDistText = if (dropDist > 0) String.format(Locale.US, "Drop %.1f km", dropDist) else "Drop N/A"
-        val summaryLine = "$fareText | $pickupText | $dropDistText"
+        fun metricItem(
+            icon: String,
+            label: String,
+            value: String,
+            weight: Float
+        ): LinearLayout {
+            return LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
 
-        val summaryTv = TextView(this).apply {
-            text = summaryLine
-            setTextColor(0xFF111827.toInt())
-            textSize = 14.5f
-            typeface = Typeface.DEFAULT_BOLD
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = dpToPx(8)
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    weight
+                )
+
+                addView(TextView(this@FloatingOverlayService).apply {
+                    text = icon
+                    textSize = 16f
+                    gravity = Gravity.CENTER
+                    setPadding(0, 0, dpToPx(5), 0)
+                })
+
+                addView(LinearLayout(this@FloatingOverlayService).apply {
+                    orientation = LinearLayout.VERTICAL
+
+                    if(label.isNotBlank()){
+                        addView(TextView(this@FloatingOverlayService).apply {
+                            text = label
+                            textSize = 10f
+                            setTextColor(0xFF4B5563.toInt())
+                            setSingleLine(true)
+                        })
+                    }
+
+                    addView(TextView(this@FloatingOverlayService).apply {
+                        text = value
+                        textSize = if(label.isBlank()) 16f else 13.5f
+                        typeface = Typeface.DEFAULT_BOLD
+                        setTextColor(0xFF111827.toInt())
+                        setSingleLine(true)
+                    })
+                })
             }
         }
-        card.addView(summaryTv)
+
+        val fareValue =
+            if(amount > 0f) "₹${amount.toInt()}" else "₹--"
+
+        val pickupValue =
+            if(pickupDist > 0f)
+                String.format(Locale.US, "%.1f km", pickupDist)
+            else
+                "Nearby"
+
+        val dropValue =
+            if(dropDist > 0f)
+                String.format(Locale.US, "%.1f km", dropDist)
+            else
+                "N/A"
+
+        metrics.addView(metricItem("₹", "", fareValue, 0.9f))
+
+        fun dividerView(): View {
+            return View(this).apply {
+                setBackgroundColor(0xFFE5E7EB.toInt())
+
+                layoutParams = LinearLayout.LayoutParams(
+                    dpToPx(1),
+                    dpToPx(34)
+                ).apply {
+                    marginStart = dpToPx(4)
+                    marginEnd = dpToPx(4)
+                }
+            }
+        }
+
+        metrics.addView(dividerView())
+        metrics.addView(metricItem("📍", "Pickup", pickupValue, 1.1f))
+        metrics.addView(dividerView())
+        metrics.addView(metricItem("🔴", "Drop", dropValue, 1.05f))
+
+        card.addView(metrics)
+
+        card.addView(View(this).apply {
+            setBackgroundColor(0xFFE5E7EB.toInt())
+
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dpToPx(1)
+            ).apply {
+                marginStart = dpToPx(10)
+                marginEnd = dpToPx(10)
+            }
+        })
 
         val cleanDrop = drop.trim()
-        val dropAddressFormatted = when {
+
+        val finalDrop = when {
             cleanDrop.isBlank() ||
-            cleanDrop.equals("Drop Location", ignoreCase = true) ||
-            cleanDrop.equals("Detected Drop Location", ignoreCase = true) -> "Drop: Location unavailable"
-            cleanDrop.startsWith("Drop:", ignoreCase = true) -> cleanDrop
-            cleanDrop.startsWith("Drop -", ignoreCase = true) -> "Drop: " + cleanDrop.substring(6).trim()
-            else -> "Drop: $cleanDrop"
+            cleanDrop.equals("Drop Location", true) ||
+            cleanDrop.equals("Detected Drop Location", true) ->
+                "Location unavailable"
+
+            cleanDrop.startsWith("Drop:", true) ->
+                cleanDrop.substringAfter(":").trim()
+
+            cleanDrop.startsWith("Drop -", true) ->
+                cleanDrop.substringAfter("-").trim()
+
+            else -> cleanDrop
         }
 
-        val dropAddressTv = TextView(this).apply {
-            text = dropAddressFormatted
-            setTextColor(0xFF374151.toInt())
-            textSize = 13f
-            maxLines = 4
-            ellipsize = TextUtils.TruncateAt.END
-            setLineSpacing(dpToPxf(2f), 1.15f)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = dpToPx(4)
-            }
+        val addressRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+            setPadding(dpToPx(10), dpToPx(7), dpToPx(10), dpToPx(2))
         }
-        card.addView(dropAddressTv)
+
+        addressRow.addView(TextView(this).apply {
+            text = "📍"
+            textSize = 14f
+            setPadding(0, 0, dpToPx(6), 0)
+        })
+
+        addressRow.addView(TextView(this).apply {
+            text = "Drop: $finalDrop"
+            textSize = 11.5f
+            setTextColor(0xFF374151.toInt())
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+        })
+
+        card.addView(addressRow)
 
         // Drag listener so driver can reposition the card anywhere on screen (both X and Y axes)
         var initialX = 0
