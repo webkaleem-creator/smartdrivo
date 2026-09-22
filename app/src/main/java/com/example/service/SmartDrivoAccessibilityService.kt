@@ -86,16 +86,17 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                 val enabled = intent.getBooleanExtra("enabled", preferencesManager.isAutoAcceptEnabled)
                 Log.i(TAG, "Broadcast received: TOGGLE_CHANGED enabled=$enabled")
                 prefs.reloadAppSettings()
-                val notificationText = if (enabled) {
-                    "✅ SmartDrivo Active — Monitoring orders"
+
+                if (enabled) {
+                    showActiveServiceNotification()
+
+                    Log.i(
+                        TAG,
+                        "▶️ MASTER ON — SmartDrivo monitoring enabled"
+                    )
                 } else {
-                    "⏸️ SmartDrivo Paused"
+                    pauseAllLiveOrderWork()
                 }
-                NotificationHelper.updateNotification(
-                    context = applicationContext,
-                    title = "SmartDrivo Active",
-                    text = notificationText
-                )
             }
         }
     }
@@ -153,6 +154,101 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             return isRapidoPackage(pkg) || isUberPackage(pkg) || isOlaPackage(pkg)
         }
     }
+    private fun showActiveServiceNotification() {
+        try {
+            NotificationHelper.createNotificationChannel(applicationContext)
+
+            val notification = NotificationHelper.buildNotification(
+                context = applicationContext,
+                title = "SmartDrivo Active",
+                text = "✅ SmartDrivo Active — Monitoring orders"
+            )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NotificationHelper.NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(
+                    NotificationHelper.NOTIFICATION_ID,
+                    notification
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(
+                TAG,
+                "Unable to show SmartDrivo active notification: ${e.message}"
+            )
+        }
+    }
+
+    private fun hideActiveServiceNotification() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (_: Exception) {
+        }
+
+        try {
+            val notificationManager =
+                getSystemService(Context.NOTIFICATION_SERVICE) as?
+                    android.app.NotificationManager
+
+            notificationManager?.cancel(
+                NotificationHelper.NOTIFICATION_ID
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * Auto Accept is SmartDrivo's MASTER switch.
+     *
+     * OFF:
+     * - no live order reading
+     * - no new history
+     * - no filters / area rules
+     * - no Auto Reject
+     * - no Bundle processing
+     * - no automatic clicks
+     * - no accepted-order overlay
+     * - no persistent SmartDrivo notification
+     */
+    private fun pauseAllLiveOrderWork() {
+        handler.removeCallbacks(processingTimeoutRunnable)
+
+        isProcessing = false
+        isRapidoEventProcessing = false
+        activeRapidoPopupOrderId = null
+        activeOrderRecordIds.clear()
+
+        isClickInProgress = false
+        recentClickTimestamps.clear()
+        clickBlockedUntilTimestamp = 0L
+
+        try {
+            stopService(
+                Intent(
+                    applicationContext,
+                    FloatingOverlayService::class.java
+                )
+            )
+        } catch (_: Exception) {
+        }
+
+        hideActiveServiceNotification()
+
+        Log.i(
+            TAG,
+            "⏸️ MASTER OFF — all SmartDrivo live order work stopped"
+        )
+    }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -173,27 +269,13 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             Log.e(TAG, "Error registering toggleReceiver: ${e.message}")
         }
 
-        // 2. In onServiceConnected(): call startForeground(1, notification)
-        val initialNotification = NotificationHelper.buildNotification(
-            context = applicationContext,
-            title = "SmartDrivo Active",
-            text = "✅ Auto-accepting orders..."
-        )
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                    NotificationHelper.NOTIFICATION_ID,
-                    initialNotification,
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-                )
-            } else {
-                startForeground(NotificationHelper.NOTIFICATION_ID, initialNotification)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error starting foreground service: ${e.message}")
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
-            notificationManager?.notify(NotificationHelper.NOTIFICATION_ID, initialNotification)
+                // Auto Accept controls active SmartDrivo monitoring.
+        if (preferencesManager.isAutoAcceptEnabled) {
+            showActiveServiceNotification()
+        } else {
+            hideActiveServiceNotification()
         }
+
 
         // Configure accessibility serviceInfo to ensure TYPE_WINDOW_CONTENT_CHANGED & TYPE_WINDOW_STATE_CHANGED are delivered
         try {
@@ -214,19 +296,14 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             Log.e(TAG, "Error configuring serviceInfo: ${e.message}")
         }
 
-        // 4. Update notification text dynamically based on Auto-Accept setting
+                // Auto Accept is the MASTER runtime switch.
         serviceScope.launch {
             prefs.appSettings.collectLatest { settings ->
-                val notificationText = if (settings.isAutoAcceptActive) {
-                    "✅ SmartDrivo Active — Monitoring orders"
+                if (settings.isAutoAcceptActive) {
+                    showActiveServiceNotification()
                 } else {
-                    "⏸️ SmartDrivo Paused"
+                    pauseAllLiveOrderWork()
                 }
-                NotificationHelper.updateNotification(
-                    context = applicationContext,
-                    title = "SmartDrivo Active",
-                    text = notificationText
-                )
             }
         }
     }
@@ -260,6 +337,14 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
      */
     @Synchronized
     private fun canExecuteClick(): Boolean {
+        if (!preferencesManager.isAutoAcceptEnabled) {
+            Log.d(
+                TAG,
+                "⏸️ Click blocked because Auto Accept master is OFF"
+            )
+            return false
+        }
+
         val now = System.currentTimeMillis()
 
         // Fix 4: Check if waiting after rate limit penalty (5-second wait)
@@ -664,6 +749,11 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
 
+        // MASTER OFF: do not read ride-app accessibility events.
+        if (!preferencesManager.isAutoAcceptEnabled) {
+            return
+        }
+
         if (event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
             return
         }
@@ -752,6 +842,11 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         eventSource: AccessibilityNodeInfo?,
         eventType: Int = 0
     ) {
+        // MASTER OFF: cancel queued ride processing.
+        if (!preferencesManager.isAutoAcceptEnabled) {
+            resetProcessing()
+            return
+        }
         // 1. Check Uber window or event for com.ubercab
         val isUberPkg = isUberPackage(eventPkg)
         if (isUberPkg) {
@@ -1256,6 +1351,11 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     }
 
     private fun onUberAccepted(candidate: RideCandidate, timesClicked: Int = 1) {
+        // MASTER OFF: ignore Uber completion.
+        if (!preferencesManager.isAutoAcceptEnabled) {
+            resetProcessing()
+            return
+        }
         val now = System.currentTimeMillis()
         val dateStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(now))
         val timeStr = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(now))
@@ -1802,6 +1902,11 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
      * Add to order history with platform = "Ola" and update stats via prefs.addOrderHistory()
      */
     private fun onOlaAccepted(candidate: RideCandidate, timesClicked: Int = 1) {
+        // MASTER OFF: ignore Ola completion.
+        if (!preferencesManager.isAutoAcceptEnabled) {
+            resetProcessing()
+            return
+        }
         setOlaState(OlaState.OLA_ACCEPTED)
 
         val now = System.currentTimeMillis()
@@ -4346,6 +4451,11 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     }
 
     private fun onOrderDetectedFast(candidate: RideCandidate): String {
+        // MASTER OFF: do not create new history records.
+        if (!preferencesManager.isAutoAcceptEnabled) {
+            return candidate.bookingId?.ifBlank { null } ?: "PAUSED"
+        }
+
         val tempId = candidate.bookingId?.ifBlank { null } ?: rideHistoryRepository.generateFingerprint(candidate)
         activeOrderRecordIds[candidate.platform] = tempId
 
@@ -4374,6 +4484,10 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         matchedGoTo: String = "",
         matchedNoGo: String = ""
     ) {
+        // MASTER OFF: no history decision update.
+        if (!preferencesManager.isAutoAcceptEnabled) {
+            return
+        }
         serviceScope.launch(Dispatchers.IO) {
             try {
                 // onOrderDetectedFast inserts PROCESSING asynchronously.
@@ -4419,6 +4533,10 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         }
     }
     private fun onOrderActionAttemptFast(recordId: String) {
+        // MASTER OFF: no action attempt history.
+        if (!preferencesManager.isAutoAcceptEnabled) {
+            return
+        }
         serviceScope.launch(Dispatchers.IO) {
             try {
                 rideHistoryRepository.onOrderActionAttempt(recordId)
@@ -4441,6 +4559,10 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         clickMethod: String = "",
         errorMsg: String? = null
     ) {
+        // MASTER OFF: ignore action completion.
+        if (!preferencesManager.isAutoAcceptEnabled) {
+            return
+        }
         val now = System.currentTimeMillis()
         val totalLatency = if (candidate.detectionTimeMs > 0L) (now - candidate.detectionTimeMs).coerceAtLeast(1L) else 100L
         val actionLatency = (now - candidate.timestamp).coerceAtLeast(15L)
@@ -4490,6 +4612,10 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         clickTimeMs: Long = System.currentTimeMillis(),
         timesClicked: Int = 1
     ) {
+        // MASTER OFF: legacy history logger disabled.
+        if (!preferencesManager.isAutoAcceptEnabled) {
+            return
+        }
         val now = System.currentTimeMillis()
         val effectiveReason = when (status) {
             OrderStatus.ACCEPTED -> {
