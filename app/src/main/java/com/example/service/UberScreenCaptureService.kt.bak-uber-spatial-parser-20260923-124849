@@ -1,0 +1,778 @@
+package com.example.service
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
+import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
+import android.media.ImageReader
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.IBinder
+import android.util.Log
+import androidx.core.app.NotificationCompat
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+
+/**
+ * User-approved Uber Trip Radar OCR.
+ *
+ * - Screen capture starts only after Android consent.
+ * - OCR is fully on-device.
+ * - No screenshots are uploaded.
+ * - No automatic click occurs in this service.
+ */
+class UberScreenCaptureService : Service() {
+
+    companion object {
+
+        private const val TAG =
+            "UberScreenCapture"
+
+        private const val CHANNEL_ID =
+            "uber_screen_capture"
+
+        private const val NOTIFICATION_ID =
+            9204
+
+
+        const val ACTION_START_CAPTURE =
+            "com.aistudio.smartdrivo.START_UBER_SCREEN_CAPTURE"
+
+        const val ACTION_STOP_CAPTURE =
+            "com.aistudio.smartdrivo.STOP_UBER_SCREEN_CAPTURE"
+
+
+        const val EXTRA_RESULT_CODE =
+            "media_projection_result_code"
+
+        const val EXTRA_RESULT_DATA =
+            "media_projection_result_data"
+
+
+        @Volatile
+        var isRunning: Boolean = false
+            private set
+    }
+
+
+    private var mediaProjection:
+        MediaProjection? = null
+
+    private var virtualDisplay:
+        VirtualDisplay? = null
+
+    private var imageReader:
+        ImageReader? = null
+
+
+    private var captureThread:
+        HandlerThread? = null
+
+    private var captureHandler:
+        Handler? = null
+
+
+    private val recognizer =
+        TextRecognition.getClient(
+            TextRecognizerOptions.DEFAULT_OPTIONS
+        )
+
+
+    @Volatile
+    private var ocrBusy =
+        false
+
+
+    @Volatile
+    private var lastOcrAt =
+        0L
+
+    @Volatile
+    private var lastUberCardDumpAt =
+        0L
+
+
+    override fun onCreate() {
+
+        super.onCreate()
+
+        createNotificationChannel()
+
+        captureThread =
+            HandlerThread(
+                "SmartDrivoUberOCR"
+            ).apply {
+                start()
+            }
+
+        captureHandler =
+            Handler(
+                captureThread!!.looper
+            )
+    }
+
+
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int
+    ): Int {
+
+        when (intent?.action) {
+
+            ACTION_START_CAPTURE -> {
+
+                startCaptureForeground()
+
+                val resultCode =
+                    intent.getIntExtra(
+                        EXTRA_RESULT_CODE,
+                        Int.MIN_VALUE
+                    )
+
+
+                val resultData =
+                    if (
+                        Build.VERSION.SDK_INT >=
+                        Build.VERSION_CODES.TIRAMISU
+                    ) {
+
+                        intent.getParcelableExtra(
+                            EXTRA_RESULT_DATA,
+                            Intent::class.java
+                        )
+
+                    } else {
+
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra<Intent>(
+                            EXTRA_RESULT_DATA
+                        )
+                    }
+
+
+                if (
+                    resultCode ==
+                    Int.MIN_VALUE ||
+                    resultData == null
+                ) {
+
+                    Log.e(
+                        TAG,
+                        "Missing MediaProjection consent result"
+                    )
+
+                    stopCaptureService()
+
+                    return START_NOT_STICKY
+                }
+
+
+                try {
+
+                    startProjection(
+                        resultCode,
+                        resultData
+                    )
+
+                } catch (e: Exception) {
+
+                    Log.e(
+                        TAG,
+                        "Unable to start MediaProjection",
+                        e
+                    )
+
+                    stopCaptureService()
+                }
+            }
+
+
+            ACTION_STOP_CAPTURE -> {
+                stopCaptureService()
+            }
+        }
+
+
+        return START_NOT_STICKY
+    }
+
+
+    private fun startCaptureForeground() {
+
+        val notification: Notification =
+            NotificationCompat.Builder(
+                this,
+                CHANNEL_ID
+            )
+                .setSmallIcon(
+                    android.R.drawable.ic_menu_view
+                )
+                .setContentTitle(
+                    "SmartDrivo Uber Scanner"
+                )
+                .setContentText(
+                    "Uber order recognition active"
+                )
+                .setOngoing(true)
+                .setSilent(true)
+                .build()
+
+
+        if (
+            Build.VERSION.SDK_INT >=
+            Build.VERSION_CODES.Q
+        ) {
+
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+
+        } else {
+
+            startForeground(
+                NOTIFICATION_ID,
+                notification
+            )
+        }
+    }
+
+
+    private fun startProjection(
+        resultCode: Int,
+        resultData: Intent
+    ) {
+
+        if (isRunning) {
+            return
+        }
+
+
+        val manager =
+            getSystemService(
+                MediaProjectionManager::class.java
+            )
+
+
+        val projection =
+            manager.getMediaProjection(
+                resultCode,
+                resultData
+            ) ?: run {
+
+                Log.e(
+                    TAG,
+                    "MediaProjection unavailable"
+                )
+
+                stopCaptureService()
+                return
+            }
+
+
+        mediaProjection =
+            projection
+
+
+        projection.registerCallback(
+            object :
+                MediaProjection.Callback() {
+
+                override fun onStop() {
+
+                    Log.i(
+                        TAG,
+                        "MediaProjection stopped by user/system"
+                    )
+
+                    releaseCaptureResources(
+                        stopProjection = false
+                    )
+
+                    stopSelf()
+                }
+            },
+            captureHandler
+        )
+
+
+        val metrics =
+            resources.displayMetrics
+
+
+        val width =
+            metrics.widthPixels
+
+        val height =
+            metrics.heightPixels
+
+        val density =
+            metrics.densityDpi
+
+
+        imageReader =
+            ImageReader.newInstance(
+                width,
+                height,
+                PixelFormat.RGBA_8888,
+                2
+            )
+
+
+        imageReader
+            ?.setOnImageAvailableListener(
+                { reader ->
+                    processLatestImage(
+                        reader,
+                        width,
+                        height
+                    )
+                },
+                captureHandler
+            )
+
+
+        virtualDisplay =
+            projection.createVirtualDisplay(
+                "SmartDrivoUberOCR",
+                width,
+                height,
+                density,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader?.surface,
+                null,
+                captureHandler
+            )
+
+
+        isRunning =
+            true
+
+
+        Log.i(
+            TAG,
+            "UBER OCR STARTED width=$width height=$height density=$density"
+        )
+    }
+
+
+    private fun processLatestImage(
+        reader: ImageReader,
+        screenWidth: Int,
+        screenHeight: Int
+    ) {
+
+        val now =
+            System.currentTimeMillis()
+
+
+        // OCR about twice per second.
+        if (
+            ocrBusy ||
+            now - lastOcrAt < 500L
+        ) {
+
+            reader.acquireLatestImage()
+                ?.close()
+
+            return
+        }
+
+
+        val image =
+            reader.acquireLatestImage()
+                ?: return
+
+
+        try {
+
+            val plane =
+                image.planes.firstOrNull()
+                    ?: return
+
+
+            val buffer =
+                plane.buffer
+
+
+            val pixelStride =
+                plane.pixelStride
+
+            val rowStride =
+                plane.rowStride
+
+            val rowPadding =
+                rowStride -
+                    pixelStride *
+                    screenWidth
+
+
+            val bitmapWidth =
+                screenWidth +
+                    rowPadding /
+                    pixelStride
+
+
+            val padded =
+                Bitmap.createBitmap(
+                    bitmapWidth,
+                    screenHeight,
+                    Bitmap.Config.ARGB_8888
+                )
+
+
+            padded.copyPixelsFromBuffer(
+                buffer
+            )
+
+
+            val bitmap =
+                Bitmap.createBitmap(
+                    padded,
+                    0,
+                    0,
+                    screenWidth,
+                    screenHeight
+                )
+
+
+            if (padded !== bitmap) {
+                padded.recycle()
+            }
+
+
+            lastOcrAt =
+                now
+
+            ocrBusy =
+                true
+
+
+            val input =
+                InputImage.fromBitmap(
+                    bitmap,
+                    0
+                )
+
+
+            recognizer
+                .process(input)
+                .addOnSuccessListener {
+                    result ->
+
+                    val text =
+                        result.text
+                            .trim()
+
+
+                    if (text.isNotBlank()) {
+
+                        val compact =
+                            text
+                                .replace(
+                                    "\r",
+                                    " "
+                                )
+                                .replace(
+                                    "\n",
+                                    " | "
+                                )
+
+
+                        Log.i(
+                            TAG,
+                            "UBER OCR TEXT: $compact"
+                        )
+
+
+                        val important =
+                            result.textBlocks
+                                .flatMap {
+                                    block ->
+                                    block.lines
+                                }
+                                .filter {
+                                    line ->
+
+                                    val value =
+                                        line.text
+
+
+                                    value.contains("₹") ||
+                                        value.contains(
+                                            "km",
+                                            ignoreCase = true
+                                        ) ||
+                                        value.contains(
+                                            "Match",
+                                            ignoreCase = true
+                                        ) ||
+                                        value.contains(
+                                            "Accept",
+                                            ignoreCase = true
+                                        )
+                                }
+
+
+
+                        // UBER_CARD_LINE_DEBUG_V1
+                        //
+                        // When Match is visible, dump all OCR lines with
+                        // screen bounds once every ~1.5 seconds.
+                        // This lets us identify fare even when ML Kit
+                        // reads "₹72" as only "72".
+                        val hasMatch =
+                            result.textBlocks
+                                .flatMap { it.lines }
+                                .any {
+                                    it.text.contains(
+                                        "Match",
+                                        ignoreCase = true
+                                    )
+                                }
+
+                        if (hasMatch) {
+
+                            val debugNow =
+                                System.currentTimeMillis()
+
+                            if (
+                                debugNow -
+                                    lastUberCardDumpAt >
+                                1500L
+                            ) {
+
+                                lastUberCardDumpAt =
+                                    debugNow
+
+                                Log.i(
+                                    TAG,
+                                    "UBER CARD LINES START"
+                                )
+
+                                result.textBlocks
+                                    .flatMap { it.lines }
+                                    .forEach { line ->
+
+                                        Log.i(
+                                            TAG,
+                                            "UBER CARD LINE: '${line.text}' bounds=${line.boundingBox}"
+                                        )
+                                    }
+
+                                Log.i(
+                                    TAG,
+                                    "UBER CARD LINES END"
+                                )
+                            }
+                        }
+                        important.forEach {
+                            line ->
+
+                            Log.i(
+                                TAG,
+                                "UBER OCR HIT: '${line.text}' bounds=${line.boundingBox}"
+                            )
+                        }
+
+                    } else {
+
+                        Log.d(
+                            TAG,
+                            "UBER OCR: frame contained no recognized text"
+                        )
+                    }
+                }
+                .addOnFailureListener {
+                    error ->
+
+                    Log.w(
+                        TAG,
+                        "UBER OCR failed: ${error.message}"
+                    )
+                }
+                .addOnCompleteListener {
+
+                    try {
+                        bitmap.recycle()
+                    } catch (_: Exception) {
+                    }
+
+                    ocrBusy =
+                        false
+                }
+
+
+        } catch (e: Exception) {
+
+            ocrBusy =
+                false
+
+            Log.w(
+                TAG,
+                "Frame conversion failed: ${e.message}"
+            )
+
+        } finally {
+
+            try {
+                image.close()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+
+    private fun createNotificationChannel() {
+
+        if (
+            Build.VERSION.SDK_INT >=
+            Build.VERSION_CODES.O
+        ) {
+
+            val manager =
+                getSystemService(
+                    NotificationManager::class.java
+                )
+
+
+            val channel =
+                NotificationChannel(
+                    CHANNEL_ID,
+                    "Uber Screen Recognition",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+
+                    description =
+                        "User-approved on-device Uber order recognition"
+
+                    setSound(
+                        null,
+                        null
+                    )
+                }
+
+
+            manager.createNotificationChannel(
+                channel
+            )
+        }
+    }
+
+
+    private fun releaseCaptureResources(
+        stopProjection: Boolean
+    ) {
+
+        isRunning =
+            false
+
+
+        try {
+
+            imageReader
+                ?.setOnImageAvailableListener(
+                    null,
+                    null
+                )
+
+        } catch (_: Exception) {
+        }
+
+
+        try {
+            virtualDisplay?.release()
+        } catch (_: Exception) {
+        }
+
+        virtualDisplay =
+            null
+
+
+        try {
+            imageReader?.close()
+        } catch (_: Exception) {
+        }
+
+        imageReader =
+            null
+
+
+        if (stopProjection) {
+
+            try {
+                mediaProjection?.stop()
+            } catch (_: Exception) {
+            }
+        }
+
+
+        mediaProjection =
+            null
+    }
+
+
+    private fun stopCaptureService() {
+
+        releaseCaptureResources(
+            stopProjection = true
+        )
+
+
+        try {
+            stopForeground(
+                STOP_FOREGROUND_REMOVE
+            )
+        } catch (_: Exception) {
+        }
+
+
+        stopSelf()
+
+
+        Log.i(
+            TAG,
+            "UBER OCR STOPPED"
+        )
+    }
+
+
+    override fun onDestroy() {
+
+        releaseCaptureResources(
+            stopProjection = true
+        )
+
+
+        try {
+            recognizer.close()
+        } catch (_: Exception) {
+        }
+
+
+        try {
+            captureThread?.quitSafely()
+        } catch (_: Exception) {
+        }
+
+
+        super.onDestroy()
+    }
+
+
+    override fun onBind(
+        intent: Intent?
+    ): IBinder? = null
+}

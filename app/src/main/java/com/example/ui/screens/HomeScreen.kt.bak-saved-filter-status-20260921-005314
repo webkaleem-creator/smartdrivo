@@ -149,18 +149,8 @@ fun HomeScreen(
     }
 val goToAreas by prefs.goToAreas.collectAsState()
     val noGoAreas by prefs.noGoAreas.collectAsState()
-    val activeGoToCount by remember(goToAreas) {
-        derivedStateOf {
-            goToAreas.count { it.isEnabled && it.keywords.isNotEmpty() }
-        }
-    }
-    val activeNoGoCount by remember(noGoAreas) {
-        derivedStateOf {
-            noGoAreas.count { it.isEnabled && it.keywords.isNotEmpty() }
-        }
-    }
-    val activeAreaFilterCount by remember(activeGoToCount, activeNoGoCount) {
-        derivedStateOf { activeGoToCount + activeNoGoCount }
+    val activeAreaFilterCount by remember(goToAreas, noGoAreas) {
+        derivedStateOf { goToAreas.size + noGoAreas.size }
     }
 
     var showSimulateDialog by remember { mutableStateOf(false) }
@@ -265,20 +255,6 @@ val goToAreas by prefs.goToAreas.collectAsState()
 
     // Fare and Distance inputs with rememberSaveable and hasUnsavedChanges
     var hasUnsavedChanges by rememberSaveable { mutableStateOf(false) }
-
-    // The tab the driver is currently editing. It does NOT become active
-    // until Save Settings is pressed.
-    var pendingFilterMode by remember { mutableStateOf(settings.filterMode) }
-
-    // Last successfully saved mode. Used only for the Enabled/Disabled badge.
-    var savedFilterMode by remember { mutableStateOf(settings.filterMode) }
-
-    LaunchedEffect(settings.filterMode) {
-        savedFilterMode = settings.filterMode
-        if (!hasUnsavedChanges) {
-            pendingFilterMode = settings.filterMode
-        }
-    }
 
     var minFareInput by rememberSaveable {
         mutableStateOf(if (settings.minFare > 0) {
@@ -646,123 +622,6 @@ val goToAreas by prefs.goToAreas.collectAsState()
                     }
                 }
             }
-            // AUTO REJECT NO CONDITION MATCH — SEPARATE CARD
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        // AUTO_REJECT_CARD_CLICK_V2
-                        .clickable {
-                            val enabled = !settings.isAutoRejectBadFaresEnabled
-                            prefs.saveAppSettings(
-                                settings.copy(
-                                    isAutoRejectBadFaresEnabled = enabled
-                                )
-                            )
-
-                            coroutineScope.launch {
-                                snackbarHostState.showSnackbar(
-                                    if (enabled)
-                                        "Auto Reject No Condition Match ON"
-                                    else
-                                        "Auto Reject No Condition Match OFF - Manual mode"
-                                )
-                            }
-                        },
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (settings.isAutoRejectBadFaresEnabled)
-                            Color(0xFFFFF1F2)
-                        else
-                            Color.White
-                    ),
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(
-                        1.dp,
-                        if (settings.isAutoRejectBadFaresEnabled)
-                            Color(0xFFFCA5A5)
-                        else
-                            CardBorderDefault
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .background(
-                                    if (settings.isAutoRejectBadFaresEnabled)
-                                        Color(0xFFFFE4E6)
-                                    else
-                                        Color(0xFFF1F5F9),
-                                    RoundedCornerShape(8.dp)
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "⛔",
-                                fontSize = 15.sp
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(9.dp))
-
-                        Column(
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = "Auto Reject No Condition Match",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextDarkPrimary,
-                                maxLines = 1
-                            )
-
-                            Text(
-                                text = if (settings.isAutoRejectBadFaresEnabled)
-                                    "ACTIVE • Skip orders that fail saved conditions"
-                                else
-                                    "INACTIVE • Manual action",
-                                fontSize = 10.sp,
-                                color = if (settings.isAutoRejectBadFaresEnabled)
-                                    StatusInactiveRed
-                                else
-                                    TextDarkSecondary,
-                                maxLines = 1
-                            )
-                        }
-
-                        Switch(
-                            checked = settings.isAutoRejectBadFaresEnabled,
-                            onCheckedChange = { enabled ->
-                                prefs.saveAppSettings(
-                                    settings.copy(
-                                        isAutoRejectBadFaresEnabled = enabled
-                                    )
-                                )
-
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar(
-                                        if (enabled)
-                                            "Auto Reject No Condition Match ON ✓"
-                                        else
-                                            "Auto Reject No Condition Match OFF • Manual mode"
-                                    )
-                                }
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = StatusInactiveRed,
-                                uncheckedThumbColor = Color.White,
-                                uncheckedTrackColor = Color(0xFFBDBDBD)
-                            )
-                        )
-                    }
-                }
-            }
             // 3. Filter Mode buttons + Fare Criteria card + Distance Criteria card
             item {
                 Card(
@@ -799,7 +658,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 FilterMode.values().forEach { mode ->
-                                    val isSelected = pendingFilterMode == mode
+                                    val isSelected = settings.filterMode == mode
                                     val selectedBg = when (mode) {
                                         FilterMode.FARE_ONLY -> BluePrimary
                                         FilterMode.DISTANCE_ONLY -> BlueSecondary
@@ -812,10 +671,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                             .clip(RoundedCornerShape(9.dp))
                                             .background(if (isSelected) selectedBg else Color.Transparent)
                                             .clickable {
-                                                if (pendingFilterMode != mode) {
-                                                    pendingFilterMode = mode
-                                                    hasUnsavedChanges = true
-                                                }
+                                                prefs.saveAppSettings(settings.copy(filterMode = mode))
                                             }
                                             .padding(vertical = 7.dp, horizontal = 4.dp),
                                         contentAlignment = Alignment.Center
@@ -834,23 +690,6 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                     }
                                 }
                             }
-                        }
-
-                        // Badge status belongs to the CURRENTLY VIEWED mode.
-                        // Fare/Distance keep their own saved status.
-                        // BOTH is one combined mode: until BOTH itself is saved,
-                        // both criteria must show Disabled; after saving BOTH,
-                        // both criteria show Enabled.
-                        val fareIsEnabled = when (pendingFilterMode) {
-                            FilterMode.FARE_ONLY -> savedFilterMode == FilterMode.FARE_ONLY
-                            FilterMode.DISTANCE_ONLY -> false
-                            FilterMode.BOTH -> savedFilterMode == FilterMode.BOTH
-                        }
-
-                        val distanceIsEnabled = when (pendingFilterMode) {
-                            FilterMode.FARE_ONLY -> false
-                            FilterMode.DISTANCE_ONLY -> savedFilterMode == FilterMode.DISTANCE_ONLY
-                            FilterMode.BOTH -> savedFilterMode == FilterMode.BOTH
                         }
 
                         val fareSection: @Composable () -> Unit = {
@@ -897,10 +736,10 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                     }
 
                                     Text(
-                                        text = if (fareIsEnabled) "Enabled" else "Disabled",
+                                        text = "Enabled",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
-                                        color = if (fareIsEnabled) StatusActiveGreen else StatusInactiveRed
+                                        color = StatusActiveGreen
                                     )
                                 }
 
@@ -959,8 +798,8 @@ val goToAreas by prefs.goToAreas.collectAsState()
 
                         val distanceSection: @Composable () -> Unit = {
                             Column(
-                                modifier = Modifier.padding(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -985,55 +824,19 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                             )
                                         }
 
-                                        Column {
-                                            Column {
-                                            Text(
-                                                text = "Distance Criteria",
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 14.sp,
-                                                color = TextDarkPrimary
-                                            )
-
-                                            val savedPickupText =
-                                                if (settings.maxPickupDistanceKm % 1f == 0f) {
-                                                    settings.maxPickupDistanceKm.toInt().toString()
-                                                } else {
-                                                    settings.maxPickupDistanceKm.toString()
-                                                }
-
-                                            val savedDropText =
-                                                if (settings.maxDropDistanceKm % 1f == 0f) {
-                                                    settings.maxDropDistanceKm.toInt().toString()
-                                                } else {
-                                                    settings.maxDropDistanceKm.toString()
-                                                }
-
-                                            Text(
-                                                text = "Accept ₹$savedPickupText km to ₹$savedDropText km",
-                                                fontSize = 12.sp,
-                                                color = BluePrimary
-                                            )
-                                        }
-
-                                            val savedPickupText =
-                                                if (settings.maxPickupDistanceKm % 1f == 0f)
-                                                    settings.maxPickupDistanceKm.toInt().toString()
-                                                else
-                                                    settings.maxPickupDistanceKm.toString()
-
-                                            val savedDropText =
-                                                if (settings.maxDropDistanceKm % 1f == 0f)
-                                                    settings.maxDropDistanceKm.toInt().toString()
-                                                else
-                                                    settings.maxDropDistanceKm.toString()
-                                        }
+                                        Text(
+                                            text = "Distance Criteria",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = TextDarkPrimary
+                                        )
                                     }
 
                                     Text(
-                                        text = if (distanceIsEnabled) "Enabled" else "Disabled",
+                                        text = "Enabled",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
-                                        color = if (distanceIsEnabled) StatusActiveGreen else StatusInactiveRed
+                                        color = StatusActiveGreen
                                     )
                                 }
 
@@ -1090,7 +893,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
                             }
                         }
 
-                        when (pendingFilterMode) {
+                        when (settings.filterMode) {
                             FilterMode.FARE_ONLY -> {
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
@@ -1142,26 +945,15 @@ val goToAreas by prefs.goToAreas.collectAsState()
 
                                 prefs.saveAppSettings(
                                     settings.copy(
-                                        filterMode = pendingFilterMode,
                                         minFare = minF,
                                         maxFare = maxF,
                                         maxPickupDistanceKm = maxP,
                                         maxDropDistanceKm = maxD
                                     )
                                 )
-                                savedFilterMode = pendingFilterMode
                                 hasUnsavedChanges = false
-
-                                val savedModeLabel = when (pendingFilterMode) {
-                                    FilterMode.FARE_ONLY -> "Fare"
-                                    FilterMode.DISTANCE_ONLY -> "Distance"
-                                    FilterMode.BOTH -> "Both"
-                                }
-
                                 coroutineScope.launch {
-                                    snackbarHostState.showSnackbar(
-                                        "$savedModeLabel settings saved ✓"
-                                    )
+                                    snackbarHostState.showSnackbar("Saved ✓")
                                 }
                             },
                             enabled = true,
@@ -1264,9 +1056,9 @@ val goToAreas by prefs.goToAreas.collectAsState()
 
                             Text(
                                 text = if (activeAreaFilterCount > 0)
-                                    "$activeGoToCount Go-To • $activeNoGoCount No-Go"
+                                    "${goToAreas.size} Go-To • ${noGoAreas.size} No-Go"
                                 else
-                                    "No active area rules",
+                                    "Configure GO TO & NO GO groups",
                                 color = TextDarkSecondary,
                                 fontSize = 11.sp,
                                 maxLines = 1

@@ -649,26 +649,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
             // AUTO REJECT NO CONDITION MATCH — SEPARATE CARD
             item {
                 Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        // AUTO_REJECT_CARD_CLICK_V2
-                        .clickable {
-                            val enabled = !settings.isAutoRejectBadFaresEnabled
-                            prefs.saveAppSettings(
-                                settings.copy(
-                                    isAutoRejectBadFaresEnabled = enabled
-                                )
-                            )
-
-                            coroutineScope.launch {
-                                snackbarHostState.showSnackbar(
-                                    if (enabled)
-                                        "Auto Reject No Condition Match ON"
-                                    else
-                                        "Auto Reject No Condition Match OFF - Manual mode"
-                                )
-                            }
-                        },
+                    modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
                         containerColor = if (settings.isAutoRejectBadFaresEnabled)
                             Color(0xFFFFF1F2)
@@ -959,8 +940,8 @@ val goToAreas by prefs.goToAreas.collectAsState()
 
                         val distanceSection: @Composable () -> Unit = {
                             Column(
-                                modifier = Modifier.padding(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -1026,6 +1007,12 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                                     settings.maxDropDistanceKm.toInt().toString()
                                                 else
                                                     settings.maxDropDistanceKm.toString()
+
+                                            Text(
+                                                text = "Accept pickup up to $savedPickupText km • drop up to $savedDropText km",
+                                                fontSize = 12.sp,
+                                                color = BluePrimary
+                                            )
                                         }
                                     }
 
