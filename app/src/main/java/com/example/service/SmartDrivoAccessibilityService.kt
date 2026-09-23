@@ -64,6 +64,233 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    // ==========================================================
+    // UBER_WINDOW_POLLER_V3
+    //
+    // Uber Trip Radar may appear in another AccessibilityWindow
+    // without sending a useful accessibility event.
+    //
+    // While Auto Accept is ON, scan Uber windows directly.
+    // Existing genuine-order guard prevents Uber Home screen
+    // from entering History or triggering clicks.
+    // ==========================================================
+
+    @Volatile
+    private var uberWindowPollingActive = false
+
+    private val uberWindowPollRunnable =
+        object : Runnable {
+
+            override fun run() {
+
+                if (!uberWindowPollingActive) {
+                    return
+                }
+
+                try {
+
+                    if (
+                        ::prefs.isInitialized &&
+                        preferencesManager.isAutoAcceptEnabled &&
+                        !isProcessing &&
+                        !isClickInProgress &&
+                        System.currentTimeMillis() >= clickBlockedUntilTimestamp
+                    ) {
+
+                        val settings =
+                            prefs.loadSettings()
+
+                        if (settings.uberEnabled) {
+
+                            val uberRoot =
+                                findBestUberOrderRoot(null)
+
+                            if (uberRoot != null) {
+
+                                val pkg =
+                                    uberRoot.packageName
+                                        ?.toString()
+                                        .orEmpty()
+
+                                if (isUberPackage(pkg)) {
+
+                                    Log.d(
+                                        TAG,
+                                        "UBER POLL V3: Uber window detected pkg=$pkg"
+                                    )
+                                    val treeNow =
+                                        System.currentTimeMillis()
+
+                                    if (
+                                        treeNow -
+                                            lastUberTreeDumpAt >
+                                        1500L
+                                    ) {
+                                        lastUberTreeDumpAt =
+                                            treeNow
+
+                                        Log.i(
+                                            TAG,
+                                            "UBER TREE START pkg=$pkg rootClass=${uberRoot.className} children=${uberRoot.childCount}"
+                                        )
+
+                                        dumpUberNodeTree(
+                                            uberRoot
+                                        )
+
+                                        Log.i(
+                                            TAG,
+                                            "UBER TREE END"
+                                        )
+                                    }
+                                    // UBER_NODE_DIAGNOSTIC_V1
+                                    try {
+                                        val debugTexts =
+                                            UberAdapter.collectAllNodeTexts(
+                                                uberRoot
+                                            )
+
+                                        Log.i(
+                                            TAG,
+                                            "UBER NODE DEBUG: pkg=$pkg textCount=${debugTexts.size} texts=" +
+                                                debugTexts.take(40).joinToString(" || ")
+                                        )
+
+                                        val clickableDebug =
+                                            RapidoAdapter.collectClickableButtonSummaries(
+                                                uberRoot
+                                            )
+
+                                        Log.i(
+                                            TAG,
+                                            "UBER NODE DEBUG BUTTONS: $clickableDebug"
+                                        )
+
+                                    } catch (e: Exception) {
+                                        Log.w(
+                                            TAG,
+                                            "UBER NODE DEBUG error: ${e.message}"
+                                        )
+                                    }
+
+                                    handleUberOrder(
+                                        uberRoot,
+                                        pkg.ifBlank {
+                                            "com.ubercab.driver"
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                } catch (e: Exception) {
+
+                    Log.w(
+                        TAG,
+                        "UBER POLL V3 error: ${e.message}"
+                    )
+
+                } finally {
+
+                    if (uberWindowPollingActive) {
+                        handler.postDelayed(
+                            this,
+                            150L
+                        )
+                    }
+                }
+            }
+        }
+
+
+    // UBER_TREE_DIAGNOSTIC_V1
+    private var lastUberTreeDumpAt = 0L
+
+    private fun dumpUberNodeTree(
+        node: AccessibilityNodeInfo?,
+        depth: Int = 0,
+        maxDepth: Int = 12
+    ) {
+        if (node == null || depth > maxDepth) return
+
+        try {
+            val bounds = Rect()
+            node.getBoundsInScreen(bounds)
+
+            Log.i(
+                TAG,
+                "UBER TREE ${"  ".repeat(depth)}" +
+                    "class=${node.className} " +
+                    "id=${node.viewIdResourceName} " +
+                    "text='${node.text}' " +
+                    "desc='${node.contentDescription}' " +
+                    "clickable=${node.isClickable} " +
+                    "enabled=${node.isEnabled} " +
+                    "visible=${node.isVisibleToUser} " +
+                    "children=${node.childCount} " +
+                    "bounds=$bounds"
+            )
+
+            for (i in 0 until node.childCount) {
+                dumpUberNodeTree(
+                    node.getChild(i),
+                    depth + 1,
+                    maxDepth
+                )
+            }
+
+        } catch (e: Exception) {
+            Log.w(TAG, "UBER TREE error: ${e.message}")
+        }
+    }
+
+    private fun startUberWindowPolling() {
+
+        if (
+            !::prefs.isInitialized ||
+            !preferencesManager.isAutoAcceptEnabled
+        ) {
+            return
+        }
+
+        if (uberWindowPollingActive) {
+            return
+        }
+
+        uberWindowPollingActive = true
+
+        handler.removeCallbacks(
+            uberWindowPollRunnable
+        )
+
+        handler.post(
+            uberWindowPollRunnable
+        )
+
+        Log.i(
+            TAG,
+            "UBER POLL V3: STARTED"
+        )
+    }
+
+
+    private fun stopUberWindowPolling() {
+
+        uberWindowPollingActive = false
+
+        handler.removeCallbacks(
+            uberWindowPollRunnable
+        )
+
+        Log.i(
+            TAG,
+            "UBER POLL V3: STOPPED"
+        )
+    }
+
+
+    // ==========================================================
     @Volatile
     private var lastHandledTimestamp = 0L
     @Volatile
@@ -88,6 +315,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                 prefs.reloadAppSettings()
 
                 if (enabled) {
+                    startUberWindowPolling()
                     showActiveServiceNotification()
 
                     Log.i(
@@ -100,6 +328,19 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             }
         }
     }
+    private val uberOcrReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == UberScreenCaptureService.ACTION_OCR_OFFER) {
+                handleUberOcrOffer(intent)
+            }
+        }
+    }
+
+    @Volatile
+    private var lastUberOcrOfferKey: String? = null
+
+    @Volatile
+    private var lastUberOcrOfferHandledAt: Long = 0L
 
     private val processingTimeoutRunnable = Runnable {
         if (isProcessing) {
@@ -221,6 +462,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
      * - no persistent SmartDrivo notification
      */
     private fun pauseAllLiveOrderWork() {
+        stopUberWindowPolling()
         handler.removeCallbacks(processingTimeoutRunnable)
 
         isProcessing = false
@@ -255,6 +497,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         prefs = PreferencesManager.getInstance(applicationContext)
         repository = FirebaseRepository(applicationContext, prefs)
         isServiceRunning = true
+        startUberWindowPolling()
         Log.i(TAG, "SmartDrivo Accessibility Service Connected")
 
         try {
@@ -267,6 +510,18 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             )
         } catch (e: Exception) {
             Log.e(TAG, "Error registering toggleReceiver: ${e.message}")
+        }
+        try {
+            val ocrFilter = IntentFilter(UberScreenCaptureService.ACTION_OCR_OFFER)
+            ContextCompat.registerReceiver(
+                this,
+                uberOcrReceiver,
+                ocrFilter,
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            Log.i(TAG, "UBER OCR bridge receiver registered")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error registering Uber OCR bridge receiver: ${e.message}")
         }
 
                 // Auto Accept controls active SmartDrivo monitoring.
@@ -301,6 +556,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             prefs.appSettings.collectLatest { settings ->
                 if (settings.isAutoAcceptActive) {
                     showActiveServiceNotification()
+                    startUberWindowPolling()
                 } else {
                     pauseAllLiveOrderWork()
                 }
@@ -762,11 +1018,30 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         val activeRootPkg = rootInActiveWindow?.packageName?.toString().orEmpty().trim().lowercase()
         val selfPkg = packageName.trim().lowercase()
 
+        // Uber Trip Radar may appear as a separate accessibility
+        // window while SmartDrivo remains the foreground activity.
+        val hasUberAccessibilityWindow =
+            try {
+                windows.any { window ->
+                    val pkg =
+                        window.root
+                            ?.packageName
+                            ?.toString()
+                            .orEmpty()
+                            .trim()
+                            .lowercase()
+
+                    isUberPackage(pkg)
+                }
+            } catch (_: Exception) {
+                false
+            }
+
         val isRapido = eventPkg == "com.rapido.passenger" ||
                 isRapidoPackage(eventPkg) ||
                 activeRootPkg == "com.rapido.passenger" ||
                 isRapidoPackage(activeRootPkg)
-        val isUber = isUberPackage(eventPkg) || isUberPackage(activeRootPkg)
+        val isUber = isUberPackage(eventPkg) || isUberPackage(activeRootPkg) || hasUberAccessibilityWindow
         val isOla = isOlaPackage(eventPkg) || isOlaPackage(activeRootPkg)
 
         if (!isRapido && !isUber && !isOla) {
@@ -774,9 +1049,21 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         }
         // Keep the old lag protection while the user is inside SmartDrivo,
         // but DO NOT ignore a real Rapido accessibility event.
-        val isDirectRapidoEvent = isRapidoPackage(eventPkg)
+        val isDirectRapidoEvent =
+            isRapidoPackage(eventPkg)
 
-        if (activeRootPkg == selfPkg && !isDirectRapidoEvent) {
+        val isDirectUberEvent =
+            isUberPackage(eventPkg)
+
+        // Rapido/Uber can show a genuine incoming ride popup while
+        // SmartDrivo itself is still the foreground/root window.
+        // Never drop those direct accessibility events.
+        if (
+            activeRootPkg == selfPkg &&
+            !isDirectRapidoEvent &&
+            !isDirectUberEvent &&
+            !hasUberAccessibilityWindow
+        ) {
             return
         }
 
@@ -847,19 +1134,188 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             resetProcessing()
             return
         }
-        // 1. Check Uber window or event for com.ubercab
-        val isUberPkg = isUberPackage(eventPkg)
+        // 1. UBER OVERLAY-SAFE DETECTION
+        //
+        // Uber Trip Radar can appear over SmartDrivo or another
+        // foreground screen. Do not trust rootInActiveWindow alone.
+        // Scan eventSource + active root + all accessibility windows
+        // and choose the Uber window containing the real offer.
+        val isUberPkg =
+            isUberPackage(eventPkg)
+
         if (isUberPkg) {
-            if (!preferencesManager.isAutoAcceptEnabled) return
-            if (isClickInProgress) return
-            if (System.currentTimeMillis() < clickBlockedUntilTimestamp) return
-            val root = rootInActiveWindow ?: eventSource
-            val rootPkg = root?.packageName?.toString().orEmpty().trim().lowercase()
-            if (root != null && isUberPackage(rootPkg)) {
-                handleUberOrder(root, eventPkg)
+
+            if (!preferencesManager.isAutoAcceptEnabled) {
                 return
             }
+
+            if (isClickInProgress) {
+                return
+            }
+
+            if (
+                System.currentTimeMillis() <
+                clickBlockedUntilTimestamp
+            ) {
+                return
+            }
+
+
+            val uberRoots =
+                mutableListOf<AccessibilityNodeInfo>()
+
+            val seenUberRoots =
+                mutableSetOf<Int>()
+
+
+            fun addUberRoot(
+                node: AccessibilityNodeInfo?
+            ) {
+                if (node == null) return
+
+                val top =
+                    getTopRootNode(node)
+                        ?: node
+
+                val pkg =
+                    top.packageName
+                        ?.toString()
+                        .orEmpty()
+                        .trim()
+                        .lowercase()
+
+                if (!isUberPackage(pkg)) {
+                    return
+                }
+
+                val key =
+                    System.identityHashCode(top)
+
+                if (seenUberRoots.add(key)) {
+                    uberRoots.add(top)
+                }
+            }
+
+
+            // Direct Uber popup/event source FIRST.
+            addUberRoot(eventSource)
+
+            // Active window may be Uber or SmartDrivo.
+            addUberRoot(rootInActiveWindow)
+
+
+            // Uber Trip Radar may exist in another interactive window.
+            try {
+                windows.forEach { window ->
+                    addUberRoot(window.root)
+                }
+            } catch (e: Exception) {
+                Log.w(
+                    TAG,
+                    "UBER: accessibility window scan failed: ${e.message}"
+                )
+            }
+
+
+            var bestUberRoot:
+                AccessibilityNodeInfo? = null
+
+            var bestScore =
+                Int.MIN_VALUE
+
+
+            for (candidateRoot in uberRoots) {
+
+                val texts =
+                    UberAdapter.collectAllNodeTexts(
+                        candidateRoot
+                    )
+
+                val fullText =
+                    texts.joinToString(" \n ")
+
+                val lower =
+                    fullText.lowercase()
+
+                var score = 0
+
+
+                if (fullText.contains("₹")) {
+                    score += 100
+                }
+
+
+                val kmCount =
+                    Regex(
+                        """(?i)\b[0-9]+(?:\.[0-9]+)?\s*km\b"""
+                    )
+                        .findAll(fullText)
+                        .count()
+
+
+                if (kmCount >= 2) {
+                    score += 100
+                } else if (kmCount == 1) {
+                    score += 20
+                }
+
+
+                if (
+                    lower.contains("match") ||
+                    lower.contains("accept") ||
+                    lower.contains("confirm")
+                ) {
+                    score += 100
+                }
+
+
+                if (
+                    lower.contains("cash payment")
+                ) {
+                    score += 20
+                }
+
+
+                Log.d(
+                    TAG,
+                    "UBER window score=$score " +
+                        "pkg=${candidateRoot.packageName} " +
+                        "kmCount=$kmCount"
+                )
+
+
+                if (score > bestScore) {
+                    bestScore = score
+                    bestUberRoot =
+                        candidateRoot
+                }
+            }
+
+
+            if (bestUberRoot != null) {
+
+                Log.i(
+                    TAG,
+                    "UBER REAL WINDOW SELECTED: " +
+                        "score=$bestScore " +
+                        "roots=${uberRoots.size}"
+                )
+
+                handleUberOrder(
+                    bestUberRoot,
+                    eventPkg
+                )
+
+                return
+            }
+
+
+            Log.d(
+                TAG,
+                "UBER event received but no Uber accessibility root found"
+            )
         }
+
 
         // 2. Check Rapido: overlay-safe detection.
         // A real order popup can appear over Rapido Home, SmartDrivo,
@@ -1039,18 +1495,571 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         processedUberBookingIds[bookingId] = System.currentTimeMillis()
     }
 
+    // Uber Trip Radar can be two-stage:
+    // Match -> same ride appears again -> final Accept.
+    private var pendingUberMatchRideKey: String? = null
+    private var pendingUberMatchUntilMs: Long = 0L
+
+    private fun isPendingUberMatchStage(
+        candidate: RideCandidate
+    ): Boolean {
+        val now = System.currentTimeMillis()
+
+        if (now > pendingUberMatchUntilMs) {
+            pendingUberMatchRideKey = null
+            pendingUberMatchUntilMs = 0L
+            return false
+        }
+
+        return pendingUberMatchRideKey ==
+            getOrderIdentifier(candidate)
+    }
+
+    private fun markPendingUberMatchStage(
+        candidate: RideCandidate
+    ) {
+        pendingUberMatchRideKey =
+            getOrderIdentifier(candidate)
+
+        pendingUberMatchUntilMs =
+            System.currentTimeMillis() + 3500L
+
+        Log.i(
+            TAG,
+            "UBER: Two-stage Match registered; waiting for final Accept"
+        )
+    }
+
+    private fun clearPendingUberMatchStage(
+        candidate: RideCandidate
+    ) {
+        if (
+            pendingUberMatchRideKey ==
+            getOrderIdentifier(candidate)
+        ) {
+            pendingUberMatchRideKey = null
+            pendingUberMatchUntilMs = 0L
+        }
+    }
+
     /**
      * Handles candidate detection and order processing for com.ubercab
      * All delays capped at 150ms max.
      */
+    // =========================================================
+    // UBER LIVE ORDER WINDOW DETECTION
+    //
+    // Uber can render the incoming offer card in a different
+    // accessibility window from rootInActiveWindow.
+    // Scan every Uber window and select the one containing the
+    // actual fare + distance + Match/Accept offer.
+    // =========================================================
+
+    private fun isUberPackageValue(
+        packageName: String?
+    ): Boolean {
+        val pkg =
+            packageName
+                ?.trim()
+                ?.lowercase()
+                .orEmpty()
+
+        return pkg == "com.ubercab" ||
+            pkg == "com.ubercab.driver" ||
+            pkg.startsWith("com.ubercab.")
+    }
+
+
+    private fun scoreUberOrderRoot(
+        root: AccessibilityNodeInfo
+    ): Int {
+
+        val rootPkg =
+            root.packageName
+                ?.toString()
+                .orEmpty()
+
+        if (!isUberPackageValue(rootPkg)) {
+            return Int.MIN_VALUE
+        }
+
+        val texts =
+            UberAdapter.collectAllNodeTexts(root)
+
+        val fullText =
+            texts.joinToString(" \n ")
+
+        val lower =
+            fullText.lowercase()
+
+        var score = 0
+
+        if (fullText.contains("₹")) {
+            score += 50
+        }
+
+        val kmCount =
+            Regex(
+                """\b[0-9]+(?:\.[0-9]+)?\s*km\b""",
+                RegexOption.IGNORE_CASE
+            )
+                .findAll(fullText)
+                .count()
+
+        if (kmCount >= 2) {
+            score += 40
+        } else if (kmCount == 1) {
+            score += 15
+        }
+
+        if (
+            lower.contains("match") ||
+            lower.contains("accept")
+        ) {
+            score += 60
+        }
+
+        if (
+            lower.contains("cash payment") ||
+            lower.contains("pickup") ||
+            lower.contains("trip")
+        ) {
+            score += 10
+        }
+
+        return score
+    }
+
+
+    private fun findBestUberOrderRoot(
+        fallback: AccessibilityNodeInfo?
+    ): AccessibilityNodeInfo? {
+
+        val candidates =
+            mutableListOf<AccessibilityNodeInfo>()
+
+        val seen =
+            mutableSetOf<Int>()
+
+        fun addCandidate(
+            node: AccessibilityNodeInfo?
+        ) {
+            if (node == null) return
+
+            val pkg =
+                node.packageName
+                    ?.toString()
+                    .orEmpty()
+
+            if (!isUberPackageValue(pkg)) {
+                return
+            }
+
+            val key =
+                System.identityHashCode(node)
+
+            if (seen.add(key)) {
+                candidates.add(node)
+            }
+        }
+
+
+        addCandidate(fallback)
+        addCandidate(rootInActiveWindow)
+
+
+        // Important: scan ALL interactive Uber windows.
+        try {
+            for (window in windows) {
+                addCandidate(window.root)
+            }
+        } catch (e: Exception) {
+            Log.w(
+                TAG,
+                "UBER: Unable to enumerate accessibility windows: ${e.message}"
+            )
+        }
+
+
+        if (candidates.isEmpty()) {
+            return fallback
+        }
+
+
+        var best:
+            AccessibilityNodeInfo? = null
+
+        var bestScore =
+            Int.MIN_VALUE
+
+
+        for (candidateRoot in candidates) {
+
+            val score =
+                scoreUberOrderRoot(
+                    candidateRoot
+                )
+
+            Log.d(
+                TAG,
+                "UBER: window candidate score=$score " +
+                    "pkg=${candidateRoot.packageName}"
+            )
+
+            if (score > bestScore) {
+                bestScore = score
+                best = candidateRoot
+            }
+        }
+
+
+        Log.i(
+            TAG,
+            "UBER: selected live order window score=$bestScore " +
+                "from ${candidates.size} Uber window(s)"
+        )
+
+
+        return best ?: fallback
+    }
+
+
+    /**
+     * Current Uber UI sometimes exposes the large bottom
+     * Match/Accept control as clickable but without readable text.
+     *
+     * We allow it ONLY when:
+     * - root belongs to Uber
+     * - screen contains a real fare
+     * - screen contains at least two km values
+     * - control is visible/enabled/clickable
+     * - control is a large bottom action button
+     *
+     * No arbitrary screen-coordinate fallback.
+     */
+    private fun isUberBottomActionGeometry(
+        node: AccessibilityNodeInfo,
+        root: AccessibilityNodeInfo?
+    ): Boolean {
+
+        if (root == null) {
+            return false
+        }
+
+        val rootPkg =
+            root.packageName
+                ?.toString()
+                .orEmpty()
+
+        val nodePkg =
+            node.packageName
+                ?.toString()
+                .orEmpty()
+
+
+        if (
+            !isUberPackageValue(rootPkg) &&
+            !isUberPackageValue(nodePkg)
+        ) {
+            return false
+        }
+
+
+        val texts =
+            UberAdapter.collectAllNodeTexts(root)
+
+        val fullText =
+            texts.joinToString(" \n ")
+
+
+        // Real Uber offer signature.
+        if (!fullText.contains("₹")) {
+            return false
+        }
+
+
+        val kmCount =
+            Regex(
+                """\b[0-9]+(?:\.[0-9]+)?\s*km\b""",
+                RegexOption.IGNORE_CASE
+            )
+                .findAll(fullText)
+                .count()
+
+
+        if (kmCount < 2) {
+            return false
+        }
+
+
+        if (
+            !node.isVisibleToUser ||
+            !node.isEnabled ||
+            !node.isClickable
+        ) {
+            return false
+        }
+
+
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+
+        if (
+            bounds.isEmpty ||
+            bounds.width() <= 0 ||
+            bounds.height() <= 0
+        ) {
+            return false
+        }
+
+
+        val metrics =
+            resources.displayMetrics
+
+        val screenWidth =
+            metrics.widthPixels
+
+        val screenHeight =
+            metrics.heightPixels
+
+        val density =
+            metrics.density
+
+
+        val minHeight =
+            (44f * density).toInt()
+
+        val maxHeight =
+            (130f * density).toInt()
+
+
+        val wideEnough =
+            bounds.width() >=
+                (screenWidth * 0.55f)
+
+        val actionHeight =
+            bounds.height() in
+                minHeight..maxHeight
+
+        val lowerScreen =
+            bounds.centerY() >=
+                (screenHeight * 0.55f)
+
+
+        return wideEnough &&
+            actionHeight &&
+            lowerScreen
+    }
+
+
+    private fun findUberBottomActionNode(
+        root: AccessibilityNodeInfo
+    ): AccessibilityNodeInfo? {
+
+        val matches =
+            mutableListOf<
+                Pair<
+                    AccessibilityNodeInfo,
+                    Int
+                >
+            >()
+
+
+        fun walk(
+            node: AccessibilityNodeInfo?
+        ) {
+            if (node == null) return
+
+
+            if (
+                isUberBottomActionGeometry(
+                    node,
+                    root
+                )
+            ) {
+
+                val bounds = Rect()
+                node.getBoundsInScreen(bounds)
+
+                // Prefer the lowest and widest control.
+                val score =
+                    bounds.centerY() +
+                        bounds.width()
+
+                matches.add(
+                    node to score
+                )
+            }
+
+
+            for (
+                i in
+                0 until node.childCount
+            ) {
+                walk(
+                    node.getChild(i)
+                )
+            }
+        }
+
+
+        walk(root)
+
+
+        val best =
+            matches.maxByOrNull {
+                it.second
+            }?.first
+
+
+        if (best != null) {
+
+            val bounds = Rect()
+            best.getBoundsInScreen(bounds)
+
+            Log.i(
+                TAG,
+                "UBER: verified bottom Match/Accept action found " +
+                    "bounds=$bounds text='${best.text}' " +
+                    "desc='${best.contentDescription}'"
+            )
+        }
+
+
+        return best
+    }
+
+    /**
+     * Prevent Uber Home / Online / Earnings screens from being
+     * recorded as ride offers.
+     *
+     * A genuine Uber offer must contain:
+     * - valid fare
+     * - valid pickup distance
+     * - valid trip/drop distance
+     * - at least 2 visible km values
+     * - fare currency
+     * - verified Match / Accept action
+     *
+     * IMPORTANT:
+     * History must NOT be created before this check passes.
+     */
+    private fun isGenuineUberLiveOffer(
+        root: AccessibilityNodeInfo,
+        candidate: RideCandidate
+    ): Boolean {
+
+        val fare =
+            candidate.fare
+
+        val pickupKm =
+            candidate.pickupDistKm
+
+        val tripKm =
+            candidate.dropDistKm
+
+
+        if (
+            fare == null ||
+            fare <= 0f ||
+            pickupKm == null ||
+            pickupKm <= 0f ||
+            tripKm == null ||
+            tripKm <= 0f
+        ) {
+
+            Log.d(
+                TAG,
+                "UBER HOME GUARD: missing real ride values " +
+                    "fare=$fare pickup=$pickupKm trip=$tripKm"
+            )
+
+            return false
+        }
+
+
+        val texts =
+            UberAdapter.collectAllNodeTexts(root)
+
+        val fullText =
+            texts.joinToString(" \n ")
+
+
+        val hasFareCurrency =
+            fullText.contains("₹") ||
+            Regex(
+                """(?i)\b(?:rs\.?|inr)\s*[0-9]+(?:\.[0-9]+)?"""
+            ).containsMatchIn(fullText)
+
+
+        val kmCount =
+            Regex(
+                """(?i)\b[0-9]+(?:\.[0-9]+)?\s*km\b"""
+            )
+                .findAll(fullText)
+                .count()
+
+
+        if (
+            !hasFareCurrency ||
+            kmCount < 2
+        ) {
+
+            Log.d(
+                TAG,
+                "UBER HOME GUARD: not an offer card " +
+                    "(currency=$hasFareCurrency, kmCount=$kmCount)"
+            )
+
+            return false
+        }
+
+
+        // Match/Accept accessibility text is intentionally NOT
+        // required here. On some Uber builds the visible Match
+        // button is drawn but its text is not exposed to
+        // Accessibility.
+        //
+        // Fare + pickup KM + trip KM already form the genuine
+        // live-order signature. Actual clicking is separately
+        // protected below.
+        Log.i(
+            TAG,
+            "UBER REAL OFFER VERIFIED: ₹$fare | " +
+                "Pickup=$pickupKm km | Trip=$tripKm km"
+        )
+
+        return true
+    }
+
     private fun handleUberOrder(root: AccessibilityNodeInfo?, pkgName: String = "com.ubercab") {
         if (root == null) return
+
+        
+        // UBER_OCR_SINGLE_SOURCE_V2
+        // Current Uber Trip Radar offer values are more reliable from the
+        // user-approved OCR capture than from Accessibility text.
+        // While OCR capture is active, do NOT create a second Uber candidate
+        // from Accessibility. This prevents duplicate/wrong rows such as
+        // â‚¹7229 while OCR correctly recorded â‚¹229.
+        if (UberScreenCaptureService.isRunning) {
+            Log.d(
+                TAG,
+                "UBER ACCESSIBILITY OFFER PATH SKIPPED: OCR is authoritative"
+            )
+            return
+        }
+// Uber offer cards may be in a separate accessibility
+        // window. Resolve the actual live order window first.
+        val uberOrderRoot =
+            findBestUberOrderRoot(root)
+                ?: root
 
         if (!preferencesManager.isAutoAcceptEnabled) {
             // FIX 3: If toggle was OFF when order appeared, mark order as "IGNORED" not "REJECTED"
             try {
                 val candidate = OrderDataExtractor.extractCandidate(
-                    root = root,
+                    root = uberOrderRoot,
                     platform = Platform.UBER,
                     defaultVehicle = prefs.userProfile.value.vehicleType
                 )
@@ -1079,7 +2088,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
         // Fix 1 - SpeculativeClick:
         // Blind speculative click is disabled to guarantee safe button detection with no blind wrong taps.
-        val actualPkg = root.packageName?.toString() ?: pkgName
+        val actualPkg = uberOrderRoot.packageName?.toString() ?: pkgName
 
         // Debounce: 150ms max
         val now = System.currentTimeMillis()
@@ -1094,20 +2103,67 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             Log.d("SmartDrivo", "Uber window found ($pkgName)! Scanning candidate nodes...")
 
             val candidate = OrderDataExtractor.extractCandidate(
-                root = root,
+                root = uberOrderRoot,
                 platform = Platform.UBER,
                 defaultVehicle = prefs.userProfile.value.vehicleType
             )
 
-            // Duplicate protection for Uber
-            if (candidate.bookingId != null && isDuplicateUberBookingId(candidate.bookingId)) {
-                Log.i(TAG, "⏭️ Duplicate Uber order skipped (bookingId: ${candidate.bookingId})")
-                RideDiagnosticsManager.recordDuplicateEvent(candidate.bookingId!!)
+            // =====================================================
+            // UBER FALSE SCREEN BLOCKED
+            //
+            // Do NOT create History from Uber Home/Online screen.
+            // Only continue when a real live offer is verified.
+            // =====================================================
+            if (
+                !isGenuineUberLiveOffer(
+                    uberOrderRoot,
+                    candidate
+                )
+            ) {
+
+                Log.i(
+                    TAG,
+                    "UBER FALSE SCREEN BLOCKED - no genuine ride offer. " +
+                        "No history, no filters, no click."
+                )
+
                 resetProcessing()
                 return
             }
-            if (candidate.bookingId != null) {
-                recordUberBookingId(candidate.bookingId!!)
+
+            // Duplicate protection for Uber.
+            // Exception: Trip Radar "Match" can redispatch the SAME ride
+            // with the final Accept button.
+            val pendingUberTwoStage =
+                isPendingUberMatchStage(candidate)
+
+            if (
+                candidate.bookingId != null &&
+                isDuplicateUberBookingId(candidate.bookingId) &&
+                !pendingUberTwoStage
+            ) {
+                Log.i(
+                    TAG,
+                    "Duplicate Uber order skipped (bookingId: ${candidate.bookingId})"
+                )
+
+                RideDiagnosticsManager.recordDuplicateEvent(
+                    candidate.bookingId!!
+                )
+
+                resetProcessing()
+                return
+            }
+
+            if (pendingUberTwoStage) {
+                Log.i(
+                    TAG,
+                    "UBER: Same ride returned after Match - allowing final Accept stage"
+                )
+            } else if (candidate.bookingId != null) {
+                recordUberBookingId(
+                    candidate.bookingId!!
+                )
             }
 
             // PART B/E: Detection-First Insert: IMMEDIATELY create one History record with PROCESSING status in Room
@@ -1120,7 +2176,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                 OrderStatus.REJECTED -> {
                     Log.i(TAG, "Uber ride rejected by direct filter: ${directResult.reason}")
                     onOrderDecisionFast(recordId, candidate, OrderStatus.REJECTED, "REJECT_CRITERIA_MET", directResult.reason)
-                    attemptRejectOrder(root, Platform.UBER, candidate, directResult.reason, pkgName)
+                    attemptRejectOrder(uberOrderRoot, Platform.UBER, candidate, directResult.reason, pkgName)
                     return
                 }
                 OrderStatus.IGNORED -> {
@@ -1148,14 +2204,14 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             }
 
             // Check pickup location text against Go-To and No-Go area lists
-            val pickupText = extractPickupLocationText(candidate, root)
+            val pickupText = extractPickupLocationText(candidate, uberOrderRoot)
             val goToAreas = prefs.loadGoToAreas()
             val noGoAreas = prefs.loadNoGoAreas()
 
             val pickupAreaDecision = checkPickupAreaRules(pickupText, goToAreas, noGoAreas)
             if (pickupAreaDecision is DecisionResult.Reject) {
                 Log.i(TAG, "Uber ride rejected by pickup area rule: ${pickupAreaDecision.reason}")
-                attemptRejectOrder(root, Platform.UBER, candidate, pickupAreaDecision.reason, pkgName)
+                attemptRejectOrder(uberOrderRoot, Platform.UBER, candidate, pickupAreaDecision.reason, pkgName)
                 return
             }
 
@@ -1181,7 +2237,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                 val isNoGo = decision.reason.contains("No-Go", ignoreCase = true)
                 if (isNoGo) {
                     Log.i(TAG, "Uber ride rejected by filter: ${decision.reason}")
-                    attemptRejectOrder(root, Platform.UBER, candidate, decision.reason, pkgName)
+                    attemptRejectOrder(uberOrderRoot, Platform.UBER, candidate, decision.reason, pkgName)
                 } else {
                     Log.i(TAG, "Uber ride ignored by filter: ${decision.reason}")
                     logOrderEvent(candidate, OrderStatus.IGNORED, decision.reason)
@@ -1199,11 +2255,11 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             // Execute Uber auto-accept using 3 methods in sequence (delays capped to 150ms max)
             val speedDelay = minOf(settings.clickSpeed.delayMs, 150L)
             if (speedDelay <= 0L) {
-                executeUberAutoAccept(root, candidate)
+                executeUberAutoAccept(uberOrderRoot, candidate)
             } else {
                 serviceScope.launch(Dispatchers.IO) {
                     delay(speedDelay)
-                    executeUberAutoAccept(root, candidate)
+                    executeUberAutoAccept(uberOrderRoot, candidate)
                 }
             }
         } catch (e: Exception) {
@@ -1211,143 +2267,1257 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             resetProcessing()
         }
     }
-
     /**
-     * Fix Uber auto-accept for com.ubercab.driver:
-     * Use 3 methods in sequence:
-     * 1. performAction(ACTION_CLICK) on accept node
-     * 2. If fails: gesture tap at node center coordinates
-     * 3. If fails: tap parent node
+     * OCR fallback for current Uber Trip Radar builds whose visible card is not
+     * exposed through Accessibility. Only verified OCR cards reach this method.
      */
-    private fun executeUberAutoAccept(root: AccessibilityNodeInfo, candidate: RideCandidate) {
-        val directResult = evaluateDirectRideFilters(candidate)
+    private fun handleUberOcrOffer(intent: Intent) {
+        try {
+            if (!preferencesManager.isAutoAcceptEnabled) return
+
+            val settings = prefs.loadSettings()
+            val userProfile = prefs.userProfile.value
+            if (!userProfile.isPlanValid && !userProfile.isAdmin) return
+            if (!settings.uberEnabled) return
+
+            val fare = intent.getFloatExtra(UberScreenCaptureService.EXTRA_OCR_FARE, -1f)
+            val pickupKm = intent.getFloatExtra(UberScreenCaptureService.EXTRA_OCR_PICKUP_KM, -1f)
+            val tripKm = intent.getFloatExtra(UberScreenCaptureService.EXTRA_OCR_TRIP_KM, -1f)
+            val pickupAddress = intent.getStringExtra(UberScreenCaptureService.EXTRA_OCR_PICKUP_ADDRESS).orEmpty().trim()
+            val dropAddress = intent.getStringExtra(UberScreenCaptureService.EXTRA_OCR_DROP_ADDRESS).orEmpty().trim()
+            val action = intent.getStringExtra(UberScreenCaptureService.EXTRA_OCR_ACTION).orEmpty().trim()
+            val left = intent.getIntExtra(UberScreenCaptureService.EXTRA_OCR_LEFT, -1)
+            val top = intent.getIntExtra(UberScreenCaptureService.EXTRA_OCR_TOP, -1)
+            val right = intent.getIntExtra(UberScreenCaptureService.EXTRA_OCR_RIGHT, -1)
+            val bottom = intent.getIntExtra(UberScreenCaptureService.EXTRA_OCR_BOTTOM, -1)
+
+            val actionAllowed =
+                action.equals("Match", true) ||
+                action.equals("Accept", true) ||
+                action.equals("Accept ride", true) ||
+                action.equals("Accept trip", true)
+
+            val metrics = resources.displayMetrics
+            val boundsValid =
+                left >= 0 && top >= 0 && right > left && bottom > top &&
+                    right <= metrics.widthPixels && bottom <= metrics.heightPixels &&
+                    ((top + bottom) / 2f) > (metrics.heightPixels * 0.70f)
+
+            if (fare <= 0f || pickupKm <= 0f || tripKm <= 0f || !actionAllowed || !boundsValid) {
+                Log.w(TAG, "UBER OCR BRIDGE BLOCKED: invalid payload")
+                return
+            }
+
+            val candidate = RideCandidate(
+                fare = fare,
+                pickupDistKm = pickupKm,
+                dropDistKm = tripKm,
+                pickupAddress = pickupAddress.ifBlank { "Address unavailable" },
+                dropAddress = dropAddress.ifBlank { "Address unavailable" },
+                dropArea = dropAddress.split(",").firstOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: "City Area",
+                platform = Platform.UBER,
+                vehicleType = userProfile.vehicleType,
+                bookingId = null,
+                detectionTimeMs = System.currentTimeMillis()
+            )
+
+            if (action.equals("Match", true) && isPendingUberMatchStage(candidate)) {
+                return
+            }
+
+            val now = System.currentTimeMillis()
+            val offerKey = "${getOrderIdentifier(candidate)}|${action.lowercase()}"
+            if (offerKey == lastUberOcrOfferKey && now - lastUberOcrOfferHandledAt < 4500L) return
+            if (isProcessing) return
+
+            lastUberOcrOfferKey = offerKey
+            lastUberOcrOfferHandledAt = now
+            isProcessing = true
+            handler.removeCallbacks(processingTimeoutRunnable)
+            handler.postDelayed(processingTimeoutRunnable, 8000L)
+
+            val pendingUberTwoStage = isPendingUberMatchStage(candidate)
+            val recordId = if (pendingUberTwoStage) {
+                activeOrderRecordIds[Platform.UBER] ?: onOrderDetectedFast(candidate)
+            } else {
+                onOrderDetectedFast(candidate)
+            }
+
+            Log.i(TAG, "UBER OCR OFFER RECEIVED: fare=â‚¹$fare pickup=${pickupKm}km trip=${tripKm}km action='$action'")
+
+            val directResult = evaluateDirectRideFilters(candidate)
+            when (directResult.status) {
+                OrderStatus.REJECTED -> {
+                    onOrderDecisionFast(recordId, candidate, OrderStatus.REJECTED, "REJECT_CRITERIA_MET", directResult.reason)
+                    resetProcessing()
+                    return
+                }
+                OrderStatus.IGNORED -> {
+                    onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED, "CRITERIA_NOT_MET", directResult.reason)
+                    resetProcessing()
+                    return
+                }
+                else -> Unit
+            }
+
+            val goToAreas = prefs.loadGoToAreas()
+            val noGoAreas = prefs.loadNoGoAreas()
+            val directSettings = readDirectSettingsFresh()
+            val effectiveSettings = settings.copy(
+                minFare = directSettings.minFare,
+                maxFare = directSettings.maxFare,
+                maxPickupDistanceKm = directSettings.maxPickupKm,
+                maxDropDistanceKm = directSettings.maxDropKm,
+                maxDropKm = directSettings.maxDropKm
+            )
+
+            when (val areaDecision = AreaRulesEngine.evaluateRide(
+                candidate = candidate,
+                areas = goToAreas + noGoAreas,
+                settings = effectiveSettings,
+                goToAreas = goToAreas,
+                noGoAreas = noGoAreas,
+                pickupLocationTextOverride = candidate.pickupAddress.orEmpty()
+            )) {
+                is DecisionResult.Reject -> {
+                    val isNoGo = areaDecision.reason.contains("No-Go", true)
+                    onOrderDecisionFast(
+                        recordId,
+                        candidate,
+                        if (isNoGo) OrderStatus.REJECTED else OrderStatus.IGNORED,
+                        if (isNoGo) "REJECT_CRITERIA_MET" else "CRITERIA_NOT_MET",
+                        areaDecision.reason
+                    )
+                    resetProcessing()
+                    return
+                }
+                is DecisionResult.Ignore -> {
+                    onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED, "CRITERIA_NOT_MET", areaDecision.reason)
+                    resetProcessing()
+                    return
+                }
+                else -> Unit
+            }
+
+            triggerOrderDetectedVibration(getOrderIdentifier(candidate))
+            
+        // UBER_OCR_CLICK_GATE_FIX_V2
+        // Verified Uber OCR offers must reach simulateTapGesture so the
+        // callback can finalize History as success/failure instead of staying PROCESSING.
+val centerX = (left + right) / 2f
+            val centerY = (top + bottom) / 2f
+            onOrderActionAttemptFast(recordId)
+            Log.i(TAG, "UBER OCR VERIFIED ACTION: tapping '$action' at ($centerX,$centerY)")
+
+            simulateTapGesture(centerX, centerY, isInternalFallback = true) { success ->
+                if (success) {
+                    verifyUberAfterClick(
+                        candidate = candidate,
+                        clickedLabel = action,
+                        attemptNumber = 1,
+                        clickMethod = "OCR verified Uber action bounds"
+                    )
+                } else {
+                    failUberAccept(
+                        candidate = candidate,
+                        reasonCode = "OCR_ACTION_GESTURE_FAILED",
+                        reasonText = "Uber OCR-verified action gesture failed",
+                        buttonFound = true,
+                        clickMethod = "OCR verified Uber action bounds"
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "UBER OCR BRIDGE error", e)
+            resetProcessing()
+        }
+    }
+    /**
+     * Uber acceptance flow based on verified Uber UI behavior:
+     *
+     * 1. Re-scan briefly while Uber card is still rendering.
+     * 2. Wait while Accept button is disabled/counting down.
+     * 3. Gesture TAP/SWIPE on VERIFIED Accept bounds first.
+     * 4. ACTION_CLICK / safe clickable ancestor fallback.
+     * 5. "Match" is treated as stage 1, not final acceptance.
+     * 6. Verify Uber state before recording ACCEPTED.
+     * 7. Never use blind fixed screen coordinates.
+     */
+    private fun executeUberAutoAccept(
+        root: AccessibilityNodeInfo,
+        candidate: RideCandidate,
+        attemptNumber: Int = 1,
+        waitRound: Int = 0,
+        clickLockNotified: Boolean = false
+    ) {
+        val directResult =
+            evaluateDirectRideFilters(candidate)
+
         if (directResult.status == OrderStatus.REJECTED) {
-            Log.w(TAG, "Aborting executeUberAutoAccept: ${directResult.reason}")
-            attemptRejectOrder(root, Platform.UBER, candidate, directResult.reason, "com.ubercab")
+            Log.w(
+                TAG,
+                "Aborting Uber auto-accept: ${directResult.reason}"
+            )
+
+            attemptRejectOrder(
+                root,
+                Platform.UBER,
+                candidate,
+                directResult.reason,
+                "com.ubercab"
+            )
             return
-        } else if (directResult.status == OrderStatus.IGNORED) {
-            Log.w(TAG, "Aborting executeUberAutoAccept: ${directResult.reason}")
-            logOrderEvent(candidate, OrderStatus.IGNORED, directResult.reason)
+        }
+
+        if (directResult.status == OrderStatus.IGNORED) {
+            Log.w(
+                TAG,
+                "Aborting Uber auto-accept: ${directResult.reason}"
+            )
+
+            logOrderEvent(
+                candidate,
+                OrderStatus.IGNORED,
+                directResult.reason
+            )
+
             resetProcessing()
             return
         }
 
-        if (!canExecuteClick()) {
-            Log.w(TAG, "Uber auto-accept skipped: click in progress or rate limit active")
+        if (
+            attemptNumber == 1 &&
+            waitRound == 0 &&
+            !clickLockNotified &&
+            !canExecuteClick()
+        ) {
+            Log.w(
+                TAG,
+                "Uber auto-accept skipped: another click is active"
+            )
+
             resetProcessing()
             return
         }
-        notifyClickInitiated()
 
-        val acceptNode = findUberAcceptNode(root)
+        val uberRoot =
+            getCurrentUberRoot(root)
+
+        val acceptNode =
+            uberRoot?.let {
+                findUberAcceptNode(it)
+            }
+
+        // Uber's Compose/card tree may appear slightly before
+        // the Accept text becomes available.
         if (acceptNode == null) {
-            Log.w(TAG, "No accept node found for Uber, executing tap at (65% width, 80% height)")
-            fallbackUberTap(candidate)
+
+            if (waitRound < 2) {
+                serviceScope.launch(Dispatchers.IO) {
+                    delay(50L)
+
+                    val retryRoot =
+                        getCurrentUberRoot(root)
+                            ?: root
+
+                    executeUberAutoAccept(
+                        root = retryRoot,
+                        candidate = candidate,
+                        attemptNumber = attemptNumber,
+                        waitRound = waitRound + 1,
+                        clickLockNotified =
+                            clickLockNotified
+                    )
+                }
+                return
+            }
+
+            executeVerifiedUberMatchGestureFallback(
+                root = uberRoot ?: root,
+                candidate = candidate,
+                attemptNumber = attemptNumber
+            )
             return
         }
 
-        Log.i(TAG, "Starting Uber auto-accept 3-method sequence for candidate fare=₹${candidate.fare}...")
 
-        // METHOD 1: performAction(ACTION_CLICK) on accept node
-        val clicked = acceptNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        Log.i(TAG, "Uber Method 1: performAction(ACTION_CLICK) on accept node returned: $clicked")
-        if (clicked) {
-            Log.i(TAG, "✓ Uber Method 1 SUCCESSFUL via ACTION_CLICK!")
-            onUberAccepted(candidate)
+        val label =
+            getUberNodeLabel(acceptNode)
+
+        // Uber can show an Accept countdown/disabled control.
+        if (!acceptNode.isEnabled) {
+
+            if (waitRound < 20) {
+                Log.d(
+                    TAG,
+                    "UBER: Accept button disabled/countdown; waiting 80ms"
+                )
+
+                serviceScope.launch(Dispatchers.IO) {
+                    delay(80L)
+
+                    val retryRoot =
+                        getCurrentUberRoot(root)
+                            ?: root
+
+                    executeUberAutoAccept(
+                        root = retryRoot,
+                        candidate = candidate,
+                        attemptNumber = attemptNumber,
+                        waitRound = waitRound + 1,
+                        clickLockNotified =
+                            clickLockNotified
+                    )
+                }
+
+                return
+            }
+
+            failUberAccept(
+                candidate = candidate,
+                reasonCode = "BUTTON_DISABLED_TIMEOUT",
+                reasonText =
+                    "Uber Accept button stayed disabled",
+                buttonFound = true,
+                clickMethod = "No click"
+            )
             return
         }
 
-        // METHOD 2: If fails: gesture tap at node center coordinates
-        Log.w(TAG, "Uber Method 1 failed. Trying Method 2: gesture tap at node center coordinates...")
+
+        if (
+            !isSafeUberAcceptTarget(
+                acceptNode,
+                uberRoot
+            )
+        ) {
+            failUberAccept(
+                candidate = candidate,
+                reasonCode = "UNVERIFIED_ACCEPT_TARGET",
+                reasonText =
+                    "Uber target did not pass safe Accept verification",
+                buttonFound = true,
+                clickMethod =
+                    "None - unsafe target prevented"
+            )
+            return
+        }
+
+
         val bounds = Rect()
         acceptNode.getBoundsInScreen(bounds)
-        if (!bounds.isEmpty && bounds.width() > 0 && bounds.height() > 0) {
-            val centerX = bounds.centerX().toFloat()
-            val centerY = bounds.centerY().toFloat()
-            Log.i(TAG, "Uber Method 2: Gesture tap at node center coordinates ($centerX, $centerY), bounds=$bounds")
-            simulateTapGesture(centerX, centerY, isInternalFallback = true) { tapSuccess ->
-                if (tapSuccess) {
-                    Log.i(TAG, "✓ Uber Method 2 SUCCESSFUL via gesture tap at coordinates!")
-                    onUberAccepted(candidate)
+
+        if (
+            bounds.isEmpty ||
+            bounds.width() <= 0 ||
+            bounds.height() <= 0
+        ) {
+            failUberAccept(
+                candidate = candidate,
+                reasonCode = "INVALID_BOUNDS",
+                reasonText =
+                    "Uber Accept button bounds were invalid",
+                buttonFound = true,
+                clickMethod =
+                    "None - invalid bounds"
+            )
+            return
+        }
+
+
+        if (!clickLockNotified) {
+            notifyClickInitiated()
+        }
+
+
+        val centerX =
+            bounds.centerX().toFloat()
+
+        val centerY =
+            bounds.centerY().toFloat()
+
+
+        Log.i(
+            TAG,
+            "UBER: Verified node='$label' " +
+                "bounds=$bounds attempt=$attemptNumber"
+        )
+
+
+        // Uber may render Swipe/Slide-to-Accept.
+        if (isUberSwipeAcceptLabel(label)) {
+
+            val startX =
+                bounds.left +
+                    bounds.width() * 0.20f
+
+            val endX =
+                bounds.right -
+                    bounds.width() * 0.15f
+
+
+            Log.i(
+                TAG,
+                "UBER Method1: verified SWIPE gesture"
+            )
+
+            simulateSwipeGesture(
+                startX = startX,
+                startY = centerY,
+                endX = endX,
+                endY = centerY,
+                durationMs = 180L
+            ) { success ->
+
+                if (success) {
+                    verifyUberAfterClick(
+                        candidate = candidate,
+                        clickedLabel = label,
+                        attemptNumber =
+                            attemptNumber,
+                        clickMethod =
+                            "Verified Uber Swipe Gesture"
+                    )
                 } else {
-                    Log.w(TAG, "Uber Method 2 gesture tap cancelled/failed. Proceeding to Method 3...")
-                    executeUberMethod3(acceptNode, candidate)
+                    tryUberActionClickFallback(
+                        root = uberRoot,
+                        node = acceptNode,
+                        candidate = candidate,
+                        clickedLabel = label,
+                        attemptNumber =
+                            attemptNumber
+                    )
                 }
             }
-        } else {
-            Log.w(TAG, "Uber Method 2: Node bounds empty, proceeding to Method 3...")
-            executeUberMethod3(acceptNode, candidate)
+
+            return
+        }
+
+
+        // RideClicker-style Uber path:
+        // Gesture on verified button bounds first.
+        Log.i(
+            TAG,
+            "UBER Method1: verified TAP gesture"
+        )
+
+        simulateTapGesture(
+            centerX,
+            centerY,
+            isInternalFallback = true
+        ) { success ->
+
+            if (success) {
+                verifyUberAfterClick(
+                    candidate = candidate,
+                    clickedLabel = label,
+                    attemptNumber =
+                        attemptNumber,
+                    clickMethod =
+                        "Verified Uber Tap Gesture"
+                )
+            } else {
+                tryUberActionClickFallback(
+                    root = uberRoot,
+                    node = acceptNode,
+                    candidate = candidate,
+                    clickedLabel = label,
+                    attemptNumber =
+                        attemptNumber
+                )
+            }
         }
     }
+
+
+    private fun getCurrentUberRoot(
+        fallback: AccessibilityNodeInfo?
+    ): AccessibilityNodeInfo? {
+
+        return findBestUberOrderRoot(
+            fallback
+        )
+            ?: fallback
+            ?: rootInActiveWindow
+    }
+
+    private fun getUberNodeLabel(
+        node: AccessibilityNodeInfo
+    ): String {
+
+        val text =
+            node.text
+                ?.toString()
+                ?.trim()
+                .orEmpty()
+
+        if (text.isNotBlank()) {
+            return text
+        }
+
+        return node.contentDescription
+            ?.toString()
+            ?.trim()
+            .orEmpty()
+    }
+
+
+    private fun isUberSwipeAcceptLabel(
+        label: String
+    ): Boolean {
+
+        val lower =
+            label.lowercase()
+
+        return lower.contains("swipe") ||
+            lower.contains("slide")
+    }
+
+
+    private fun isUberMatchStageLabel(
+        label: String
+    ): Boolean {
+
+        val lower =
+            label.trim().lowercase()
+
+        return (
+            lower == "match" ||
+            lower == "match trip" ||
+            lower.contains("tap to match")
+        ) && !lower.contains("matched")
+    }
+
+
+    private fun isUberFailureScreen(
+        text: String
+    ): Boolean {
+
+        val lower =
+            text.lowercase()
+
+        return listOf(
+            "accepted by another driver",
+            "accepted by another captain",
+            "another driver accepted",
+            "request no longer available",
+            "trip no longer available",
+            "no matches"
+        ).any {
+            lower.contains(it)
+        }
+    }
+
+
+    private fun isUberConfirmedScreen(
+        text: String
+    ): Boolean {
+
+        val lower =
+            text.lowercase()
+
+        return listOf(
+            "matched to trip",
+            "trip accepted",
+            "navigate to pickup",
+            "head to pickup"
+        ).any {
+            lower.contains(it)
+        }
+    }
+
+
+    private fun isUberTransitionScreen(
+        text: String
+    ): Boolean {
+
+        val lower =
+            text.lowercase()
+
+        return lower.contains(
+            "matching in progress"
+        )
+    }
+
+
+    private fun isSafeUberAcceptTarget(
+        node: AccessibilityNodeInfo,
+        root: AccessibilityNodeInfo?
+    ): Boolean {
+
+        val label =
+            getUberNodeLabel(node)
+
+        val nodeId =
+            node.viewIdResourceName
+                ?.lowercase()
+                .orEmpty()
+
+        val textMatched =
+            UberAdapter.isAcceptText(label) ||
+            UberAdapter.isAcceptDesc(label)
+
+        val idMatched =
+            UberAdapter.ACCEPT_IDS.any { id ->
+
+                val cleanId =
+                    id.substringAfterLast("/")
+                        .lowercase()
+
+                nodeId.contains(cleanId)
+            }
+
+
+        val geometryMatched =
+            isUberBottomActionGeometry(
+                node,
+                root
+            )
+
+        if (
+            !textMatched &&
+            !idMatched &&
+            !geometryMatched
+        ) {
+            return false
+        }
+
+
+        val nodePkg =
+            node.packageName
+                ?.toString()
+                .orEmpty()
+                .lowercase()
+
+        val rootPkg =
+            root?.packageName
+                ?.toString()
+                .orEmpty()
+                .lowercase()
+
+
+        val uberOwned =
+            listOf(
+                nodePkg,
+                rootPkg
+            ).any {
+                it == "com.ubercab" ||
+                    it == "com.ubercab.driver" ||
+                    it.startsWith(
+                        "com.ubercab."
+                    )
+            }
+
+
+        if (!uberOwned) {
+            return false
+        }
+
+
+        if (!node.isVisibleToUser) {
+            return false
+        }
+
+
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+
+        return !bounds.isEmpty &&
+            bounds.width() > 0 &&
+            bounds.height() > 0
+    }
+
 
     /**
-     * METHOD 3: If fails: tap parent node
+     * Method 2/3:
+     * ACTION_CLICK only on the verified node or a nearby
+     * clickable ancestor. No arbitrary screen coordinates.
      */
-    private fun executeUberMethod3(node: AccessibilityNodeInfo, candidate: RideCandidate) {
-        var currentParent = node.parent
-        var handled = false
+    private fun tryUberActionClickFallback(
+        root: AccessibilityNodeInfo?,
+        node: AccessibilityNodeInfo,
+        candidate: RideCandidate,
+        clickedLabel: String,
+        attemptNumber: Int
+    ) {
+        var current:
+            AccessibilityNodeInfo? = node
 
-        while (currentParent != null && !handled) {
-            val parentBounds = Rect()
-            currentParent.getBoundsInScreen(parentBounds)
-            Log.i(TAG, "Uber Method 3: Testing parent node (clickable=${currentParent.isClickable}, bounds=$parentBounds)")
+        var depth = 0
 
-            if (currentParent.isClickable) {
-                val parentClicked = currentParent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                if (parentClicked) {
-                    Log.i(TAG, "✓ Uber Method 3 SUCCESSFUL via parent ACTION_CLICK!")
-                    onUberAccepted(candidate)
-                    handled = true
-                    break
-                }
-            }
+        val screenHeight =
+            resources.displayMetrics
+                .heightPixels
 
-            // If performAction didn't succeed, attempt gesture tap on parent center
-            if (!parentBounds.isEmpty && parentBounds.width() > 0 && parentBounds.height() > 0) {
-                val pCenterX = parentBounds.centerX().toFloat()
-                val pCenterY = parentBounds.centerY().toFloat()
-                Log.i(TAG, "Uber Method 3: Gesture tap at parent center ($pCenterX, $pCenterY)")
-                simulateTapGesture(pCenterX, pCenterY, isInternalFallback = true) { tapSuccess ->
-                    if (tapSuccess) {
-                        Log.i(TAG, "✓ Uber Method 3 SUCCESSFUL via parent center gesture tap!")
-                        onUberAccepted(candidate)
-                    } else {
-                        fallbackUberTap(candidate)
+
+        while (
+            current != null &&
+            depth <= 3
+        ) {
+
+            val bounds = Rect()
+            current.getBoundsInScreen(bounds)
+
+            val pkg =
+                current.packageName
+                    ?.toString()
+                    .orEmpty()
+                    .lowercase()
+
+            val uberOwned =
+                pkg == "com.ubercab" ||
+                    pkg == "com.ubercab.driver" ||
+                    pkg.startsWith(
+                        "com.ubercab."
+                    ) ||
+                    root?.packageName
+                        ?.toString()
+                        ?.lowercase()
+                        ?.startsWith(
+                            "com.ubercab"
+                        ) == true
+
+
+            // Prevent accidentally clicking a huge ride-card
+            // ancestor instead of the Accept control.
+            val safeHeight =
+                bounds.height() > 0 &&
+                    bounds.height() <
+                    (screenHeight * 0.35f)
+
+
+            if (
+                current.isClickable &&
+                current.isEnabled &&
+                current.isVisibleToUser &&
+                uberOwned &&
+                safeHeight
+            ) {
+
+                try {
+                    val clicked =
+                        current.performAction(
+                            AccessibilityNodeInfo.ACTION_CLICK
+                        )
+
+                    Log.i(
+                        TAG,
+                        "UBER Method2/3: ACTION_CLICK depth=$depth result=$clicked"
+                    )
+
+                    if (clicked) {
+                        verifyUberAfterClick(
+                            candidate = candidate,
+                            clickedLabel =
+                                clickedLabel,
+                            attemptNumber =
+                                attemptNumber,
+                            clickMethod =
+                                "Uber ACTION_CLICK parentDepth=$depth"
+                        )
+                        return
                     }
+
+                } catch (e: Exception) {
+                    Log.w(
+                        TAG,
+                        "UBER ACTION_CLICK exception: ${e.message}"
+                    )
                 }
-                handled = true
-                break
             }
 
-            currentParent = currentParent.parent
+
+            current =
+                current.parent
+
+            depth++
         }
 
-        if (!handled) {
-            Log.w(TAG, "Uber Method 3: No valid clickable or bounded parent found. Executing fallback tap...")
-            fallbackUberTap(candidate)
+
+        failUberAccept(
+            candidate = candidate,
+            reasonCode =
+                "ALL_CLICK_METHODS_FAILED",
+            reasonText =
+                "Verified Uber Accept control found but click methods failed",
+            buttonFound = true,
+            clickMethod =
+                "Gesture + ACTION_CLICK failed"
+        )
+    }
+
+
+    /**
+     * Uber success verification.
+     *
+     * Important: dispatchGesture/ACTION_CLICK returning true only
+     * means Android accepted the input event. It does NOT prove
+     * Uber accepted the trip.
+     */
+    private fun verifyUberAfterClick(
+        candidate: RideCandidate,
+        clickedLabel: String,
+        attemptNumber: Int,
+        clickMethod: String
+    ) {
+
+        // Trip Radar "Match" is stage 1 only.
+        if (
+            isUberMatchStageLabel(
+                clickedLabel
+            )
+        ) {
+
+            markPendingUberMatchStage(
+                candidate
+            )
+
+            Log.i(
+                TAG,
+                "UBER: Match clicked - waiting for same ride to redispatch with final Accept"
+            )
+
+            serviceScope.launch(
+                Dispatchers.IO
+            ) {
+                delay(120L)
+                resetProcessing()
+            }
+
+            return
+        }
+
+
+        serviceScope.launch(
+            Dispatchers.IO
+        ) {
+
+            var lastUberRoot:
+                AccessibilityNodeInfo? = null
+
+            for (check in 0 until 5) {
+
+                delay(
+                    if (check == 0)
+                        180L
+                    else
+                        220L
+                )
+
+
+                val currentRoot =
+                    getCurrentUberRoot(null)
+
+                lastUberRoot =
+                    currentRoot
+
+
+                if (currentRoot == null) {
+                    continue
+                }
+
+
+                val allText =
+                    UberAdapter
+                        .collectAllNodeTexts(
+                            currentRoot
+                        )
+                        .joinToString(" \n ")
+
+
+                // Explicit lost-trip status.
+                if (
+                    isUberFailureScreen(
+                        allText
+                    )
+                ) {
+
+                    clearPendingUberMatchStage(
+                        candidate
+                    )
+
+                    failUberAccept(
+                        candidate = candidate,
+                        reasonCode =
+                            "UBER_LOST_TO_OTHER_DRIVER",
+                        reasonText =
+                            "Uber reported that another driver/captain received the trip",
+                        buttonFound = true,
+                        clickMethod =
+                            clickMethod
+                    )
+
+                    return@launch
+                }
+
+
+                // Explicit success screen.
+                if (
+                    isUberConfirmedScreen(
+                        allText
+                    )
+                ) {
+
+                    clearPendingUberMatchStage(
+                        candidate
+                    )
+
+                    Log.i(
+                        TAG,
+                        "UBER: Confirmed accepted screen detected"
+                    )
+
+                    onUberAccepted(
+                        candidate = candidate,
+                        timesClicked =
+                            attemptNumber,
+                        clickMethod =
+                            clickMethod
+                    )
+
+                    return@launch
+                }
+
+
+                val transitionVisible =
+                    isUberTransitionScreen(
+                        allText
+                    )
+
+
+                val acceptStillVisible =
+                    findUberAcceptNode(
+                        currentRoot
+                    )?.let {
+                        isSafeUberAcceptTarget(
+                            it,
+                            currentRoot
+                        )
+                    } == true
+
+
+                // If the verified offer button has disappeared
+                // and no failure banner appeared, allow one more
+                // verification cycle before confirming.
+                if (
+                    !acceptStillVisible &&
+                    !transitionVisible &&
+                    check >= 1
+                ) {
+
+                    clearPendingUberMatchStage(
+                        candidate
+                    )
+
+                    Log.i(
+                        TAG,
+                        "UBER: Offer control disappeared without failure banner - confirming acceptance"
+                    )
+
+                    onUberAccepted(
+                        candidate = candidate,
+                        timesClicked =
+                            attemptNumber,
+                        clickMethod =
+                            clickMethod
+                    )
+
+                    return@launch
+                }
+            }
+
+
+            // Same Accept is still visible:
+            // click may have silently failed.
+            if (
+                lastUberRoot != null &&
+                attemptNumber < 3
+            ) {
+
+                val node =
+                    findUberAcceptNode(
+                        lastUberRoot!!
+                    )
+
+                if (
+                    node != null &&
+                    isSafeUberAcceptTarget(
+                        node,
+                        lastUberRoot
+                    )
+                ) {
+
+                    Log.w(
+                        TAG,
+                        "UBER: Same offer reappeared/still visible; controlled retry #${attemptNumber + 1}"
+                    )
+
+                    delay(140L)
+
+                    executeUberAutoAccept(
+                        root =
+                            lastUberRoot!!,
+                        candidate =
+                            candidate,
+                        attemptNumber =
+                            attemptNumber + 1,
+                        waitRound = 0,
+                        clickLockNotified = true
+                    )
+
+                    return@launch
+                }
+            }
+
+
+            clearPendingUberMatchStage(
+                candidate
+            )
+
+            failUberAccept(
+                candidate = candidate,
+                reasonCode =
+                    "UBER_VERIFICATION_TIMEOUT",
+                reasonText =
+                    "Uber click sent but acceptance could not be verified",
+                buttonFound = true,
+                clickMethod =
+                    clickMethod
+            )
         }
     }
 
-    private fun fallbackUberTap(candidate: RideCandidate) {
-        Log.w(TAG, "❌ [Uber] Accept button not detected or invalid in hierarchy! Refusing blind coordinate taps.")
-        val recordId = activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+
+    /**
+     * Last-resort Uber Trip Radar Match gesture.
+     *
+     * Some Uber builds visually draw the large Match button but
+     * do not expose its text/clickable node through Accessibility.
+     *
+     * This fallback is allowed ONLY after a genuine Uber offer has
+     * already been parsed:
+     *   fare > 0
+     *   pickupKm > 0
+     *   tripKm > 0
+     *   Uber-owned window
+     *
+     * Therefore this never runs on Uber Home/Earnings screens.
+     */
+    private fun executeVerifiedUberMatchGestureFallback(
+        root: AccessibilityNodeInfo,
+        candidate: RideCandidate,
+        attemptNumber: Int
+    ) {
+
+        val fare =
+            candidate.fare ?: 0f
+
+        val pickup =
+            candidate.pickupDistKm ?: 0f
+
+        val trip =
+            candidate.dropDistKm ?: 0f
+
+        val pkg =
+            root.packageName
+                ?.toString()
+                .orEmpty()
+
+
+        if (
+            fare <= 0f ||
+            pickup <= 0f ||
+            trip <= 0f ||
+            !isUberPackageValue(pkg)
+        ) {
+
+            failUberAccept(
+                candidate = candidate,
+                reasonCode =
+                    "UNVERIFIED_UBER_CARD",
+                reasonText =
+                    "Uber Match fallback blocked because genuine offer signature was incomplete",
+                buttonFound = false,
+                clickMethod =
+                    "None - safety guard"
+            )
+
+            return
+        }
+
+
+        val texts =
+            UberAdapter.collectAllNodeTexts(
+                root
+            )
+
+        val fullText =
+            texts.joinToString(" \n ")
+
+
+        val hasFare =
+            fullText.contains("₹")
+
+
+        val kmCount =
+            Regex(
+                """(?i)\b[0-9]+(?:\.[0-9]+)?\s*km\b"""
+            )
+                .findAll(fullText)
+                .count()
+
+
+        if (
+            !hasFare ||
+            kmCount < 2
+        ) {
+
+            failUberAccept(
+                candidate = candidate,
+                reasonCode =
+                    "UNVERIFIED_UBER_CARD",
+                reasonText =
+                    "Uber Match fallback blocked: fare + two distances not visible",
+                buttonFound = false,
+                clickMethod =
+                    "None - safety guard"
+            )
+
+            return
+        }
+
+
+        if (!canExecuteClick()) {
+            resetProcessing()
+            return
+        }
+
+
+        val metrics =
+            resources.displayMetrics
+
+        val screenWidth =
+            metrics.widthPixels.toFloat()
+
+        val screenHeight =
+            metrics.heightPixels.toFloat()
+
+
+        // Current Uber Trip Radar card:
+        // large Match CTA is centered at roughly 59% screen width
+        // and 90.5% screen height.
+        //
+        // This coordinate is used ONLY after real-offer
+        // verification above.
+        val matchX =
+            screenWidth * 0.59f
+
+        val matchY =
+            screenHeight * 0.905f
+
+
+        Log.i(
+            TAG,
+            "UBER: verified offer has hidden Match node. " +
+                "Gesture fallback at ($matchX,$matchY) " +
+                "fare=₹$fare pickup=$pickup trip=$trip"
+        )
+
+
+        notifyClickInitiated()
+
+
+        simulateTapGesture(
+            matchX,
+            matchY,
+            isInternalFallback = true
+        ) { success ->
+
+            if (success) {
+
+                verifyUberAfterClick(
+                    candidate = candidate,
+                    clickedLabel = "Match",
+                    attemptNumber =
+                        attemptNumber,
+                    clickMethod =
+                        "Verified Uber Trip Radar Match Gesture"
+                )
+
+            } else {
+
+                failUberAccept(
+                    candidate = candidate,
+                    reasonCode =
+                        "MATCH_GESTURE_FAILED",
+                    reasonText =
+                        "Verified Uber Match gesture failed",
+                    buttonFound = false,
+                    clickMethod =
+                        "Verified Uber Trip Radar Match Gesture"
+                )
+            }
+        }
+    }
+
+    private fun failUberAccept(
+        candidate: RideCandidate,
+        reasonCode: String,
+        reasonText: String,
+        buttonFound: Boolean,
+        clickMethod: String
+    ) {
+
+        val recordId =
+            activeOrderRecordIds[
+                candidate.platform
+            ] ?: onOrderDetectedFast(
+                candidate
+            )
+
+
         onOrderActionCompletedFast(
             recordId = recordId,
             candidate = candidate,
             status = OrderStatus.FAILED,
-            reasonCode = "BUTTON_NOT_FOUND",
-            reasonText = "Accept button node not detected in Uber hierarchy",
+            reasonCode = reasonCode,
+            reasonText = reasonText,
             actionSucceeded = false,
             timesClicked = 0,
-            buttonFound = false,
-            buttonDetails = "Accept button node not detected in hierarchy",
-            clickMethod = "None (blind tap prevented)",
-            errorMsg = "Safe button not found - blind taps blocked"
+            buttonFound = buttonFound,
+            buttonDetails =
+                if (buttonFound)
+                    "Verified Uber Accept control"
+                else
+                    "Uber Accept control not found",
+            clickMethod = clickMethod,
+            errorMsg = reasonText
         )
+
+
         resetProcessing()
     }
 
-    private fun onUberAccepted(candidate: RideCandidate, timesClicked: Int = 1) {
+
+    // Compatibility wrapper — NEVER blind taps.
+    private fun fallbackUberTap(
+        candidate: RideCandidate
+    ) {
+        failUberAccept(
+            candidate = candidate,
+            reasonCode =
+                "BUTTON_NOT_FOUND",
+            reasonText =
+                "Accept button node not detected in Uber hierarchy",
+            buttonFound = false,
+            clickMethod =
+                "None - blind tap prevented"
+        )
+    }
+
+
+    private fun onUberAccepted(candidate: RideCandidate, timesClicked: Int = 1, clickMethod: String = "Verified Uber Accept") {
+        clearPendingUberMatchStage(candidate)
         // MASTER OFF: ignore Uber completion.
         if (!preferencesManager.isAutoAcceptEnabled) {
             resetProcessing()
@@ -1369,7 +3539,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             timesClicked = timesClicked,
             buttonFound = true,
             buttonDetails = "Uber Accept button verified in hierarchy",
-            clickMethod = "Strict Button ACTION_CLICK ($timesClicked attempts)"
+            clickMethod = "$clickMethod ($timesClicked attempt(s))"
         )
 
         val historyItem = OrderHistoryItem(
@@ -1420,26 +3590,163 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun findUberAcceptNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        // Direct text match
-        val directTextMatch = searchNodeRaw(root) { UberAdapter.isAcceptText(it) }
-        if (directTextMatch != null) return directTextMatch
+    private fun findUberAcceptNode(
+        root: AccessibilityNodeInfo
+    ): AccessibilityNodeInfo? {
 
-        // Direct desc match
-        val directDescMatch = searchNodeByDescRaw(root) { UberAdapter.isAcceptDesc(it) }
-        if (directDescMatch != null) return directDescMatch
+        val roots =
+            mutableListOf<AccessibilityNodeInfo>()
 
-        // Resource IDs
-        for (resId in UberAdapter.ACCEPT_IDS) {
-            val list = root.findAccessibilityNodeInfosByViewId(resId)
-            if (!list.isNullOrEmpty()) {
-                val target = list[0]
-                for (i in 1 until list.size) list[i].recycle()
-                return target
+        val seen =
+            mutableSetOf<Int>()
+
+
+        fun add(
+            node: AccessibilityNodeInfo?
+        ) {
+            if (node == null) return
+
+            val pkg =
+                node.packageName
+                    ?.toString()
+                    .orEmpty()
+
+            if (!isUberPackageValue(pkg)) {
+                return
+            }
+
+            val key =
+                System.identityHashCode(node)
+
+            if (seen.add(key)) {
+                roots.add(node)
             }
         }
 
-        return UberAdapter.findAcceptNode(root)
+
+        add(root)
+
+        add(
+            findBestUberOrderRoot(
+                root
+            )
+        )
+
+
+        try {
+            for (window in windows) {
+                add(window.root)
+            }
+        } catch (_: Exception) {
+        }
+
+
+        for (uberRoot in roots) {
+
+            // 1. Visible text: Accept / Match / Confirm
+            val directTextMatch =
+                searchNodeRaw(
+                    uberRoot
+                ) {
+                    UberAdapter.isAcceptText(
+                        it
+                    )
+                }
+
+            if (directTextMatch != null) {
+
+                Log.i(
+                    TAG,
+                    "UBER: action found by visible text " +
+                        "'${directTextMatch.text}'"
+                )
+
+                return directTextMatch
+            }
+
+
+            // 2. Content description
+            val directDescMatch =
+                searchNodeByDescRaw(
+                    uberRoot
+                ) {
+                    UberAdapter.isAcceptDesc(
+                        it
+                    )
+                }
+
+            if (directDescMatch != null) {
+
+                Log.i(
+                    TAG,
+                    "UBER: action found by contentDescription " +
+                        "'${directDescMatch.contentDescription}'"
+                )
+
+                return directDescMatch
+            }
+
+
+            // 3. Known Uber resource IDs
+            for (
+                resId in
+                UberAdapter.ACCEPT_IDS
+            ) {
+                try {
+
+                    val list =
+                        uberRoot
+                            .findAccessibilityNodeInfosByViewId(
+                                resId
+                            )
+
+                    if (
+                        !list.isNullOrEmpty()
+                    ) {
+
+                        val target =
+                            list[0]
+
+                        Log.i(
+                            TAG,
+                            "UBER: action found by resource ID '$resId'"
+                        )
+
+                        return target
+                    }
+
+                } catch (_: Exception) {
+                }
+            }
+
+
+            // 4. Existing UberAdapter scan
+            val adapterNode =
+                UberAdapter.findAcceptNode(
+                    uberRoot
+                )
+
+            if (adapterNode != null) {
+                return adapterNode
+            }
+
+
+            // 5. Uber Compose zero-text Match/Accept button.
+            // Not a blind coordinate tap: requires a genuine
+            // fare + distance card and a large clickable bottom
+            // Uber-owned action control.
+            val bottomAction =
+                findUberBottomActionNode(
+                    uberRoot
+                )
+
+            if (bottomAction != null) {
+                return bottomAction
+            }
+        }
+
+
+        return null
     }
 
     private fun searchNodeRaw(node: AccessibilityNodeInfo?, predicate: (String) -> Boolean): AccessibilityNodeInfo? {
@@ -1919,7 +4226,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             timesClicked = timesClicked,
             buttonFound = true,
             buttonDetails = "Ola Accept button/slider verified in hierarchy",
-            clickMethod = "Strict Button ACTION_CLICK ($timesClicked attempts)"
+            clickMethod = "Ola Accept button click ($timesClicked attempt(s))"
         )
 
         val historyItem = OrderHistoryItem(
@@ -2499,6 +4806,19 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
      * FIX 1 - Order Card Detection:
      * When order card detected (node with "₹" + distance "km" both found in screen).
      */
+    // RAPIDO_POST_ACCEPT_FIX_V1
+    // Rapido may keep a visible card/container after Match/Accept succeeds.
+    // These texts are confirmation/status UI, NOT a new ride offer.
+    private fun isRapidoPostAcceptScreen(root: AccessibilityNodeInfo?): Boolean {
+        if (root == null) return false
+
+        val textList = mutableListOf<String>()
+        collectAllNodeText(root, textList)
+        val allText = textList.joinToString(" ").lowercase(Locale.ROOT)
+
+        return allText.contains("thanks for accepting") ||
+            allText.contains("checking order status")
+    }
     private fun isRapidoOrderScreenVisible(root: AccessibilityNodeInfo?): Boolean {
         return isRapidoOrderPopupShowing(root)
     }
@@ -2512,7 +4832,16 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             return
         }
 
-        // Validate genuine popup BEFORE applying home-screen detection.
+        
+        // RAPIDO_POST_ACCEPT_FIX_V1
+        // Never parse Rapido confirmation/status UI as a fresh ride.
+        // The running accept-verification coroutine will finalize the ORIGINAL
+        // history row, preserving fare, distance and addresses.
+        if (isRapidoPostAcceptScreen(root)) {
+            Log.i(TAG, "RAPIDO POST-ACCEPT screen detected; blocking duplicate candidate/history insert")
+            return
+        }
+// Validate genuine popup BEFORE applying home-screen detection.
         // A real Rapido order card can be rendered as an overlay while
         // underlying Home text is still present in the same node tree.
         val validation =
@@ -3075,9 +5404,10 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         serviceScope.launch(Dispatchers.IO) {
             delay(200L) // reduced from 2000ms to 200ms max
             val currentRoot = getRapidoOrderRootNode(orderRoot)
-            val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoot) || isRapidoOrderPopupShowing(currentRoot))
+                        val postAcceptConfirmed = isRapidoPostAcceptScreen(currentRoot)
+val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoot) || isRapidoOrderPopupShowing(currentRoot))
 
-            if (!isOrderStillVisible) {
+                        if (postAcceptConfirmed || !isOrderStillVisible) {
                 // Order popup gone in 200ms = ACCEPTED
                 Log.i(TAG, "🎉 STEP 4: Rapido order popup gone in 200ms = ACCEPTED (Attempt #$attemptNumber)")
                 NotificationHelper.updateNotification(
@@ -4695,12 +7025,18 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        stopUberWindowPolling()
         isServiceRunning = false
         serviceScope.cancel()
         try {
             unregisterReceiver(toggleReceiver)
         } catch (e: Exception) {
             Log.e(TAG, "Error unregistering toggleReceiver: ${e.message}")
+        }
+        try {
+            unregisterReceiver(uberOcrReceiver)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error unregistering Uber OCR receiver: ${e.message}")
         }
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {

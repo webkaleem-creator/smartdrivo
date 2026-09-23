@@ -86,7 +86,7 @@ fun CommunityScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(20.dp),
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 

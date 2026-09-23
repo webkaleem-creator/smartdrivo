@@ -1,6 +1,14 @@
 package com.example
 
 import android.Manifest
+import com.example.service.UberScreenCaptureService
+import androidx.activity.result.contract.ActivityResultContracts
+import android.media.projection.MediaProjectionManager
+import android.content.IntentFilter
+import android.content.Intent
+import android.content.Context
+import android.content.BroadcastReceiver
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -120,6 +128,193 @@ private data class NavItemData(
 )
 
 class MainActivity : ComponentActivity() {
+    // ==========================================================
+    // UBER_MEDIA_PROJECTION_V1
+    //
+    // User-controlled screen capture.
+    // Capture begins only after Android's visible consent dialog.
+    // ==========================================================
+
+    private var uberCapturePromptOpen = false
+    private var uberCaptureConsentDenied = false
+
+
+    private val uberCaptureLauncher =
+        registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+
+            uberCapturePromptOpen = false
+
+            val resultData =
+                result.data
+
+
+            if (
+                result.resultCode == Activity.RESULT_OK &&
+                resultData != null
+            ) {
+
+                uberCaptureConsentDenied = false
+
+                val serviceIntent =
+                    Intent(
+                        this,
+                        UberScreenCaptureService::class.java
+                    ).apply {
+
+                        action =
+                            UberScreenCaptureService.ACTION_START_CAPTURE
+
+                        putExtra(
+                            UberScreenCaptureService.EXTRA_RESULT_CODE,
+                            result.resultCode
+                        )
+
+                        putExtra(
+                            UberScreenCaptureService.EXTRA_RESULT_DATA,
+                            resultData
+                        )
+                    }
+
+
+                ContextCompat.startForegroundService(
+                    this,
+                    serviceIntent
+                )
+
+
+                android.util.Log.i(
+                    "MainActivity",
+                    "Uber OCR screen capture permission granted"
+                )
+
+            } else {
+
+                uberCaptureConsentDenied = true
+
+                android.util.Log.i(
+                    "MainActivity",
+                    "Uber OCR screen capture permission denied/cancelled"
+                )
+            }
+        }
+
+
+    private val uberCaptureToggleReceiver =
+        object : BroadcastReceiver() {
+
+            override fun onReceive(
+                context: Context?,
+                intent: Intent?
+            ) {
+
+                if (
+                    intent?.action !=
+                    "com.example.TOGGLE_CHANGED"
+                ) {
+                    return
+                }
+
+
+                val enabled =
+                    intent.getBooleanExtra(
+                        "enabled",
+                        false
+                    )
+
+
+                if (enabled) {
+
+                    // A fresh ON action may ask again if the
+                    // user previously cancelled permission.
+                    uberCaptureConsentDenied =
+                        false
+
+                    window.decorView.post {
+                        maybeRequestUberScreenCapture()
+                    }
+
+                } else {
+
+                    uberCaptureConsentDenied =
+                        false
+
+                    try {
+
+                        stopService(
+                            Intent(
+                                this@MainActivity,
+                                UberScreenCaptureService::class.java
+                            )
+                        )
+
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+        }
+
+
+    private fun maybeRequestUberScreenCapture() {
+
+        try {
+
+            if (
+                !::preferencesManager.isInitialized ||
+                uberCapturePromptOpen ||
+                uberCaptureConsentDenied ||
+                UberScreenCaptureService.isRunning
+            ) {
+                return
+            }
+
+
+            val settings =
+                preferencesManager.appSettings.value
+
+
+            if (
+                !settings.isAutoAcceptActive ||
+                !settings.uberEnabled
+            ) {
+                return
+            }
+
+
+            val manager =
+                getSystemService(
+                    MediaProjectionManager::class.java
+                )
+
+
+            uberCapturePromptOpen =
+                true
+
+
+            uberCaptureLauncher.launch(
+                manager.createScreenCaptureIntent()
+            )
+
+
+            android.util.Log.i(
+                "MainActivity",
+                "Requesting user permission for Uber OCR screen capture"
+            )
+
+        } catch (e: Exception) {
+
+            uberCapturePromptOpen =
+                false
+
+            android.util.Log.e(
+                "MainActivity",
+                "Unable to request Uber capture: ${e.message}",
+                e
+            )
+        }
+    }
+
 
     private lateinit var preferencesManager: PreferencesManager
     private lateinit var firebaseRepository: FirebaseRepository
@@ -127,6 +322,25 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // REGISTER_UBER_CAPTURE_RECEIVER_V1
+        try {
+
+            ContextCompat.registerReceiver(
+                this,
+                uberCaptureToggleReceiver,
+                IntentFilter(
+                    "com.example.TOGGLE_CHANGED"
+                ),
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+
+        } catch (e: Exception) {
+
+            android.util.Log.e(
+                "MainActivity",
+                "Uber capture receiver registration failed: ${e.message}"
+            )
+        }
 
         try {
             preferencesManager = PreferencesManager.getInstance(applicationContext)
@@ -177,6 +391,19 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         checkAndApplyAutoAcceptOnResume()
+    }
+
+    // UNREGISTER_UBER_CAPTURE_RECEIVER_V1
+    override fun onDestroy() {
+
+        try {
+            unregisterReceiver(
+                uberCaptureToggleReceiver
+            )
+        } catch (_: Exception) {
+        }
+
+        super.onDestroy()
     }
 
     private fun checkAndApplyAutoAcceptOnResume() {

@@ -352,10 +352,8 @@ object UberAdapter {
         var dropMarkerIdx = -1
         var pickupKm: Float? = null
         var dropKm: Float? = null
-
-        val pickupMarkerRegex = Regex("""(?i)(?:away\b|pick\s*up|pickup|[0-9.]+\s*mins?\s*(?:\([0-9.]+\s*km\)|•\s*[0-9.]+\s*km)?\s*away)""")
-        val dropMarkerRegex = Regex("""(?i)(?:trip\b|drop\s*off|dropoff|destination|[0-9.]+\s*mins?\s*(?:\([0-9.]+\s*km\)|•\s*[0-9.]+\s*km)?\s*trip)""")
-
+        val pickupMarkerRegex = Regex("""(?i)(?:away\b|pick\s*up|pickup|[0-9.]+\s*mins?\s*(?:\([0-9.]+\s*km\)|•\s*[0-9.]+\s*km)?\s*away|[0-9.]+\s*mins?\s*\(\s*[0-9.]+\s*km\s*\))""")
+        val dropMarkerRegex = Regex("""(?i)(?:trip\b|drop\s*off|dropoff|destination|[0-9.]+\s*mins?\s*(?:\([0-9.]+\s*km\)|•\s*[0-9.]+\s*km)?\s*trip|[0-9.]+\s*mins?\s*\(\s*[0-9.]+\s*km\s*\))""")
         for (i in texts.indices) {
             val line = texts[i].trim()
             if (SPEED_REGEX.matcher(line).find()) continue
@@ -400,6 +398,238 @@ object UberAdapter {
                         break
                     }
                 }
+            }
+        }
+
+        // =========================================================
+        // UBER_CURRENT_CARD_FALLBACK
+        //
+        // Current Uber Trip Radar format:
+        //   6 min (0.8 km)
+        //   Pickup address
+        //   9 mins (2.4 km)
+        //   Drop address
+        //
+        // Uber does not always include words like "pickup",
+        // "away", "trip" or "drop" in these distance rows.
+        // First timed-km row = pickup.
+        // Second timed-km row = trip/drop.
+        // =========================================================
+
+        if (
+            pickupKm == null ||
+            dropKm == null ||
+            pickupMarkerIdx == -1 ||
+            dropMarkerIdx == -1
+        ) {
+
+            val timedKmRegex =
+                Regex(
+                    """(?i)\b[0-9]+(?:\.[0-9]+)?\s*mins?\s*\(\s*([0-9]+(?:\.[0-9]+)?)\s*km\s*\)"""
+                )
+
+            val timedKmRows =
+                mutableListOf<Pair<Int, Float>>()
+
+            var lastNormalizedTimedRow: String? = null
+
+            for (i in texts.indices) {
+
+                val line =
+                    texts[i].trim()
+
+                if (
+                    line.isBlank() ||
+                    SPEED_REGEX.matcher(line).find()
+                ) {
+                    continue
+                }
+
+                val match =
+                    timedKmRegex.find(line)
+
+                if (match != null) {
+
+                    val km =
+                        match.groupValues
+                            .getOrNull(1)
+                            ?.toFloatOrNull()
+
+                    if (
+                        km != null &&
+                        km > 0f
+                    ) {
+
+                        val normalized =
+                            line.lowercase()
+                                .replace(
+                                    Regex("""\s+"""),
+                                    " "
+                                )
+                                .trim()
+
+                        // Some Accessibility trees expose the same
+                        // visible row twice through parent/child nodes.
+                        if (
+                            normalized !=
+                            lastNormalizedTimedRow
+                        ) {
+                            timedKmRows.add(
+                                i to km
+                            )
+
+                            lastNormalizedTimedRow =
+                                normalized
+                        }
+                    }
+                }
+            }
+
+
+            if (timedKmRows.size >= 2) {
+
+                val firstRow =
+                    timedKmRows[0]
+
+                val secondRow =
+                    timedKmRows[1]
+
+
+                if (
+                    pickupKm == null ||
+                    pickupKm <= 0f
+                ) {
+                    pickupKm =
+                        firstRow.second
+                }
+
+
+                if (
+                    dropKm == null ||
+                    dropKm <= 0f
+                ) {
+                    dropKm =
+                        secondRow.second
+                }
+
+
+                if (
+                    pickupMarkerIdx == -1
+                ) {
+                    pickupMarkerIdx =
+                        firstRow.first
+                }
+
+
+                if (
+                    dropMarkerIdx == -1
+                ) {
+                    dropMarkerIdx =
+                        secondRow.first
+                }
+
+
+                Log.i(
+                    TAG,
+                    "UBER CURRENT CARD parsed: " +
+                        "pickup=${pickupKm}km " +
+                        "trip=${dropKm}km"
+                )
+            }
+        }
+
+        // =========================================================
+        // UBER_ANY_TWO_KM_FALLBACK
+        //
+        // Some Uber versions split:
+        //   "6 min"   "(0.9 km)"
+        // into different accessibility nodes.
+        //
+        // On a verified offer, the first two genuine KM values are:
+        //   first  = pickup distance
+        //   second = trip/drop distance
+        // =========================================================
+
+        if (pickupKm == null || dropKm == null) {
+
+            val allKmValues =
+                mutableListOf<Pair<Int, Float>>()
+
+            for (i in texts.indices) {
+
+                val line = texts[i].trim()
+
+                if (
+                    line.isBlank() ||
+                    SPEED_REGEX.matcher(line).find()
+                ) {
+                    continue
+                }
+
+                val kmMatcher =
+                    Regex(
+                        """(?i)([0-9]+(?:\.[0-9]+)?)\s*km\b"""
+                    )
+
+                for (match in kmMatcher.findAll(line)) {
+
+                    val value =
+                        match.groupValues[1]
+                            .toFloatOrNull()
+
+                    if (
+                        value != null &&
+                        value > 0f &&
+                        value < 200f
+                    ) {
+
+                        if (
+                            allKmValues.none {
+                                it.first == i &&
+                                it.second == value
+                            }
+                        ) {
+                            allKmValues.add(
+                                i to value
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (allKmValues.size >= 2) {
+
+                if (
+                    pickupKm == null ||
+                    pickupKm <= 0f
+                ) {
+                    pickupKm =
+                        allKmValues[0].second
+                }
+
+                if (
+                    dropKm == null ||
+                    dropKm <= 0f
+                ) {
+                    dropKm =
+                        allKmValues[1].second
+                }
+
+                if (pickupMarkerIdx == -1) {
+                    pickupMarkerIdx =
+                        allKmValues[0].first
+                }
+
+                if (dropMarkerIdx == -1) {
+                    dropMarkerIdx =
+                        allKmValues[1].first
+                }
+
+                Log.i(
+                    TAG,
+                    "UBER any-two-km fallback: " +
+                        "pickup=${pickupKm} km, trip=${dropKm} km"
+                )
             }
         }
 
