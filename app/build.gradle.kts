@@ -16,7 +16,7 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.smartdrivo.krmx"
+    applicationId = "com.smartdrivo.app"
     minSdk = 24
     targetSdk = 36
     versionCode = 1
@@ -156,7 +156,7 @@ tasks.register("printDebugSha1") {
   group = "help"
   notCompatibleWithConfigurationCache("Prints debug keystore fingerprints to console")
   val keystorePath = "${rootDir}/debug.keystore"
-  val pkgName = "com.aistudio.smartdrivo.krmx"
+  val pkgName = "com.smartdrivo.app"
   doLast {
     val keystoreFile = File(keystorePath)
     if (keystoreFile.exists()) {

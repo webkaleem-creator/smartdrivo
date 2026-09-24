@@ -510,7 +510,7 @@ class ExampleUnitTest {
 
     @Test
     fun testSmartDrivoPackageIdentification() {
-        assertTrue(RapidoAdapter.isSmartDrivoPackage("com.aistudio.smartdrivo.krmx"))
+        assertTrue(RapidoAdapter.isSmartDrivoPackage("com.smartdrivo.app"))
         assertTrue(RapidoAdapter.isSmartDrivoPackage("com.example"))
         assertTrue(RapidoAdapter.isSmartDrivoPackage("com.example.smartdrivo"))
         assertFalse(RapidoAdapter.isSmartDrivoPackage("com.rapido.passenger"))

@@ -40,7 +40,7 @@ object OrderDataExtractor {
     fun isSmartDrivoPackage(pkg: String?): Boolean {
         if (pkg.isNullOrBlank()) return false
         val p = pkg.lowercase().trim()
-        return p == "com.aistudio.smartdrivo.krmx" ||
+        return p == "com.smartdrivo.app" ||
                p == "com.example" ||
                p.contains("smartdrivo")
     }
