@@ -22,3 +22,11 @@ my-upload-key.jks
 *.apk
 
 app/google-services.json
+
+# Local development backup files
+*.bak
+*.bak-*
+**/*.bak
+**/*.bak-*
+logo-backup-*/
+**/logo-backup-*/
