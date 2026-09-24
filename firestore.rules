@@ -78,9 +78,9 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
     
-    // Logs collection
+    // Logs collection - admin only
     match /logs/{logId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if isAdmin();
     }
   }
 }

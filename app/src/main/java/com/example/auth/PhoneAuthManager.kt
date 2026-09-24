@@ -29,7 +29,7 @@ object PhoneAuthManager {
             auth = FirebaseAuth.getInstance().apply {
                 setLanguageCode("en")
             }
-            Log.i(TAG, "FirebaseAuth initialized. Current user: ${auth?.currentUser?.uid ?: "None"}")
+            Log.i(TAG, "FirebaseAuth initialized")
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing Firebase Auth: ${e.message}", e)
         }
@@ -64,7 +64,7 @@ object PhoneAuthManager {
         onError: (message: String) -> Unit
     ) {
         val formattedPhone = normalizePhoneNumber(phoneNumber)
-        Log.i(TAG, "Initiating OTP send for: $formattedPhone")
+        Log.i(TAG, "Initiating OTP send")
 
         val firebaseAuth = getAuthInstance()
         if (firebaseAuth == null) {
@@ -75,16 +75,12 @@ object PhoneAuthManager {
 
         val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
             override fun onVerificationCompleted(credential: PhoneAuthCredential) {
-                Log.i(TAG, "✓ Phone auto-verification completed automatically for $formattedPhone")
-                val code = credential.smsCode
-                if (!code.isNullOrEmpty()) {
-                    Log.d(TAG, "SMS code auto-retrieved: $code")
-                }
+                Log.i(TAG, "Phone auto-verification completed")
                 signInWithCredential(credential, formattedPhone, onAutoVerified, onError)
             }
 
             override fun onVerificationFailed(e: FirebaseException) {
-                Log.e(TAG, "Firebase phone verification failed for $formattedPhone: ${e.message}", e)
+                Log.e(TAG, "Firebase phone verification failed: ${e.message}", e)
                 val friendlyMessage = when (e) {
                     is FirebaseAuthInvalidCredentialsException ->
                         "Invalid phone number or verification code. Please check your details."
@@ -100,7 +96,7 @@ object PhoneAuthManager {
                 verificationId: String,
                 token: PhoneAuthProvider.ForceResendingToken
             ) {
-                Log.i(TAG, "Firebase SMS code sent successfully to $formattedPhone. Verification ID: $verificationId")
+                Log.i(TAG, "Firebase SMS code sent successfully")
                 resendToken = token
                 lastPhoneNumber = formattedPhone
                 onCodeSent(verificationId)
@@ -118,7 +114,7 @@ object PhoneAuthManager {
                 optionsBuilder.setForceResendingToken(resendToken!!)
             }
 
-            Log.i(TAG, "Triggering PhoneAuthProvider.verifyPhoneNumber for SMS OTP to $formattedPhone")
+            Log.i(TAG, "Triggering Firebase phone verification")
             PhoneAuthProvider.verifyPhoneNumber(optionsBuilder.build())
         } catch (e: Exception) {
             Log.e(TAG, "Error calling PhoneAuthProvider.verifyPhoneNumber: ${e.message}", e)
@@ -174,7 +170,7 @@ object PhoneAuthManager {
                 if (task.isSuccessful) {
                     val user = firebaseAuth.currentUser
                     val phoneOrUid = user?.phoneNumber ?: phone
-                    Log.i(TAG, "✓ Firebase Phone Sign-In Successful! UID: ${user?.uid}, Phone: $phoneOrUid")
+                    Log.i(TAG, "Firebase Phone Sign-In successful")
                     onSuccess(phoneOrUid)
                 } else {
                     val e = task.exception
@@ -205,7 +201,7 @@ object PhoneAuthManager {
                     if (task.isSuccessful) {
                         val user = firebaseAuth.currentUser
                         val emailOrUid = user?.email ?: user?.uid ?: ""
-                        Log.i(TAG, "✓ Firebase Google Sign-In Successful! UID: ${user?.uid}, Email: $emailOrUid")
+                        Log.i(TAG, "Firebase Google Sign-In successful")
                         onSuccess(emailOrUid)
                     } else {
                         val err = task.exception?.localizedMessage ?: "Google Sign-In failed in Firebase"
