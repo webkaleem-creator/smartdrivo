@@ -818,7 +818,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                     for (target in targets) {
                         if (
                             dropText.isNotBlank() &&
-                            dropText.contains(target.lowercase())
+                            Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(target.lowercase()) + "(?![\\p{L}\\p{N}])", RegexOption.IGNORE_CASE).containsMatchIn(dropText)
                         ) {
                             dropMatches += target
                             groupMatched = true
@@ -850,11 +850,10 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
                     val areas = dropMatches.distinct()
 
                     val reason = buildString {
-                        append("Mode: No-Go (Drop Only)")
+                        append("Mode: No Go Area")
                         if (groups.isNotEmpty()) {
                             append("\nGroup: ${groups.joinToString(", ")}")
                         }
-                        append("\nOrder: Fare $fareText | Pickup $pickupKmText | Trip $tripKmText")
                         append("\nDrop matched: ${areas.joinToString(", ")}")
                         append("\nWhy rejected: destination/drop area is blocked")
                     }
@@ -948,7 +947,6 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
             val reason = buildString {
                 append("Mode: $modeLabel")
-                append("\nOrder: ${orderParts.joinToString(" | ")}")
                 append("\nLimits: ${limitParts.joinToString(" | ")}")
                 append("\nWhy ignored: ${failureReasons.joinToString("; ")}")
             }

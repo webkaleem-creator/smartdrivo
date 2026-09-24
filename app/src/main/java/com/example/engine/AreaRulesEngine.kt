@@ -61,7 +61,7 @@ object AreaRulesEngine {
                     }
 
                 for (word in words) {
-                    if (dropText.contains(word.lowercase())) {
+                    if (Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(word.lowercase()) + "(?![\\p{L}\\p{N}])", RegexOption.IGNORE_CASE).containsMatchIn(dropText)) {
                         return DecisionResult.Reject(
                             "No-Go Area: destination matches '$word' in '${group.name}'"
                         )
@@ -88,7 +88,7 @@ object AreaRulesEngine {
                                 !it.equals(group.name, ignoreCase = true)
                         }
                         .any { word ->
-                            dropText.contains(word.lowercase())
+                            Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(word.lowercase()) + "(?![\\p{L}\\p{N}])", RegexOption.IGNORE_CASE).containsMatchIn(dropText)
                         }
                 }
 
