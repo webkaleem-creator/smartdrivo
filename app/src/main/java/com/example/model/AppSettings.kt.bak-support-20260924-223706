@@ -47,8 +47,8 @@ enum class FilterMode(val displayName: String) {
 @Immutable
 data class CommunityLinks(
     val whatsappUrl: String = "https://chat.whatsapp.com/smartdrivo",
-    val telegramUrl: String = "https://t.me/smartdrivo",
-    val instagramUrl: String = "https://www.instagram.com/smartdrivo/"
+    val telegramUrl: String = "https://t.me/smartdrivo_riders",
+    val instagramUrl: String = "https://instagram.com/smartdrivo"
 )
 
 @Immutable

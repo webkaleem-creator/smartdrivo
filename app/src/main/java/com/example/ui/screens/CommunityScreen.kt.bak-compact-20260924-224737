@@ -45,6 +45,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.PreferencesManager
+import com.example.ui.theme.AccentGreen
+import com.example.ui.theme.BluePrimary
+import com.example.ui.theme.CardBackground
+import com.example.ui.theme.LightBackground
+import com.example.ui.theme.TextDarkPrimary
+import com.example.ui.theme.TextDarkSecondary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,14 +61,7 @@ fun CommunityScreen(
     val context = LocalContext.current
     val links by prefs.communityLinks.collectAsState()
 
-    fun openUrl(
-        dynamicUrl: String,
-        fallbackUrl: String? = null,
-        unavailableMessage: String,
-        errorMessage: String
-    ) {
-        val url = dynamicUrl.trim().ifBlank { fallbackUrl.orEmpty() }
-
+    fun openUrl(url: String, unavailableMessage: String, errorMessage: String) {
         if (url.isBlank()) {
             Toast.makeText(context, unavailableMessage, Toast.LENGTH_SHORT).show()
             return
@@ -70,7 +69,10 @@ fun CommunityScreen(
 
         try {
             context.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse(url)
+                )
             )
         } catch (_: Exception) {
             Toast.makeText(context, errorMessage, Toast.LENGTH_SHORT).show()
@@ -83,8 +85,7 @@ fun CommunityScreen(
                 title = {
                     Text(
                         text = "SmartDrivo Support",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
+                        fontWeight = FontWeight.Bold
                     )
                 },
                 navigationIcon = {
@@ -100,95 +101,94 @@ fun CommunityScreen(
                 )
             )
         },
-        containerColor = Color(0xFFF4F4F4)
+        containerColor = LightBackground
     ) { padding ->
 
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(
-                horizontal = 12.dp,
-                vertical = 10.dp
-            ),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
-            // 1. CUSTOMER SUPPORT
             item {
                 SupportCard(
-                    icon = Icons.Default.SupportAgent,
-                    iconColor = Color(0xFF278FE6),
-                    title = "Customer Support",
-                    description = "Need help with membership, payment verification, app settings or SmartDrivo features? Chat with SmartDrivo Support on Telegram.",
-                    buttonText = "Chat on Telegram",
-                    buttonColor = Color(0xFF278FE6),
+                    icon = Icons.Default.Campaign,
+                    iconColor = AccentGreen,
+                    title = "WhatsApp Channel",
+                    description = "Follow the official SmartDrivo WhatsApp Channel for app updates, new features and important announcements.",
+                    buttonText = "Follow WhatsApp Channel",
+                    buttonColor = AccentGreen,
                     onClick = {
                         openUrl(
-                            dynamicUrl = "https://t.me/SmartDrivoSupport",
-                            fallbackUrl = "https://t.me/SmartDrivoSupport",
-                            unavailableMessage = "SmartDrivo Support is not available.",
-                            errorMessage = "Unable to open SmartDrivo Support."
+                            links.whatsappUrl.trim(),
+                            "WhatsApp Channel link is not available.",
+                            "Unable to open WhatsApp Channel."
                         )
                     }
                 )
             }
 
-            // 2. TELEGRAM CHANNEL
             item {
                 SupportCard(
                     icon = Icons.Default.Send,
                     iconColor = Color(0xFF229ED9),
                     title = "Telegram Channel",
-                    description = "Join SmartDrivo Telegram for APK updates, new features and announcements.",
-                    buttonText = "Open Telegram",
+                    description = "Join the official SmartDrivo Telegram Channel for APK updates, new features and important announcements.",
+                    buttonText = "Join Telegram Channel",
                     buttonColor = Color(0xFF229ED9),
                     onClick = {
                         openUrl(
-                            dynamicUrl = links.telegramUrl,
-                            fallbackUrl = "https://t.me/smartdrivo",
-                            unavailableMessage = "Telegram Channel link is not available.",
-                            errorMessage = "Unable to open Telegram Channel."
+                            links.telegramUrl.trim(),
+                            "Telegram Channel link is not available.",
+                            "Unable to open Telegram Channel."
                         )
                     }
                 )
             }
 
-            // 3. WHATSAPP CHANNEL
-            item {
-                SupportCard(
-                    icon = Icons.Default.Campaign,
-                    iconColor = Color(0xFF14B98A),
-                    title = "WhatsApp Channel",
-                    description = "Follow SmartDrivo WhatsApp Channel for updates and announcements.",
-                    buttonText = "Open WhatsApp",
-                    buttonColor = Color(0xFF14B98A),
-                    onClick = {
-                        openUrl(
-                            dynamicUrl = links.whatsappUrl,
-                            unavailableMessage = "WhatsApp Channel link is not available.",
-                            errorMessage = "Unable to open WhatsApp Channel."
-                        )
-                    }
-                )
-            }
-
-            // 4. INSTAGRAM
             item {
                 SupportCard(
                     icon = Icons.Default.PhotoCamera,
                     iconColor = Color(0xFFE1306C),
-                    title = "Instagram",
-                    description = "Follow SmartDrivo for feature demos, videos, tips and announcements.",
-                    buttonText = "Open Instagram",
+                    title = "SmartDrivo on Instagram",
+                    description = "Follow SmartDrivo on Instagram for feature demos, videos, tips and announcements.",
+                    buttonText = "Follow on Instagram",
                     buttonColor = Color(0xFFE1306C),
                     onClick = {
                         openUrl(
-                            dynamicUrl = links.instagramUrl,
-                            fallbackUrl = "https://www.instagram.com/smartdrivo/",
-                            unavailableMessage = "Instagram link is not available.",
-                            errorMessage = "Unable to open Instagram."
+                            links.instagramUrl.trim(),
+                            "Instagram link is not available.",
+                            "Unable to open Instagram."
                         )
+                    }
+                )
+            }
+
+            item {
+                SupportCard(
+                    icon = Icons.Default.SupportAgent,
+                    iconColor = BluePrimary,
+                    title = "Customer Support",
+                    description = "Need help with membership, payment verification, app settings or SmartDrivo features?",
+                    buttonText = "Contact Support",
+                    buttonColor = BluePrimary,
+                    onClick = {
+                        try {
+                            context.startActivity(
+                                Intent(
+                                    Intent.ACTION_SENDTO,
+                                    Uri.parse("mailto:support@smartdrivo.com")
+                                )
+                            )
+                        } catch (_: Exception) {
+                            Toast.makeText(
+                                context,
+                                "No email app found.",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
                     }
                 )
             }
@@ -208,20 +208,15 @@ private fun SupportCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = Color.White
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = 1.dp
+            containerColor = CardBackground
         )
     ) {
         Column(
-            modifier = Modifier.padding(
-                horizontal = 14.dp,
-                vertical = 12.dp
-            )
+            modifier = Modifier.padding(20.dp)
         ) {
+
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -229,48 +224,40 @@ private fun SupportCard(
                     imageVector = icon,
                     contentDescription = null,
                     tint = iconColor,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(28.dp)
                 )
 
-                Spacer(modifier = Modifier.width(9.dp))
+                Spacer(modifier = Modifier.width(12.dp))
 
                 Text(
                     text = title,
-                    fontSize = 16.sp,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF111A2D)
+                    color = TextDarkPrimary
                 )
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
                 text = description,
-                fontSize = 12.sp,
-                lineHeight = 17.sp,
-                color = Color(0xFF566174)
+                fontSize = 13.sp,
+                color = TextDarkSecondary
             )
 
-            Spacer(modifier = Modifier.height(9.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Button(
                 onClick = onClick,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(40.dp),
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = buttonColor,
                     contentColor = Color.White
-                ),
-                contentPadding = PaddingValues(
-                    horizontal = 12.dp,
-                    vertical = 0.dp
                 )
             ) {
                 Text(
                     text = buttonText,
-                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
             }

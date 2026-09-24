@@ -739,11 +739,11 @@ class FirebaseRepository(
 
                     val tg =
                         doc.getString("telegram")
-                            ?: "https://t.me/smartdrivo"
+                            ?: "https://t.me/smartdrivo_riders"
 
                     val ig =
                         doc.getString("instagram")
-                            ?: "https://www.instagram.com/smartdrivo/"
+                            ?: "https://instagram.com/smartdrivo"
 
                     prefs.updateCommunityLinks(
                         wa,

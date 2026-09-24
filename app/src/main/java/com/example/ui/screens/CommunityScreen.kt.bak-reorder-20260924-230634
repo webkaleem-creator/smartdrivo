@@ -61,19 +61,32 @@ fun CommunityScreen(
         unavailableMessage: String,
         errorMessage: String
     ) {
-        val url = dynamicUrl.trim().ifBlank { fallbackUrl.orEmpty() }
+        val url = dynamicUrl.trim().ifBlank {
+            fallbackUrl.orEmpty()
+        }
 
         if (url.isBlank()) {
-            Toast.makeText(context, unavailableMessage, Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                context,
+                unavailableMessage,
+                Toast.LENGTH_SHORT
+            ).show()
             return
         }
 
         try {
             context.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse(url)
+                )
             )
         } catch (_: Exception) {
-            Toast.makeText(context, errorMessage, Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                context,
+                errorMessage,
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
@@ -114,27 +127,24 @@ fun CommunityScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
 
-            // 1. CUSTOMER SUPPORT
             item {
                 SupportCard(
-                    icon = Icons.Default.SupportAgent,
-                    iconColor = Color(0xFF278FE6),
-                    title = "Customer Support",
-                    description = "Need help with membership, payment verification, app settings or SmartDrivo features? Chat with SmartDrivo Support on Telegram.",
-                    buttonText = "Chat on Telegram",
-                    buttonColor = Color(0xFF278FE6),
+                    icon = Icons.Default.Campaign,
+                    iconColor = Color(0xFF14B98A),
+                    title = "WhatsApp Channel",
+                    description = "Follow SmartDrivo WhatsApp Channel for updates and announcements.",
+                    buttonText = "Open WhatsApp",
+                    buttonColor = Color(0xFF14B98A),
                     onClick = {
                         openUrl(
-                            dynamicUrl = "https://t.me/SmartDrivoSupport",
-                            fallbackUrl = "https://t.me/SmartDrivoSupport",
-                            unavailableMessage = "SmartDrivo Support is not available.",
-                            errorMessage = "Unable to open SmartDrivo Support."
+                            dynamicUrl = links.whatsappUrl,
+                            unavailableMessage = "WhatsApp Channel link is not available.",
+                            errorMessage = "Unable to open WhatsApp Channel."
                         )
                     }
                 )
             }
 
-            // 2. TELEGRAM CHANNEL
             item {
                 SupportCard(
                     icon = Icons.Default.Send,
@@ -154,26 +164,6 @@ fun CommunityScreen(
                 )
             }
 
-            // 3. WHATSAPP CHANNEL
-            item {
-                SupportCard(
-                    icon = Icons.Default.Campaign,
-                    iconColor = Color(0xFF14B98A),
-                    title = "WhatsApp Channel",
-                    description = "Follow SmartDrivo WhatsApp Channel for updates and announcements.",
-                    buttonText = "Open WhatsApp",
-                    buttonColor = Color(0xFF14B98A),
-                    onClick = {
-                        openUrl(
-                            dynamicUrl = links.whatsappUrl,
-                            unavailableMessage = "WhatsApp Channel link is not available.",
-                            errorMessage = "Unable to open WhatsApp Channel."
-                        )
-                    }
-                )
-            }
-
-            // 4. INSTAGRAM
             item {
                 SupportCard(
                     icon = Icons.Default.PhotoCamera,
@@ -188,6 +178,25 @@ fun CommunityScreen(
                             fallbackUrl = "https://www.instagram.com/smartdrivo/",
                             unavailableMessage = "Instagram link is not available.",
                             errorMessage = "Unable to open Instagram."
+                        )
+                    }
+                )
+            }
+
+            item {
+                SupportCard(
+                    icon = Icons.Default.SupportAgent,
+                    iconColor = Color(0xFF278FE6),
+                    title = "Customer Support",
+                    description = "Need help with membership, payment verification, app settings or SmartDrivo features? Chat with SmartDrivo Support on Telegram.",
+                    buttonText = "Chat on Telegram",
+                    buttonColor = Color(0xFF278FE6),
+                    onClick = {
+                        openUrl(
+                            dynamicUrl = "https://t.me/SmartDrivoSupport",
+                            fallbackUrl = "https://t.me/SmartDrivoSupport",
+                            unavailableMessage = "SmartDrivo Support is not available.",
+                            errorMessage = "Unable to open SmartDrivo Support."
                         )
                     }
                 )
@@ -222,6 +231,7 @@ private fun SupportCard(
                 vertical = 12.dp
             )
         ) {
+
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {

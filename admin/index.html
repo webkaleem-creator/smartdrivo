@@ -814,6 +814,7 @@
           if (data.whatsapp) document.getElementById('whatsappInput').value = data.whatsapp;
           if (data.telegram) document.getElementById('telegramInput').value = data.telegram;
           if (data.instagram) document.getElementById('instagramInput').value = data.instagram;
+          document.getElementById('supportTelegramInput').value = data.supportTelegram || 'https://t.me/SmartDrivoSupport';
 
           logMessage("Settings synchronized with Firestore /settings/global.");
         }
@@ -1223,6 +1224,7 @@
       const whatsapp = document.getElementById('whatsappInput').value.trim();
       const telegram = document.getElementById('telegramInput').value.trim();
       const instagram = document.getElementById('instagramInput').value.trim();
+      const supportTelegram = document.getElementById('supportTelegramInput').value.trim();
 
       const saveBtn = document.getElementById('saveLinksBtn');
       saveBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Saving...';
@@ -1233,6 +1235,7 @@
           whatsapp: whatsapp,
           telegram: telegram,
           instagram: instagram,
+          supportTelegram: supportTelegram,
           updatedAt: Date.now(),
           updatedBy: currentAdminEmail || currentAdminUid
         }, { merge: true });
