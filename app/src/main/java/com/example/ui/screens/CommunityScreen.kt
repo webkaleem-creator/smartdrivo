@@ -125,7 +125,7 @@ fun CommunityScreen(
                     buttonColor = Color(0xFF278FE6),
                     onClick = {
                         openUrl(
-                            dynamicUrl = "https://t.me/SmartDrivoSupport",
+                            dynamicUrl = links.supportTelegramUrl,
                             fallbackUrl = "https://t.me/SmartDrivoSupport",
                             unavailableMessage = "SmartDrivo Support is not available.",
                             errorMessage = "Unable to open SmartDrivo Support."

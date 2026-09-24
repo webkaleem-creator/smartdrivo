@@ -159,11 +159,36 @@ class PreferencesManager(private val context: Context) {
     private val _instagramLink = MutableStateFlow(prefs.getString(KEY_COMMUNITY_INSTAGRAM, "https://www.instagram.com/smartdrivo/") ?: "https://www.instagram.com/smartdrivo/")
     val instagramLink: StateFlow<String> = _instagramLink.asStateFlow()
 
+    private val _supportTelegramLink = MutableStateFlow(
+        prefs.getString(
+            KEY_COMMUNITY_SUPPORT_TELEGRAM,
+            "https://t.me/SmartDrivoSupport"
+        ) ?: "https://t.me/SmartDrivoSupport"
+    )
+
+    val supportTelegramLink: StateFlow<String> =
+        _supportTelegramLink.asStateFlow()
     private val _communityLinks = MutableStateFlow(
         com.example.model.CommunityLinks(
-            whatsappUrl = prefs.getString(KEY_COMMUNITY_WHATSAPP, "https://chat.whatsapp.com/smartdrivo") ?: "https://chat.whatsapp.com/smartdrivo",
-            telegramUrl = prefs.getString(KEY_COMMUNITY_TELEGRAM, "https://t.me/smartdrivo") ?: "https://t.me/smartdrivo",
-            instagramUrl = prefs.getString(KEY_COMMUNITY_INSTAGRAM, "https://www.instagram.com/smartdrivo/") ?: "https://www.instagram.com/smartdrivo/"
+            whatsappUrl = prefs.getString(
+                KEY_COMMUNITY_WHATSAPP,
+                "https://chat.whatsapp.com/smartdrivo"
+            ) ?: "https://chat.whatsapp.com/smartdrivo",
+
+            telegramUrl = prefs.getString(
+                KEY_COMMUNITY_TELEGRAM,
+                "https://t.me/smartdrivo"
+            ) ?: "https://t.me/smartdrivo",
+
+            instagramUrl = prefs.getString(
+                KEY_COMMUNITY_INSTAGRAM,
+                "https://www.instagram.com/smartdrivo/"
+            ) ?: "https://www.instagram.com/smartdrivo/",
+
+            supportTelegramUrl = prefs.getString(
+                KEY_COMMUNITY_SUPPORT_TELEGRAM,
+                "https://t.me/SmartDrivoSupport"
+            ) ?: "https://t.me/SmartDrivoSupport"
         )
     )
     val communityLinks: StateFlow<com.example.model.CommunityLinks> = _communityLinks.asStateFlow()
@@ -1159,17 +1184,32 @@ class PreferencesManager(private val context: Context) {
         _qrImageUrl.value = url
     }
 
-    fun updateCommunityLinks(whatsapp: String, telegram: String, instagram: String) {
+    fun updateCommunityLinks(
+        whatsapp: String,
+        telegram: String,
+        instagram: String,
+        supportTelegram: String = "https://t.me/SmartDrivoSupport"
+    ) {
         prefs.edit().apply {
             putString(KEY_COMMUNITY_WHATSAPP, whatsapp)
             putString(KEY_COMMUNITY_TELEGRAM, telegram)
             putString(KEY_COMMUNITY_INSTAGRAM, instagram)
+            putString(KEY_COMMUNITY_SUPPORT_TELEGRAM, supportTelegram)
             apply()
         }
+
         _whatsappLink.value = whatsapp
         _telegramLink.value = telegram
         _instagramLink.value = instagram
-        _communityLinks.value = com.example.model.CommunityLinks(whatsapp, telegram, instagram)
+        _supportTelegramLink.value = supportTelegram
+
+        _communityLinks.value =
+            com.example.model.CommunityLinks(
+                whatsappUrl = whatsapp,
+                telegramUrl = telegram,
+                instagramUrl = instagram,
+                supportTelegramUrl = supportTelegram
+            )
     }
 
     companion object {
@@ -1267,5 +1307,6 @@ class PreferencesManager(private val context: Context) {
         private const val KEY_COMMUNITY_WHATSAPP = "comm_whatsapp"
         private const val KEY_COMMUNITY_TELEGRAM = "comm_telegram"
         private const val KEY_COMMUNITY_INSTAGRAM = "comm_instagram"
+        private const val KEY_COMMUNITY_SUPPORT_TELEGRAM = "comm_support_telegram"
     }
 }

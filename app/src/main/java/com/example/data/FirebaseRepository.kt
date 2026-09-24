@@ -745,10 +745,15 @@ class FirebaseRepository(
                         doc.getString("instagram")
                             ?: "https://www.instagram.com/smartdrivo/"
 
+                    val supportTelegram =
+                        doc.getString("supportTelegram")
+                            ?: "https://t.me/SmartDrivoSupport"
+
                     prefs.updateCommunityLinks(
                         wa,
                         tg,
-                        ig
+                        ig,
+                        supportTelegram
                     )
 
                     val prices =
