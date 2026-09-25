@@ -226,6 +226,9 @@ fun SmartDrivoApp(
 
     val membershipPlans by
         prefs.membershipPlans.collectAsState()
+
+    val paymentSubmissions by
+        prefs.paymentSubmissions.collectAsState()
     val isUserAdmin = userProfile.isAdmin
     val firebaseUser = PhoneAuthManager.getAuthInstance()?.currentUser
     val isLoggedIn = prefs.isLoggedIn && (firebaseUser != null || userProfile.email.isNotBlank() || userProfile.phone.isNotBlank())
@@ -667,34 +670,79 @@ fun SmartDrivoApp(
                 planSelected = selectedPlanForPayment.id,
                 amount = selectedPlanForPayment.price
             )
+
+            val liveSub =
+                paymentSubmissions.firstOrNull {
+                    it.paymentId == sub.paymentId
+                } ?: sub
+
+            LaunchedEffect(liveSub.status, isMembershipActive) {
+                when {
+                    liveSub.status ==
+                        com.example.model.PaymentStatus.APPROVED ||
+                        isMembershipActive -> {
+                        navController.navigate(Routes.PAYMENT_SUCCESS) {
+                            launchSingleTop = true
+                        }
+                    }
+
+                    liveSub.status ==
+                        com.example.model.PaymentStatus.REJECTED -> {
+                        navController.navigate(Routes.PAYMENT_FAILED) {
+                            launchSingleTop = true
+                        }
+                    }
+                }
+            }
+
             PaymentPendingScreen(
-                submission = sub,
+                submission = liveSub,
                 onCheckStatus = {
-                    val currentSub = prefs.paymentSubmissions.value.firstOrNull { it.paymentId == sub.paymentId }
-                    if (currentSub?.status == com.example.model.PaymentStatus.APPROVED) {
-                        navController.navigate(Routes.PAYMENT_SUCCESS)
-                    } else if (currentSub?.status == com.example.model.PaymentStatus.REJECTED) {
-                        navController.navigate(Routes.PAYMENT_FAILED)
-                    } else {
-                        navController.navigate(Routes.PAYMENT_PROCESSING)
+                    repository.startOwnMembershipSync()
+
+                    val currentSub =
+                        prefs.paymentSubmissions.value.firstOrNull {
+                            it.paymentId == sub.paymentId
+                        }
+
+                    when {
+                        currentSub?.status ==
+                            com.example.model.PaymentStatus.APPROVED ||
+                            isMembershipActive ->
+                            navController.navigate(Routes.PAYMENT_SUCCESS)
+
+                        currentSub?.status ==
+                            com.example.model.PaymentStatus.REJECTED ->
+                            navController.navigate(Routes.PAYMENT_FAILED)
+
+                        else ->
+                            navController.navigate(Routes.PAYMENT_PROCESSING)
                     }
                 },
+
                 onGoToHome = {
                     if (isMembershipActive) {
-                        val hasAllPermissions = checkAllPermissionsGranted()
-                        val dest = if (hasAllPermissions) Routes.HOME else Routes.FINISH_SETUP
+                        val dest =
+                            if (checkAllPermissionsGranted())
+                                Routes.HOME
+                            else
+                                Routes.FINISH_SETUP
+
                         navController.navigate(dest) {
-                            popUpTo(Routes.PAYMENT_PENDING) { inclusive = true }
+                            popUpTo(Routes.PAYMENT_PENDING) {
+                                inclusive = true
+                            }
                         }
                     } else {
                         navController.navigate(Routes.PLAN_SELECTION) {
-                            popUpTo(Routes.PAYMENT_PENDING) { inclusive = true }
+                            popUpTo(Routes.PAYMENT_PENDING) {
+                                inclusive = true
+                            }
                         }
                     }
                 }
             )
         }
-
         // 9. Payment Success Screen
         composable(Routes.PAYMENT_SUCCESS) {
             PaymentSuccessScreen(
