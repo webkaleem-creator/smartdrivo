@@ -1159,78 +1159,203 @@
 
     // 6. APPROVE PAYMENT (REAL FIRESTORE BATCH WRITE)
     async function approvePayment(paymentId, uid, planSelected, amount, utrNumber) {
-      const cleanUtr = (utrNumber || '').trim();
-      if (!confirm(`Approve payment UTR #${cleanUtr} for ₹${amount} and activate ${planSelected} plan for driver?`)) {
+      const cleanUtr = String(utrNumber || '').trim();
+
+      if (!/^\d{12}$/.test(cleanUtr)) {
+        showToast('UTR must be exactly 12 numeric digits.', 'error');
+        return;
+      }
+
+      if (!confirm(
+        `Approve payment UTR #${cleanUtr} for ₹${amount} and activate ${planSelected} plan for driver?`
+      )) {
         return;
       }
 
       try {
-        logMessage(`Approving payment #${paymentId} for driver UID: ${uid}...`);
+        logMessage(`Secure approval started for payment #${paymentId}...`);
 
-        // Compute days to add
-        let daysToAdd = 7;
-        const p = (planSelected || '').toUpperCase();
-        if (p.includes('3DAY')) daysToAdd = 3;
-        else if (p.includes('7DAY')) daysToAdd = 7;
-        else if (p.includes('15DAY')) daysToAdd = 15;
-        else if (p.includes('1MONTH') || p.includes('30DAY')) daysToAdd = 30;
+        // DUPLICATE_UTR_SECURITY_V3
+        // Check old APPROVED payments created before permanent UTR locks existed.
+        const historicalSnapshot =
+          await db.collection('payments')
+            .where('utrNumber', '==', cleanUtr)
+            .get();
 
-        const now = Date.now();
-        let baseTime = now;
+        const historicalDuplicate =
+          historicalSnapshot.docs.some(doc => {
+            const d = doc.data() || {};
+            return (
+              doc.id !== paymentId &&
+              String(d.status || '').toUpperCase() === 'APPROVED'
+            );
+          });
 
-        // Fetch driver's existing expiry if available
-        if (uid) {
-          try {
-            const userSnap = await db.collection('users').doc(uid).get();
-            if (userSnap.exists) {
-              const uData = userSnap.data();
-              if (uData.planExpireMillis && Number(uData.planExpireMillis) > now) {
-                baseTime = Number(uData.planExpireMillis);
-              }
-            }
-          } catch (fetchErr) {
-            console.warn("Could not read current driver expiry, using now:", fetchErr);
-          }
+        if (historicalDuplicate) {
+          throw new Error(
+            'This UTR was already approved for another payment.'
+          );
         }
 
-        const newExpiry = baseTime + (daysToAdd * 86400000);
+        let approvedDays = 0;
 
-        // Batch update: Payment document + Driver document
-        const batch = db.batch();
+        await db.runTransaction(async transaction => {
 
-        // 1. Payment document in /payments
-        const paymentRef = db.collection('payments').doc(paymentId);
-        batch.update(paymentRef, {
-          status: 'APPROVED',
-          approvedAt: now,
-          approvedBy: currentAdminEmail || currentAdminUid
-        });
+          const paymentRef =
+            db.collection('payments').doc(paymentId);
 
-        // 2. User document in /users
-        if (uid) {
-          const userRef = db.collection('users').doc(uid);
-          batch.update(userRef, {
-            plan: planSelected || '7DAYS',
-            planPrice: Number(amount) || 0,
+          const utrRef =
+            db.collection('paymentUtrs').doc(cleanUtr);
+
+          const paymentSnap =
+            await transaction.get(paymentRef);
+
+          if (!paymentSnap.exists) {
+            throw new Error('Payment record not found.');
+          }
+
+          const paymentData =
+            paymentSnap.data() || {};
+
+          const status =
+            String(paymentData.status || 'PENDING')
+              .toUpperCase();
+
+          if (status === 'APPROVED') {
+            throw new Error('Payment already approved.');
+          }
+
+          const storedUtr =
+            String(paymentData.utrNumber || '').trim();
+
+          if (storedUtr !== cleanUtr) {
+            throw new Error('Payment UTR mismatch.');
+          }
+
+          const safeUid =
+            String(paymentData.uid || '').trim();
+
+          if (!safeUid) {
+            throw new Error('Driver UID missing.');
+          }
+
+          const safePlan =
+            String(paymentData.planSelected || '7DAYS')
+              .toUpperCase();
+
+          const safeAmount =
+            Number(paymentData.amount) || 0;
+
+          let daysToAdd = 7;
+
+          if (safePlan === '3DAYS') {
+            daysToAdd = 3;
+          } else if (safePlan === '7DAYS') {
+            daysToAdd = 7;
+          } else if (safePlan === '15DAYS') {
+            daysToAdd = 15;
+          } else if (
+            safePlan === '1MONTH' ||
+            safePlan === '30DAYS'
+          ) {
+            daysToAdd = 30;
+          }
+
+          approvedDays = daysToAdd;
+
+          // Permanent atomic UTR reservation.
+          const utrSnap =
+            await transaction.get(utrRef);
+
+          if (utrSnap.exists) {
+            throw new Error(
+              'This UTR was already approved.'
+            );
+          }
+
+          const userRef =
+            db.collection('users').doc(safeUid);
+
+          const userSnap =
+            await transaction.get(userRef);
+
+          if (!userSnap.exists) {
+            throw new Error('Driver account not found.');
+          }
+
+          const userData =
+            userSnap.data() || {};
+
+          const now = Date.now();
+
+          const oldExpiry =
+            Number(userData.planExpireMillis) || 0;
+
+          const baseTime =
+            oldExpiry > now
+              ? oldExpiry
+              : now;
+
+          const newExpiry =
+            baseTime +
+            (daysToAdd * 86400000);
+
+          transaction.update(paymentRef, {
+            status: 'APPROVED',
+            approvedAt: now,
+            approvedBy:
+              currentAdminUid ||
+              currentAdminEmail ||
+              'admin'
+          });
+
+          transaction.update(userRef, {
+            plan: safePlan,
+            planPrice: safeAmount,
             planExpireMillis: newExpiry,
             isApproved: true,
             isActive: true,
             updatedAt: now
           });
-        }
 
-        await batch.commit();
+          transaction.set(utrRef, {
+            utrNumber: cleanUtr,
+            paymentId: paymentId,
+            uid: safeUid,
+            approvedBy:
+              currentAdminUid ||
+              currentAdminEmail ||
+              'admin',
+            approvedAt: now
+          });
+        });
 
-        showToast(`✓ Payment approved! Driver plan activated for ${daysToAdd} days.`, 'success');
-        logMessage(`Payment #${paymentId} approved successfully in Firestore.`);
+        showToast(
+          `✓ Payment approved! Driver membership activated for ${approvedDays} days.`,
+          'success'
+        );
+
+        logMessage(
+          `Payment #${paymentId} approved with permanent UTR lock.`
+        );
 
       } catch (err) {
-        console.error("Payment approval error:", err);
-        logMessage(`Payment approval failed: ${err.message}`);
-        showToast(`Error approving payment: ${err.message}`, 'error');
+
+        console.error(
+          'Secure payment approval error:',
+          err
+        );
+
+        logMessage(
+          `Payment approval blocked/failed: ${err.message}`
+        );
+
+        showToast(
+          `Approval blocked: ${err.message}`,
+          'error'
+        );
       }
     }
-
     // 7. REJECT PAYMENT (REAL FIRESTORE WRITE)
     async function rejectPayment(paymentId, utrNumber) {
       if (!confirm(`Are you sure you want to reject payment submission for UTR #${utrNumber}?`)) {

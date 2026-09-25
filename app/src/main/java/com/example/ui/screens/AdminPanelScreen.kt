@@ -368,25 +368,21 @@ fun AdminPanelScreen(
                                 return@PaymentApprovalsSection
                             }
 
-                            // Add days based on plan
-                            val daysToAdd = when (sub.planSelected.uppercase()) {
-                                "3DAYS" -> 3
-                                "7DAYS" -> 7
-                                "15DAYS" -> 15
-                                "1MONTH", "30DAYS" -> 30
-                                else -> 7
-                            }
-
-                            // Update payment & user in Firestore and locally
-                            repository.adminApprovePayment(sub, daysToAdd) { success ->
+                            // Secure approval:
+                            // fresh duplicate lookup + permanent UTR lock +
+                            // payment/user update in one Firestore transaction.
+                            repository.adminApprovePayment(sub) { success, message ->
                                 Toast.makeText(
                                     context,
-                                    "✓ Payment Approved! Driver membership activated for $daysToAdd days with 12-digit UTR ($cleanUtr).",
+                                    if (success) {
+                                        "✓ $message"
+                                    } else {
+                                        "Approval Blocked: $message"
+                                    },
                                     Toast.LENGTH_LONG
                                 ).show()
                             }
-                        },
-                        onReject = { sub ->
+                        },                        onReject = { sub ->
                             repository.adminRejectPayment(sub.paymentId) {
                                 Toast.makeText(context, "Payment marked as REJECTED in Firestore", Toast.LENGTH_SHORT).show()
                             }

@@ -63,13 +63,40 @@ service cloud.firestore {
         )
       );
       
-      // Only admins can approve, reject, or modify payment status
-      allow update: if isAdmin();
+      // Only admins can modify payment status.
+      // A transition into APPROVED must atomically create the matching
+      // immutable /paymentUtrs/{utr} reservation document.
+      allow update: if isAdmin() && (
+        request.resource.data.status != 'APPROVED' ||
+        resource.data.status == 'APPROVED' ||
+        (
+          request.resource.data.utrNumber is string &&
+          request.resource.data.uid is string &&
+          getAfter(
+            /databases/$(database)/documents/paymentUtrs/$(request.resource.data.utrNumber)
+          ).data.paymentId == paymentId &&
+          getAfter(
+            /databases/$(database)/documents/paymentUtrs/$(request.resource.data.utrNumber)
+          ).data.uid == request.resource.data.uid
+        )
+      );
       
       // Only admins can delete payment submissions
       allow delete: if isAdmin();
     }
     
+    // Permanent approved-UTR reservations.
+    // One UTR can be created only once and can never be overwritten/deleted.
+    match /paymentUtrs/{utr} {
+      allow read: if isAdmin();
+
+      allow create: if isAdmin() &&
+        request.resource.data.utrNumber == utr &&
+        request.resource.data.paymentId is string &&
+        request.resource.data.uid is string;
+
+      allow update, delete: if false;
+    }
     // Settings collection (global UPI, plan prices, community links)
     match /settings/{settingId} {
       // All authenticated users can read global settings

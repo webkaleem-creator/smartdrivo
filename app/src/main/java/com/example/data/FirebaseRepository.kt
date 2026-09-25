@@ -34,7 +34,7 @@ class FirebaseRepository(
     private var ownPaymentsListener: ListenerRegistration? = null
     private var adminUsersListener: ListenerRegistration? = null
     private var adminPaymentsListener: ListenerRegistration? = null
-
+
     private var globalSettingsListener: ListenerRegistration? = null
     init {
         try {
@@ -451,55 +451,156 @@ class FirebaseRepository(
         val fs = firestore
         val adminUid = auth?.currentUser?.uid
 
-        if (fs == null || adminUid.isNullOrBlank() || !prefs.userProfile.value.isAdmin) {
+        if (
+            fs == null ||
+            adminUid.isNullOrBlank() ||
+            !prefs.userProfile.value.isAdmin
+        ) {
             onComplete(false, "Admin authorization unavailable")
             return
         }
 
         val cleanUtr = submission.utrNumber.trim()
-        if (cleanUtr.length != 12 || !cleanUtr.all { it.isDigit() }) {
+
+        if (
+            cleanUtr.length != 12 ||
+            !cleanUtr.all { it.isDigit() }
+        ) {
             onComplete(false, "UTR must be exactly 12 numeric digits")
             return
         }
 
-        val daysToAdd = when (submission.planSelected.uppercase()) {
-            "3DAYS" -> 3
-            "7DAYS" -> 7
-            "15DAYS" -> 15
-            "1MONTH", "30DAYS" -> 30
-            else -> 7
-        }
-
         scope.launch {
             try {
-                val paymentRef = fs.collection("payments").document(submission.paymentId)
-                val userRef = fs.collection("users").document(submission.uid)
-                val utrRef = fs.collection("paymentUtrs").document(cleanUtr)
+
+                // DUPLICATE_UTR_SECURITY_V3
+                // Protect UTRs approved before paymentUtrs reservation existed.
+                val historicalMatches =
+                    fs.collection("payments")
+                        .whereEqualTo("utrNumber", cleanUtr)
+                        .get()
+                        .await()
+
+                val historicalApprovedDuplicate =
+                    historicalMatches.documents.any { doc ->
+                        doc.id != submission.paymentId &&
+                            (doc.getString("status") ?: "")
+                                .equals("APPROVED", ignoreCase = true)
+                    }
+
+                if (historicalApprovedDuplicate) {
+                    throw IllegalStateException(
+                        "This UTR was already approved for another payment"
+                    )
+                }
+
+                val paymentRef =
+                    fs.collection("payments")
+                        .document(submission.paymentId)
+
+                val utrRef =
+                    fs.collection("paymentUtrs")
+                        .document(cleanUtr)
+
                 val now = System.currentTimeMillis()
 
+                var approvedDays = 0
+
                 fs.runTransaction { tx ->
+
                     val paymentDoc = tx.get(paymentRef)
+
                     if (!paymentDoc.exists()) {
-                        throw IllegalStateException("Payment record not found")
+                        throw IllegalStateException(
+                            "Payment record not found"
+                        )
                     }
 
-                    if ((paymentDoc.getString("status") ?: "PENDING") == "APPROVED") {
-                        throw IllegalStateException("Payment already approved")
+                    val currentStatus =
+                        (paymentDoc.getString("status") ?: "PENDING")
+                            .uppercase()
+
+                    if (currentStatus == "APPROVED") {
+                        throw IllegalStateException(
+                            "Payment already approved"
+                        )
                     }
 
+                    val storedUtr =
+                        paymentDoc.getString("utrNumber")
+                            ?.trim()
+                            .orEmpty()
+
+                    if (storedUtr != cleanUtr) {
+                        throw IllegalStateException(
+                            "Payment UTR mismatch"
+                        )
+                    }
+
+                    val storedUid =
+                        paymentDoc.getString("uid")
+                            ?.trim()
+                            .orEmpty()
+
+                    if (storedUid.isBlank()) {
+                        throw IllegalStateException(
+                            "Driver UID missing"
+                        )
+                    }
+
+                    val storedPlan =
+                        (paymentDoc.getString("planSelected") ?: "7DAYS")
+                            .uppercase()
+
+                    val storedAmount =
+                        paymentDoc.getLong("amount")
+                            ?.toInt()
+                            ?: submission.amount
+
+                    val daysToAdd =
+                        when (storedPlan) {
+                            "3DAYS" -> 3
+                            "7DAYS" -> 7
+                            "15DAYS" -> 15
+                            "1MONTH", "30DAYS" -> 30
+                            else -> 7
+                        }
+
+                    approvedDays = daysToAdd
+
+                    // This document is the permanent UTR lock.
                     val utrDoc = tx.get(utrRef)
+
                     if (utrDoc.exists()) {
-                        throw IllegalStateException("This UTR was already approved")
+                        throw IllegalStateException(
+                            "This UTR was already approved"
+                        )
                     }
+
+                    val userRef =
+                        fs.collection("users")
+                            .document(storedUid)
 
                     val userDoc = tx.get(userRef)
+
                     if (!userDoc.exists()) {
-                        throw IllegalStateException("Driver account not found")
+                        throw IllegalStateException(
+                            "Driver account not found"
+                        )
                     }
 
-                    val oldExpiry = userDoc.getLong("planExpireMillis") ?: 0L
-                    val base = if (oldExpiry > now) oldExpiry else now
-                    val newExpiry = base + (daysToAdd * 86400000L)
+                    val oldExpiry =
+                        userDoc.getLong("planExpireMillis")
+                            ?: 0L
+
+                    val base =
+                        if (oldExpiry > now)
+                            oldExpiry
+                        else
+                            now
+
+                    val newExpiry =
+                        base + (daysToAdd * 86400000L)
 
                     tx.update(
                         paymentRef,
@@ -513,8 +614,8 @@ class FirebaseRepository(
                     tx.set(
                         userRef,
                         mapOf(
-                            "plan" to submission.planSelected,
-                            "planPrice" to submission.amount,
+                            "plan" to storedPlan,
+                            "planPrice" to storedAmount,
                             "planExpireMillis" to newExpiry,
                             "isApproved" to true,
                             "isActive" to true,
@@ -527,8 +628,8 @@ class FirebaseRepository(
                         utrRef,
                         mapOf(
                             "utrNumber" to cleanUtr,
-                            "paymentId" to submission.paymentId,
-                            "uid" to submission.uid,
+                            "paymentId" to paymentDoc.id,
+                            "uid" to storedUid,
                             "approvedBy" to adminUid,
                             "approvedAt" to now
                         )
@@ -541,17 +642,28 @@ class FirebaseRepository(
                 )
 
                 kotlinx.coroutines.withContext(Dispatchers.Main) {
-                    onComplete(true, "Membership activated for $daysToAdd days")
+                    onComplete(
+                        true,
+                        "Membership activated for $approvedDays days"
+                    )
                 }
+
             } catch (e: Exception) {
-                Log.e("FirebaseRepo", "Admin approval failed: ${e.message}")
+
+                Log.e(
+                    "FirebaseRepo",
+                    "Admin approval blocked/failed: ${e.message}"
+                )
+
                 kotlinx.coroutines.withContext(Dispatchers.Main) {
-                    onComplete(false, e.message ?: "Approval failed")
+                    onComplete(
+                        false,
+                        e.message ?: "Approval failed"
+                    )
                 }
             }
         }
     }
-
     fun adminRejectPayment(
         submission: PaymentSubmission,
         onComplete: (Boolean, String) -> Unit
@@ -962,48 +1074,17 @@ class FirebaseRepository(
         }
     }
 
-    fun adminApprovePayment(submission: PaymentSubmission, daysToAdd: Int, onComplete: ((Boolean) -> Unit)? = null) {
-        prefs.updatePaymentStatus(submission.paymentId, PaymentStatus.APPROVED)
-        prefs.extendUserPlan(submission.uid, daysToAdd, submission.planSelected, submission.amount)
-        scope.launch {
-            try {
-                val now = System.currentTimeMillis()
-                val fs = firestore ?: return@launch
-
-                // 1. Update payments collection in Firestore
-                fs.collection("payments").document(submission.paymentId).update(
-                    mapOf(
-                        "status" to PaymentStatus.APPROVED.name,
-                        "approvedAt" to now
-                    )
-                ).await()
-
-                // 2. Extend driver plan in users collection in Firestore
-                if (submission.uid.isNotBlank()) {
-                    val userDoc = fs.collection("users").document(submission.uid).get().await()
-                    val currentExpiry = userDoc.getLong("planExpireMillis") ?: 0L
-                    val baseTime = if (currentExpiry > now) currentExpiry else now
-                    val newExpiry = baseTime + (daysToAdd * 86400000L)
-
-                    fs.collection("users").document(submission.uid).update(
-                        mapOf(
-                            "plan" to submission.planSelected,
-                            "planPrice" to submission.amount,
-                            "planExpireMillis" to newExpiry,
-                            "isApproved" to true,
-                            "isActive" to true,
-                            "updatedAt" to now
-                        )
-                    ).await()
-                }
-                onComplete?.invoke(true)
-            } catch (e: Exception) {
-                Log.w("FirebaseRepo", "Firestore adminApprovePayment failed: ${e.message}")
-                onComplete?.invoke(false)
-            }
+    @Suppress("UNUSED_PARAMETER")
+    fun adminApprovePayment(
+        submission: PaymentSubmission,
+        daysToAdd: Int,
+        onComplete: ((Boolean) -> Unit)? = null
+    ) {
+        // Legacy callers are forced through the secure transaction.
+        adminApprovePayment(submission) { success, _ ->
+            onComplete?.invoke(success)
         }
     }
-
     fun adminRejectPayment(paymentId: String, onComplete: ((Boolean) -> Unit)? = null) {
         prefs.updatePaymentStatus(paymentId, PaymentStatus.REJECTED)
         scope.launch {
