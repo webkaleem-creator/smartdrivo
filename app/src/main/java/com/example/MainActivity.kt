@@ -689,8 +689,7 @@ fun SmartDrivoApp(
             LaunchedEffect(liveSub.status, isMembershipActive) {
                 when {
                     liveSub.status ==
-                        com.example.model.PaymentStatus.APPROVED ||
-                        isMembershipActive -> {
+                        com.example.model.PaymentStatus.APPROVED -> {
                         navController.navigate(Routes.PAYMENT_SUCCESS) {
                             launchSingleTop = true
                         }
@@ -717,8 +716,7 @@ fun SmartDrivoApp(
 
                     when {
                         currentSub?.status ==
-                            com.example.model.PaymentStatus.APPROVED ||
-                            isMembershipActive ->
+                            com.example.model.PaymentStatus.APPROVED ->
                             navController.navigate(Routes.PAYMENT_SUCCESS)
 
                         currentSub?.status ==
