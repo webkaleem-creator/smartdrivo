@@ -105,6 +105,7 @@ fun OrderHistoryScreen(
     onBack: () -> Unit
 ) {
     val historyEntities by viewModel.history.collectAsStateWithLifecycle()
+    val userProfile by prefs.userProfile.collectAsStateWithLifecycle()
     val history = remember(historyEntities) {
         historyEntities.sortedByDescending { it.detectedAt }.map { it.toOrderHistoryItem() }
     }

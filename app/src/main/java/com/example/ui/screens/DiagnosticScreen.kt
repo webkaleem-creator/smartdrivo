@@ -378,9 +378,55 @@ private fun SimulationDiagnosticCard(
         mutableStateOf(false)
     }
 
+    var isUberSimulating by remember {
+        mutableStateOf(false)
+    }
+
     val anySimulationRunning =
         isRapidoSimulating ||
-            isOlaSimulating
+            isOlaSimulating ||
+            isUberSimulating
+
+    fun showDiagnosticOverlay(
+        platform: String,
+        amount: Float,
+        pickup: String,
+        pickupDist: Float,
+        drop: String,
+        dropDist: Float,
+        dropArea: String
+    ) {
+        if (
+            !PermissionHelper
+                .isOverlayPermissionGranted(context)
+        ) {
+            PermissionHelper
+                .openOverlaySettings(context)
+
+            return
+        }
+
+        val timeFormat =
+            SimpleDateFormat(
+                "hh:mm a",
+                Locale.getDefault()
+            )
+
+        val currentTimeStr =
+            timeFormat.format(Date())
+
+        FloatingOverlayService.show(
+            context = context,
+            amount = amount,
+            pickup = pickup,
+            pickupDist = pickupDist,
+            drop = drop,
+            dropDist = dropDist,
+            dropArea = dropArea,
+            time = currentTimeStr,
+            platform = platform
+        )
+    }
 
     Card(
         modifier = Modifier
@@ -400,6 +446,7 @@ private fun SimulationDiagnosticCard(
         Column(
             modifier = Modifier.padding(12.dp)
         ) {
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment =
@@ -427,9 +474,8 @@ private fun SimulationDiagnosticCard(
 
             Text(
                 text =
-                    "Test Ola uses a mock Ola offer with your CURRENT saved filters. " +
-                    "It verifies engine decision, history and diagnostics. " +
-                    "It does not tap the real Ola app.",
+                    "Admin-only mock tests use your CURRENT saved filters. " +
+                    "They verify platform, rules, history and diagnostics without tapping the real driver apps.",
                 fontSize = 12.sp,
                 color = TextDarkSecondary,
                 modifier = Modifier.padding(
@@ -439,17 +485,29 @@ private fun SimulationDiagnosticCard(
                 fontFamily = FontFamily.Default
             )
 
-            // ------------------------------------------------
-            // RAPIDO + OLA simulation buttons
-            // ------------------------------------------------
+
+            // =================================================
+            // MOCK ENGINE TESTS
+            // =================================================
+
+            Text(
+                text = "MOCK ENGINE TEST",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextDarkSecondary
+            )
+
+            Spacer(
+                modifier = Modifier.height(6.dp)
+            )
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement =
-                    Arrangement.spacedBy(8.dp),
-                verticalAlignment =
-                    Alignment.CenterVertically
+                    Arrangement.spacedBy(7.dp)
             ) {
 
+                // ---------------- RAPIDO ----------------
                 Button(
                     onClick = {
                         if (anySimulationRunning) {
@@ -475,7 +533,8 @@ private fun SimulationDiagnosticCard(
                     shape = RoundedCornerShape(8.dp),
                     colors =
                         ButtonDefaults.buttonColors(
-                            containerColor = BluePrimary
+                            containerColor =
+                                BluePrimary
                         ),
                     modifier = Modifier
                         .weight(1f)
@@ -488,14 +547,15 @@ private fun SimulationDiagnosticCard(
                             if (isRapidoSimulating)
                                 "Testing..."
                             else
-                                "Test Ride",
-                        fontSize = 12.sp,
+                                "Rapido",
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        fontFamily = FontFamily.Default
+                        color = Color.White
                     )
                 }
 
+
+                // ---------------- OLA ----------------
                 Button(
                     onClick = {
                         if (anySimulationRunning) {
@@ -533,45 +593,107 @@ private fun SimulationDiagnosticCard(
                     Text(
                         text =
                             if (isOlaSimulating)
-                                "Testing Ola..."
+                                "Testing..."
                             else
-                                "Test Ola",
-                        fontSize = 12.sp,
+                                "Ola",
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        fontFamily = FontFamily.Default
+                        color = Color.White
+                    )
+                }
+
+
+                // ---------------- UBER ----------------
+                Button(
+                    onClick = {
+                        if (anySimulationRunning) {
+                            return@Button
+                        }
+
+                        isUberSimulating = true
+
+                        coroutineScope.launch(
+                            Dispatchers.IO
+                        ) {
+                            try {
+                                runUberSimulationTest(
+                                    roomRepo = roomRepo,
+                                    prefs = prefs
+                                )
+                            } finally {
+                                isUberSimulating = false
+                            }
+                        }
+                    },
+                    enabled = !anySimulationRunning,
+                    shape = RoundedCornerShape(8.dp),
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor =
+                                Color.Black
+                        ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag(
+                            "run_uber_simulation_button"
+                        )
+                ) {
+                    Text(
+                        text =
+                            if (isUberSimulating)
+                                "Testing..."
+                            else
+                                "Uber",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
                     )
                 }
             }
 
+
             Spacer(
-                modifier = Modifier.height(8.dp)
+                modifier = Modifier.height(12.dp)
             )
 
-            // ------------------------------------------------
-            // Existing overlay test
-            // ------------------------------------------------
-            Button(
-                onClick = {
-                    if (
-                        !PermissionHelper
-                            .isOverlayPermissionGranted(context)
-                    ) {
-                        PermissionHelper
-                            .openOverlaySettings(context)
-                    } else {
+            HorizontalDivider(
+                color =
+                    CardBorderDefault.copy(
+                        alpha = 0.7f
+                    )
+            )
 
-                        val timeFormat =
-                            SimpleDateFormat(
-                                "hh:mm a",
-                                Locale.getDefault()
-                            )
+            Spacer(
+                modifier = Modifier.height(10.dp)
+            )
 
-                        val currentTimeStr =
-                            timeFormat.format(Date())
 
-                        FloatingOverlayService.show(
-                            context = context,
+            // =================================================
+            // OVERLAY PREVIEW
+            // =================================================
+
+            Text(
+                text = "OVERLAY PREVIEW",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextDarkSecondary
+            )
+
+            Spacer(
+                modifier = Modifier.height(6.dp)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement =
+                    Arrangement.spacedBy(7.dp)
+            ) {
+
+                // RAPIDO OVERLAY
+                Button(
+                    onClick = {
+                        showDiagnosticOverlay(
+                            platform = "Rapido",
                             amount = 145f,
                             pickup =
                                 "Indiranagar 100ft Rd, Bangalore",
@@ -579,35 +701,109 @@ private fun SimulationDiagnosticCard(
                             drop =
                                 "Koramangala 5th Block, Bangalore",
                             dropDist = 6.8f,
-                            dropArea = "Koramangala",
-                            time = currentTimeStr,
-                            platform = "Rapido"
+                            dropArea = "Koramangala"
                         )
-                    }
-                },
-                shape = RoundedCornerShape(8.dp),
-                colors =
-                    ButtonDefaults.buttonColors(
-                        containerColor = BlueDark
-                    ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag(
-                        "test_overlay_button"
+                    },
+                    shape =
+                        RoundedCornerShape(8.dp),
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor =
+                                BluePrimary
+                        ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag(
+                            "test_rapido_overlay_button"
+                        )
+                ) {
+                    Text(
+                        text = "Rapido",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
                     )
-            ) {
-                Text(
-                    text = "Test Overlay",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    fontFamily = FontFamily.Default
-                )
+                }
+
+
+                // OLA OVERLAY
+                Button(
+                    onClick = {
+                        showDiagnosticOverlay(
+                            platform = "Ola",
+                            amount = 150f,
+                            pickup =
+                                "Mehdipatnam, Hyderabad",
+                            pickupDist = 1.5f,
+                            drop =
+                                "Banjara Hills, Hyderabad",
+                            dropDist = 7.0f,
+                            dropArea =
+                                "Banjara Hills"
+                        )
+                    },
+                    shape =
+                        RoundedCornerShape(8.dp),
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor =
+                                Color(0xFF00A859)
+                        ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag(
+                            "test_ola_overlay_button"
+                        )
+                ) {
+                    Text(
+                        text = "Ola",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+
+
+                // UBER OVERLAY
+                Button(
+                    onClick = {
+                        showDiagnosticOverlay(
+                            platform = "Uber",
+                            amount = 175f,
+                            pickup =
+                                "Tolichowki, Hyderabad",
+                            pickupDist = 1.2f,
+                            drop =
+                                "HITEC City, Hyderabad",
+                            dropDist = 6.5f,
+                            dropArea =
+                                "HITEC City"
+                        )
+                    },
+                    shape =
+                        RoundedCornerShape(8.dp),
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor =
+                                Color.Black
+                        ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag(
+                            "test_uber_overlay_button"
+                        )
+                ) {
+                    Text(
+                        text = "Uber",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
             }
         }
     }
 }
-
 
 // ============================================================
 // OLA ENGINE DIAGNOSTIC SIMULATION
@@ -864,6 +1060,271 @@ private suspend fun runOlaSimulationTest(
     prefs.notifyOrderHistoryChanged()
 }
 
+
+
+// ============================================================
+// UBER ENGINE DIAGNOSTIC SIMULATION
+//
+// MOCK ORDER:
+// Fare        ₹175 total
+// Base Fare   ₹165
+// Tip         ₹10
+// Pickup      1.2 km
+// Drop        6.5 km
+// Pickup      Tolichowki, Hyderabad
+// Drop        HITEC City, Hyderabad
+//
+// Uses CURRENT SmartDrivo filters / Go-To / No-Go.
+// No real Uber app click happens here.
+// ============================================================
+
+private suspend fun runUberSimulationTest(
+    roomRepo: RideHistoryRepository,
+    prefs: PreferencesManager
+) {
+    val startMs =
+        System.currentTimeMillis()
+
+    val testId =
+        "UBER-TEST-${startMs.toString().takeLast(6)}"
+
+    val candidate =
+        RideCandidate(
+            platform = Platform.UBER,
+            vehicleType = VehicleType.AUTO,
+            fare = 175f,
+            baseFare = 165f,
+            tipAmount = 10f,
+            pickupDistKm = 1.2f,
+            dropDistKm = 6.5f,
+            pickupAddress =
+                "Tolichowki, Hyderabad",
+            dropAddress =
+                "HITEC City, Hyderabad",
+            dropArea =
+                "HITEC City",
+            bookingId = testId,
+            detectionTimeMs = startMs
+        )
+
+
+    // --------------------------------------------------------
+    // 1. DETECTION
+    // --------------------------------------------------------
+
+    val entity =
+        roomRepo.onOrderDetected(
+            candidate = candidate,
+            initialReasonCode =
+                "UBER_TEST_PROCESSING",
+            initialReasonText =
+                "Uber diagnostic ride detected. Evaluating current saved filters..."
+        )
+
+    RideDiagnosticsManager.recordDetection(
+        id = entity.id,
+        candidate = candidate,
+        insertLatencyMs =
+            entity.historyInsertLatencyMs
+    )
+
+    kotlinx.coroutines.delay(40L)
+
+
+    // --------------------------------------------------------
+    // 2. LOAD CURRENT SAVED SETTINGS
+    // --------------------------------------------------------
+
+    val settings =
+        prefs.loadSettings()
+
+    val goToAreas =
+        prefs.loadGoToAreas()
+
+    val noGoAreas =
+        prefs.loadNoGoAreas()
+
+
+    // --------------------------------------------------------
+    // 3. ACTUAL SMARTDRIVO RULE ENGINE
+    // --------------------------------------------------------
+
+    val decision: DecisionResult =
+        when {
+
+            !settings.isAutoAcceptActive ->
+                DecisionResult.Ignore(
+                    "Master Auto-Accept is OFF"
+                )
+
+            !settings.uberEnabled ->
+                DecisionResult.Ignore(
+                    "Uber platform is OFF in Settings"
+                )
+
+            else ->
+                AreaRulesEngine.evaluateRide(
+                    candidate = candidate,
+                    areas =
+                        goToAreas + noGoAreas,
+                    settings = settings,
+                    goToAreas = goToAreas,
+                    noGoAreas = noGoAreas,
+                    pickupLocationTextOverride =
+                        candidate.pickupAddress
+                )
+        }
+
+
+    val status: OrderStatus
+    val reasonCode: String
+    val reasonText: String
+
+    when (decision) {
+
+        is DecisionResult.Accept -> {
+            status =
+                OrderStatus.ACCEPTED
+
+            reasonCode =
+                "UBER_TEST_FILTERS_MATCHED"
+
+            reasonText =
+                "UBER TEST • ${decision.reason}"
+        }
+
+        is DecisionResult.Reject -> {
+            status =
+                OrderStatus.REJECTED
+
+            reasonCode =
+                "UBER_TEST_FILTER_REJECTED"
+
+            reasonText =
+                "UBER TEST • ${decision.reason}"
+        }
+
+        is DecisionResult.Ignore -> {
+            status =
+                OrderStatus.IGNORED
+
+            reasonCode =
+                "UBER_TEST_IGNORED"
+
+            reasonText =
+                "UBER TEST • ${decision.reason}"
+        }
+    }
+
+
+    val decisionEntity =
+        roomRepo.onOrderDecision(
+            id = entity.id,
+            status = status,
+            reasonCode = reasonCode,
+            reasonText = reasonText
+        )
+
+
+    RideDiagnosticsManager.recordDecision(
+        id = entity.id,
+        status = status,
+        ruleCode = reasonCode,
+        exactRule = reasonText,
+        decisionLatencyMs =
+            decisionEntity
+                ?.decisionLatencyMs
+                ?: 0L
+    )
+
+
+    // --------------------------------------------------------
+    // 4. MOCK UBER ACCEPT PATH
+    // --------------------------------------------------------
+
+    if (status == OrderStatus.ACCEPTED) {
+
+        kotlinx.coroutines.delay(25L)
+
+        roomRepo.onOrderActionAttempt(
+            entity.id
+        )
+
+        kotlinx.coroutines.delay(20L)
+
+        val completed =
+            roomRepo.onOrderActionCompleted(
+                id = entity.id,
+                status =
+                    OrderStatus.ACCEPTED,
+                reasonCode =
+                    "UBER_TEST_AUTO_ACCEPTED",
+                reasonText =
+                    reasonText,
+                actionSucceeded = true,
+                timesClicked = 1
+            )
+
+
+        RideDiagnosticsManager.recordAction(
+            id = entity.id,
+            status =
+                OrderStatus.ACCEPTED,
+            buttonFound = true,
+            buttonDetails =
+                "MOCK UBER: Accept request node detected",
+            clickMethod =
+                "SIMULATED Uber ACTION_CLICK — no external app tap",
+            finalAction =
+                "UBER TEST PASSED • Filters matched • Accept path ready",
+            actionLatencyMs =
+                completed
+                    ?.actionLatencyMs
+                    ?: 20L,
+            totalLatencyMs =
+                completed
+                    ?.totalProcessingMs
+                    ?: (
+                        System.currentTimeMillis() -
+                            startMs
+                        )
+        )
+
+    } else {
+
+        RideDiagnosticsManager.recordAction(
+            id = entity.id,
+            status = status,
+            buttonFound = false,
+            buttonDetails =
+                "Button action skipped because current filters did not accept this mock Uber ride",
+            clickMethod =
+                "No click — filter decision",
+            finalAction =
+                when (status) {
+
+                    OrderStatus.REJECTED ->
+                        "UBER TEST REJECTED • $reasonText"
+
+                    OrderStatus.IGNORED ->
+                        "UBER TEST IGNORED • $reasonText"
+
+                    else ->
+                        "UBER TEST • $reasonText"
+                },
+            actionLatencyMs = 0L,
+            totalLatencyMs =
+                decisionEntity
+                    ?.totalProcessingMs
+                    ?: (
+                        System.currentTimeMillis() -
+                            startMs
+                        )
+        )
+    }
+
+    prefs.notifyOrderHistoryChanged()
+}
 
 private suspend fun runSimulationTest(roomRepo: RideHistoryRepository, prefs: PreferencesManager) {
     val startMs = System.currentTimeMillis()

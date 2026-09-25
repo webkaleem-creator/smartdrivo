@@ -812,7 +812,7 @@ fun SmartDrivoApp(
         composable(Routes.ORDER_HISTORY) {
             OrderHistoryScreen(
                 prefs = prefs,
-                onNavigateToDiagnostics = { navController.navigate(Routes.DIAGNOSTICS) },
+                onNavigateToDiagnostics = { if (userProfile.isAdmin) navController.navigate(Routes.DIAGNOSTICS) },
                 onBack = { navController.popBackStack() }
             )
         }
@@ -822,7 +822,7 @@ fun SmartDrivoApp(
             SettingsScreen(
                 prefs = prefs,
                 onNavigateToAdminWeb = { navController.navigate(Routes.ADMIN_PANEL) },
-                onNavigateToDiagnostics = { navController.navigate(Routes.DIAGNOSTICS) },
+                onNavigateToDiagnostics = { if (userProfile.isAdmin) navController.navigate(Routes.DIAGNOSTICS) },
                 onBack = { navController.popBackStack() }
             )
         }
@@ -834,7 +834,7 @@ fun SmartDrivoApp(
                 onNavigateToPlanSelection = { navController.navigate(Routes.PLAN_SELECTION) },
                 onNavigateToPaymentHistory = { navController.navigate(Routes.PAYMENT_HISTORY) },
                 onNavigateToSettings = { navController.navigate(Routes.SETTINGS) },
-                onNavigateToDiagnostics = { navController.navigate(Routes.DIAGNOSTICS) },
+                onNavigateToDiagnostics = { if (userProfile.isAdmin) navController.navigate(Routes.DIAGNOSTICS) },
                 onNavigateToCommunity = { navController.navigate(Routes.COMMUNITY) },
                 onNavigateToAdminPanel = { navController.navigate(Routes.ADMIN_PANEL) },
                 onLogout = {
