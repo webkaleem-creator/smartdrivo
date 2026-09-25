@@ -995,6 +995,18 @@
       renderPaymentsQueue();
     }
 
+    function getDuplicatePaymentsForUtr(utrNumber, excludePaymentId = '') {
+      const cleanUtr = String(utrNumber || '').trim();
+
+      if (!cleanUtr || cleanUtr === 'N/A') {
+        return [];
+      }
+
+      return livePayments.filter(p =>
+        p.paymentId !== excludePaymentId &&
+        String(p.utrNumber || '').trim() === cleanUtr
+      );
+    }
     function renderPaymentsQueue() {
       const container = document.getElementById('paymentsList');
       if (!container) return;
@@ -1024,23 +1036,101 @@
         if (sub.status === 'APPROVED') badgeClass = 'badge-approved';
         else if (sub.status === 'REJECTED') badgeClass = 'badge-rejected';
 
+        // Duplicate UTR protection
+        const duplicateMatches =
+          getDuplicatePaymentsForUtr(
+            sub.utrNumber,
+            sub.paymentId
+          );
+
+        const isDuplicateUtr =
+          duplicateMatches.length > 0;
+
+        const duplicateWarningHtml =
+          isDuplicateUtr
+            ? `
+              <div style="
+                margin-top:8px;
+                padding:8px 10px;
+                border-radius:7px;
+                background:#4a1017;
+                border:1px solid #ef4444;
+                color:#f87171;
+                font-weight:700;
+                font-size:12px;">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                DUPLICATE UTR — already used in another payment.
+              </div>
+            `
+            : '';
+
         // Action buttons
         let actionsHtml = '';
+
         if (sub.status === 'PENDING') {
-          actionsHtml = `
-            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <button class="btn btn-success" onclick="approvePayment('${escapeHtml(sub.paymentId)}', '${escapeHtml(sub.uid)}', '${escapeHtml(sub.planSelected)}', ${sub.amount}, '${escapeHtml(sub.utrNumber)}')">
-                <i class="fa-solid fa-check"></i> Approve
-              </button>
-              <button class="btn btn-danger" onclick="rejectPayment('${escapeHtml(sub.paymentId)}', '${escapeHtml(sub.utrNumber)}')">
-                <i class="fa-solid fa-xmark"></i> Reject
-              </button>
-            </div>
-          `;
+
+          if (isDuplicateUtr) {
+
+            actionsHtml = `
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button
+                  class="btn btn-danger"
+                  disabled
+                  style="opacity:.65; cursor:not-allowed;">
+                  <i class="fa-solid fa-ban"></i>
+                  Duplicate UTR
+                </button>
+
+                <button
+                  class="btn btn-danger"
+                  onclick="rejectPayment(
+                    '${escapeHtml(sub.paymentId)}',
+                    '${escapeHtml(sub.utrNumber)}'
+                  )">
+                  <i class="fa-solid fa-xmark"></i>
+                  Reject
+                </button>
+              </div>
+            `;
+
+          } else {
+
+            actionsHtml = `
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button
+                  class="btn btn-success"
+                  onclick="approvePayment(
+                    '${escapeHtml(sub.paymentId)}',
+                    '${escapeHtml(sub.uid)}',
+                    '${escapeHtml(sub.planSelected)}',
+                    ${sub.amount},
+                    '${escapeHtml(sub.utrNumber)}'
+                  )">
+                  <i class="fa-solid fa-check"></i>
+                  Approve
+                </button>
+
+                <button
+                  class="btn btn-danger"
+                  onclick="rejectPayment(
+                    '${escapeHtml(sub.paymentId)}',
+                    '${escapeHtml(sub.utrNumber)}'
+                  )">
+                  <i class="fa-solid fa-xmark"></i>
+                  Reject
+                </button>
+              </div>
+            `;
+          }
+
         } else {
+
           actionsHtml = `
-            <div style="font-size: 12px; color: var(--text-dim);">
-              Processed on: <strong style="color: #FFF;">${formatTime(sub.approvedAt || sub.rejectedAt)}</strong>
+            <div style="font-size:12px; color:var(--text-dim);">
+              Processed on:
+              <strong style="color:#FFF;">
+                ${formatTime(sub.approvedAt || sub.rejectedAt)}
+              </strong>
             </div>
           `;
         }
