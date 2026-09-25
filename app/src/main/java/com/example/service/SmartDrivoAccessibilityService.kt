@@ -328,21 +328,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             }
         }
     }
-    private val uberOcrReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == UberScreenCaptureService.ACTION_OCR_OFFER) {
-                handleUberOcrOffer(intent)
-            }
-        }
-    }
-
-    @Volatile
-    private var lastUberOcrOfferKey: String? = null
-
-    @Volatile
-    private var lastUberOcrOfferHandledAt: Long = 0L
-
-    private val processingTimeoutRunnable = Runnable {
+private val processingTimeoutRunnable = Runnable {
         if (isProcessing) {
             Log.w(TAG, "Watchdog: Resetting isProcessing state after timeout")
             isProcessing = false
@@ -511,20 +497,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
             Log.e(TAG, "Error registering toggleReceiver: ${e.message}")
         }
-        try {
-            val ocrFilter = IntentFilter(UberScreenCaptureService.ACTION_OCR_OFFER)
-            ContextCompat.registerReceiver(
-                this,
-                uberOcrReceiver,
-                ocrFilter,
-                ContextCompat.RECEIVER_NOT_EXPORTED
-            )
-            Log.i(TAG, "UBER OCR bridge receiver registered")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error registering Uber OCR bridge receiver: ${e.message}")
-        }
-
-                // Auto Accept controls active SmartDrivo monitoring.
+// Auto Accept controls active SmartDrivo monitoring.
         if (preferencesManager.isAutoAcceptEnabled) {
             showActiveServiceNotification()
         } else {
@@ -2032,21 +2005,6 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
     private fun handleUberOrder(root: AccessibilityNodeInfo?, pkgName: String = "com.ubercab") {
         if (root == null) return
-
-        
-        // UBER_OCR_SINGLE_SOURCE_V2
-        // Current Uber Trip Radar offer values are more reliable from the
-        // user-approved OCR capture than from Accessibility text.
-        // While OCR capture is active, do NOT create a second Uber candidate
-        // from Accessibility. This prevents duplicate/wrong rows such as
-        // â‚¹7229 while OCR correctly recorded â‚¹229.
-        if (UberScreenCaptureService.isRunning) {
-            Log.d(
-                TAG,
-                "UBER ACCESSIBILITY OFFER PATH SKIPPED: OCR is authoritative"
-            )
-            return
-        }
 // Uber offer cards may be in a separate accessibility
         // window. Resolve the actual live order window first.
         val uberOrderRoot =
@@ -2265,182 +2223,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
             resetProcessing()
         }
     }
-    /**
-     * OCR fallback for current Uber Trip Radar builds whose visible card is not
-     * exposed through Accessibility. Only verified OCR cards reach this method.
-     */
-    private fun handleUberOcrOffer(intent: Intent) {
-        try {
-            if (!preferencesManager.isAutoAcceptEnabled) return
 
-            val settings = prefs.loadSettings()
-            val userProfile = prefs.userProfile.value
-            if (!userProfile.isPlanValid && !userProfile.isAdmin) return
-            if (!settings.uberEnabled) return
-
-            val fare = intent.getFloatExtra(UberScreenCaptureService.EXTRA_OCR_FARE, -1f)
-            val pickupKm = intent.getFloatExtra(UberScreenCaptureService.EXTRA_OCR_PICKUP_KM, -1f)
-            val tripKm = intent.getFloatExtra(UberScreenCaptureService.EXTRA_OCR_TRIP_KM, -1f)
-            val pickupAddress = intent.getStringExtra(UberScreenCaptureService.EXTRA_OCR_PICKUP_ADDRESS).orEmpty().trim()
-            val dropAddress = intent.getStringExtra(UberScreenCaptureService.EXTRA_OCR_DROP_ADDRESS).orEmpty().trim()
-            val action = intent.getStringExtra(UberScreenCaptureService.EXTRA_OCR_ACTION).orEmpty().trim()
-            val left = intent.getIntExtra(UberScreenCaptureService.EXTRA_OCR_LEFT, -1)
-            val top = intent.getIntExtra(UberScreenCaptureService.EXTRA_OCR_TOP, -1)
-            val right = intent.getIntExtra(UberScreenCaptureService.EXTRA_OCR_RIGHT, -1)
-            val bottom = intent.getIntExtra(UberScreenCaptureService.EXTRA_OCR_BOTTOM, -1)
-
-            val actionAllowed =
-                action.equals("Match", true) ||
-                action.equals("Accept", true) ||
-                action.equals("Accept ride", true) ||
-                action.equals("Accept trip", true)
-
-            val metrics = resources.displayMetrics
-            val boundsValid =
-                left >= 0 && top >= 0 && right > left && bottom > top &&
-                    right <= metrics.widthPixels && bottom <= metrics.heightPixels &&
-                    ((top + bottom) / 2f) > (metrics.heightPixels * 0.70f)
-
-            if (fare <= 0f || pickupKm <= 0f || tripKm <= 0f || !actionAllowed || !boundsValid) {
-                Log.w(TAG, "UBER OCR BRIDGE BLOCKED: invalid payload")
-                return
-            }
-
-            val candidate = RideCandidate(
-                fare = fare,
-                pickupDistKm = pickupKm,
-                dropDistKm = tripKm,
-                pickupAddress = pickupAddress.ifBlank { "Address unavailable" },
-                dropAddress = dropAddress.ifBlank { "Address unavailable" },
-                dropArea = dropAddress.split(",").firstOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: "City Area",
-                platform = Platform.UBER,
-                vehicleType = userProfile.vehicleType,
-                bookingId = null,
-                detectionTimeMs = System.currentTimeMillis()
-            )
-
-            if (action.equals("Match", true) && isPendingUberMatchStage(candidate)) {
-                return
-            }
-
-            val now = System.currentTimeMillis()
-            val offerKey = "${getOrderIdentifier(candidate)}|${action.lowercase()}"
-            if (offerKey == lastUberOcrOfferKey && now - lastUberOcrOfferHandledAt < 4500L) return
-            if (isProcessing) return
-
-            lastUberOcrOfferKey = offerKey
-            lastUberOcrOfferHandledAt = now
-            isProcessing = true
-            handler.removeCallbacks(processingTimeoutRunnable)
-            handler.postDelayed(processingTimeoutRunnable, 8000L)
-
-            val pendingUberTwoStage = isPendingUberMatchStage(candidate)
-            val recordId = if (pendingUberTwoStage) {
-                activeOrderRecordIds[Platform.UBER] ?: onOrderDetectedFast(candidate)
-            } else {
-                onOrderDetectedFast(candidate)
-            }
-
-            Log.i(TAG, "UBER OCR OFFER RECEIVED: fare=â‚¹$fare pickup=${pickupKm}km trip=${tripKm}km action='$action'")
-
-            val directResult = evaluateDirectRideFilters(candidate)
-            when (directResult.status) {
-                OrderStatus.REJECTED -> {
-                    onOrderDecisionFast(recordId, candidate, OrderStatus.REJECTED, "REJECT_CRITERIA_MET", directResult.reason)
-                    resetProcessing()
-                    return
-                }
-                OrderStatus.IGNORED -> {
-                    onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED, "CRITERIA_NOT_MET", directResult.reason)
-                    resetProcessing()
-                    return
-                }
-                else -> Unit
-            }
-
-            val goToAreas = prefs.loadGoToAreas()
-            val noGoAreas = prefs.loadNoGoAreas()
-            val directSettings = readDirectSettingsFresh()
-            val effectiveSettings = settings.copy(
-                minFare = directSettings.minFare,
-                maxFare = directSettings.maxFare,
-                maxPickupDistanceKm = directSettings.maxPickupKm,
-                maxDropDistanceKm = directSettings.maxDropKm,
-                maxDropKm = directSettings.maxDropKm
-            )
-
-            when (val areaDecision = AreaRulesEngine.evaluateRide(
-                candidate = candidate,
-                areas = goToAreas + noGoAreas,
-                settings = effectiveSettings,
-                goToAreas = goToAreas,
-                noGoAreas = noGoAreas,
-                pickupLocationTextOverride = candidate.pickupAddress.orEmpty()
-            )) {
-                is DecisionResult.Reject -> {
-                    val isNoGo = areaDecision.reason.contains("No-Go", true)
-                    onOrderDecisionFast(
-                        recordId,
-                        candidate,
-                        if (isNoGo) OrderStatus.REJECTED else OrderStatus.IGNORED,
-                        if (isNoGo) "REJECT_CRITERIA_MET" else "CRITERIA_NOT_MET",
-                        areaDecision.reason
-                    )
-                    resetProcessing()
-                    return
-                }
-                is DecisionResult.Ignore -> {
-                    onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED, "CRITERIA_NOT_MET", areaDecision.reason)
-                    resetProcessing()
-                    return
-                }
-                else -> Unit
-            }
-
-            triggerOrderDetectedVibration(getOrderIdentifier(candidate))
-            
-        // UBER_OCR_CLICK_GATE_FIX_V2
-        // Verified Uber OCR offers must reach simulateTapGesture so the
-        // callback can finalize History as success/failure instead of staying PROCESSING.
-val centerX = (left + right) / 2f
-            val centerY = (top + bottom) / 2f
-            onOrderActionAttemptFast(recordId)
-            Log.i(TAG, "UBER OCR VERIFIED ACTION: tapping '$action' at ($centerX,$centerY)")
-
-            simulateTapGesture(centerX, centerY, isInternalFallback = true) { success ->
-                if (success) {
-                    verifyUberAfterClick(
-                        candidate = candidate,
-                        clickedLabel = action,
-                        attemptNumber = 1,
-                        clickMethod = "OCR verified Uber action bounds"
-                    )
-                } else {
-                    failUberAccept(
-                        candidate = candidate,
-                        reasonCode = "OCR_ACTION_GESTURE_FAILED",
-                        reasonText = "Uber OCR-verified action gesture failed",
-                        buttonFound = true,
-                        clickMethod = "OCR verified Uber action bounds"
-                    )
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "UBER OCR BRIDGE error", e)
-            resetProcessing()
-        }
-    }
-    /**
-     * Uber acceptance flow based on verified Uber UI behavior:
-     *
-     * 1. Re-scan briefly while Uber card is still rendering.
-     * 2. Wait while Accept button is disabled/counting down.
-     * 3. Gesture TAP/SWIPE on VERIFIED Accept bounds first.
-     * 4. ACTION_CLICK / safe clickable ancestor fallback.
-     * 5. "Match" is treated as stage 1, not final acceptance.
-     * 6. Verify Uber state before recording ACCEPTED.
-     * 7. Never use blind fixed screen coordinates.
-     */
     private fun executeUberAutoAccept(
         root: AccessibilityNodeInfo,
         candidate: RideCandidate,
@@ -7030,11 +6813,6 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
             unregisterReceiver(toggleReceiver)
         } catch (e: Exception) {
             Log.e(TAG, "Error unregistering toggleReceiver: ${e.message}")
-        }
-        try {
-            unregisterReceiver(uberOcrReceiver)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error unregistering Uber OCR receiver: ${e.message}")
         }
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
