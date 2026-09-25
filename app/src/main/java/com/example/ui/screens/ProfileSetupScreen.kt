@@ -225,87 +225,108 @@ fun ProfileSetupScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // City & State Row
-                    Row(
+                    // City - full width for clear mobile display
+                    Text(
+                        text = "City *",
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White,
+                        fontSize = 13.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    OutlinedTextField(
+                        value = city,
+                        onValueChange = {
+                            city = it
+                            errorText = null
+                        },
+                        placeholder = {
+                            Text(
+                                "e.g. Hyderabad",
+                                color = Color(0xFF64748B),
+                                fontSize = 13.sp
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.LocationCity,
+                                contentDescription = null,
+                                tint = AccentGreen,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Words,
+                            imeAction = ImeAction.Next
+                        ),
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        // City Field
-                        Column(modifier = Modifier.weight(1f)) {
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color(0xFF0F172A),
+                            unfocusedContainerColor = Color(0xFF0F172A),
+                            focusedBorderColor = AccentGreen,
+                            unfocusedBorderColor = Color(0xFF334155),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            cursorColor = AccentGreen
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // State - full width for clear mobile display
+                    Text(
+                        text = "State *",
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White,
+                        fontSize = 13.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    OutlinedTextField(
+                        value = state,
+                        onValueChange = {
+                            state = it
+                            errorText = null
+                        },
+                        placeholder = {
                             Text(
-                                text = "City *",
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White,
+                                "e.g. Telangana",
+                                color = Color(0xFF64748B),
                                 fontSize = 13.sp
                             )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            OutlinedTextField(
-                                value = city,
-                                onValueChange = {
-                                    city = it
-                                    errorText = null
-                                },
-                                placeholder = { Text("e.g. Hyderabad", color = Color(0xFF64748B), fontSize = 13.sp) },
-                                leadingIcon = { Icon(Icons.Default.LocationCity, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp)) },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(
-                                    capitalization = KeyboardCapitalization.Words,
-                                    imeAction = ImeAction.Next
-                                ),
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = Color(0xFF0F172A),
-                                    unfocusedContainerColor = Color(0xFF0F172A),
-                                    focusedBorderColor = AccentGreen,
-                                    unfocusedBorderColor = Color(0xFF334155),
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    cursorColor = AccentGreen
-                                )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Map,
+                                contentDescription = null,
+                                tint = AccentGreen,
+                                modifier = Modifier.size(18.dp)
                             )
-                        }
-
-                        // State Field
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "State *",
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White,
-                                fontSize = 13.sp
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            OutlinedTextField(
-                                value = state,
-                                onValueChange = {
-                                    state = it
-                                    errorText = null
-                                },
-                                placeholder = { Text("e.g. Telangana", color = Color(0xFF64748B), fontSize = 13.sp) },
-                                leadingIcon = { Icon(Icons.Default.Map, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp)) },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(
-                                    capitalization = KeyboardCapitalization.Words,
-                                    imeAction = ImeAction.Done
-                                ),
-                                keyboardActions = KeyboardActions(
-                                    onDone = { focusManager.clearFocus() }
-                                ),
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = Color(0xFF0F172A),
-                                    unfocusedContainerColor = Color(0xFF0F172A),
-                                    focusedBorderColor = AccentGreen,
-                                    unfocusedBorderColor = Color(0xFF334155),
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    cursorColor = AccentGreen
-                                )
-                            )
-                        }
-                    }
-
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Words,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = { focusManager.clearFocus() }
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color(0xFF0F172A),
+                            unfocusedContainerColor = Color(0xFF0F172A),
+                            focusedBorderColor = AccentGreen,
+                            unfocusedBorderColor = Color(0xFF334155),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            cursorColor = AccentGreen
+                        )
+                    )
                     Spacer(modifier = Modifier.height(20.dp))
 
                     // Vehicle Type Selection

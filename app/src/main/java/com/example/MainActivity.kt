@@ -238,6 +238,8 @@ fun SmartDrivoApp(
     // Verify profile with Firestore for existing users on startup
     LaunchedEffect(isLoggedIn) {
         if (isLoggedIn) {
+            // GLOBAL_MEMBERSHIP_LIVE_SYNC_V2
+            repository.startOwnMembershipSync()
             // Refresh global pricing after login
             repository.fetchGlobalSettings()
             val fUser = PhoneAuthManager.getAuthInstance()?.currentUser
@@ -662,6 +664,14 @@ fun SmartDrivoApp(
 
         // 8. Payment Pending Screen
         composable(Routes.PAYMENT_PENDING) {
+
+            // PAYMENT_PENDING_LIVE_SYNC_V2
+            // Start Firestore live listeners immediately when this screen opens.
+            // Admin approval/rejection should update this screen automatically.
+            LaunchedEffect(Unit) {
+                repository.startOwnMembershipSync()
+            }
+
             val sub = activePaymentSubmission ?: PaymentSubmission(
                 paymentId = "PAY-SAMPLE",
                 uid = userProfile.uid,
