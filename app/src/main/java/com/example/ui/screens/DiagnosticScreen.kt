@@ -72,6 +72,8 @@ import com.example.data.RideDiagnosticsManager
 import com.example.data.db.AppDatabase
 import com.example.data.db.RideHistoryRepository
 import com.example.data.db.entity.RideHistoryEntity
+import com.example.engine.AreaRulesEngine
+import com.example.engine.DecisionResult
 import com.example.model.OrderStatus
 import com.example.model.Platform
 import com.example.model.RideCandidate
@@ -367,21 +369,41 @@ private fun SimulationDiagnosticCard(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    var isSimulating by remember { mutableStateOf(false) }
+
+    var isRapidoSimulating by remember {
+        mutableStateOf(false)
+    }
+
+    var isOlaSimulating by remember {
+        mutableStateOf(false)
+    }
+
+    val anySimulationRunning =
+        isRapidoSimulating ||
+            isOlaSimulating
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("simulation_diagnostic_card"),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = BlueContainer.copy(alpha = 0.5f)),
-        border = BorderStroke(1.dp, BluePrimary.copy(alpha = 0.3f)),
+        colors = CardDefaults.cardColors(
+            containerColor =
+                BlueContainer.copy(alpha = 0.5f)
+        ),
+        border = BorderStroke(
+            1.dp,
+            BluePrimary.copy(alpha = 0.3f)
+        ),
         elevation = CardDefaults.cardElevation(0.dp)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment =
+                    Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.Default.Speed,
@@ -389,7 +411,11 @@ private fun SimulationDiagnosticCard(
                     tint = BluePrimary,
                     modifier = Modifier.size(18.dp)
                 )
-                Spacer(modifier = Modifier.width(6.dp))
+
+                Spacer(
+                    modifier = Modifier.width(6.dp)
+                )
+
                 Text(
                     text = "Engine Verification Tool",
                     fontSize = 14.sp,
@@ -400,36 +426,69 @@ private fun SimulationDiagnosticCard(
             }
 
             Text(
-                text = "Simulates instant detection → filter evaluation → safe button scan → same-row latency logging.",
+                text =
+                    "Test Ola uses a mock Ola offer with your CURRENT saved filters. " +
+                    "It verifies engine decision, history and diagnostics. " +
+                    "It does not tap the real Ola app.",
                 fontSize = 12.sp,
                 color = TextDarkSecondary,
-                modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
+                modifier = Modifier.padding(
+                    top = 4.dp,
+                    bottom = 10.dp
+                ),
                 fontFamily = FontFamily.Default
             )
 
+            // ------------------------------------------------
+            // RAPIDO + OLA simulation buttons
+            // ------------------------------------------------
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement =
+                    Arrangement.spacedBy(8.dp),
+                verticalAlignment =
+                    Alignment.CenterVertically
             ) {
+
                 Button(
                     onClick = {
-                        if (isSimulating) return@Button
-                        isSimulating = true
-                        coroutineScope.launch(Dispatchers.IO) {
-                            runSimulationTest(roomRepo, prefs)
-                            isSimulating = false
+                        if (anySimulationRunning) {
+                            return@Button
+                        }
+
+                        isRapidoSimulating = true
+
+                        coroutineScope.launch(
+                            Dispatchers.IO
+                        ) {
+                            try {
+                                runSimulationTest(
+                                    roomRepo,
+                                    prefs
+                                )
+                            } finally {
+                                isRapidoSimulating = false
+                            }
                         }
                     },
-                    enabled = !isSimulating,
+                    enabled = !anySimulationRunning,
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor = BluePrimary
+                        ),
                     modifier = Modifier
                         .weight(1f)
-                        .testTag("run_simulation_button")
+                        .testTag(
+                            "run_simulation_button"
+                        )
                 ) {
                     Text(
-                        text = if (isSimulating) "Testing..." else "Test Ride",
+                        text =
+                            if (isRapidoSimulating)
+                                "Testing..."
+                            else
+                                "Test Ride",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -439,32 +498,44 @@ private fun SimulationDiagnosticCard(
 
                 Button(
                     onClick = {
-                        if (!PermissionHelper.isOverlayPermissionGranted(context)) {
-                            PermissionHelper.openOverlaySettings(context)
-                        } else {
-                            val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
-                            val currentTimeStr = timeFormat.format(Date())
-                            FloatingOverlayService.show(
-                                context = context,
-                                amount = 145f,
-                                pickup = "Indiranagar 100ft Rd, Bangalore",
-                                pickupDist = 1.4f,
-                                drop = "Koramangala 5th Block, Bangalore",
-                                dropDist = 6.8f,
-                                dropArea = "Koramangala",
-                                time = currentTimeStr,
-                                platform = "Rapido"
-                            )
+                        if (anySimulationRunning) {
+                            return@Button
+                        }
+
+                        isOlaSimulating = true
+
+                        coroutineScope.launch(
+                            Dispatchers.IO
+                        ) {
+                            try {
+                                runOlaSimulationTest(
+                                    roomRepo = roomRepo,
+                                    prefs = prefs
+                                )
+                            } finally {
+                                isOlaSimulating = false
+                            }
                         }
                     },
+                    enabled = !anySimulationRunning,
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = BlueDark),
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor =
+                                Color(0xFF00A859)
+                        ),
                     modifier = Modifier
                         .weight(1f)
-                        .testTag("test_overlay_button")
+                        .testTag(
+                            "run_ola_simulation_button"
+                        )
                 ) {
                     Text(
-                        text = "Test Overlay",
+                        text =
+                            if (isOlaSimulating)
+                                "Testing Ola..."
+                            else
+                                "Test Ola",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -472,9 +543,327 @@ private fun SimulationDiagnosticCard(
                     )
                 }
             }
+
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
+
+            // ------------------------------------------------
+            // Existing overlay test
+            // ------------------------------------------------
+            Button(
+                onClick = {
+                    if (
+                        !PermissionHelper
+                            .isOverlayPermissionGranted(context)
+                    ) {
+                        PermissionHelper
+                            .openOverlaySettings(context)
+                    } else {
+
+                        val timeFormat =
+                            SimpleDateFormat(
+                                "hh:mm a",
+                                Locale.getDefault()
+                            )
+
+                        val currentTimeStr =
+                            timeFormat.format(Date())
+
+                        FloatingOverlayService.show(
+                            context = context,
+                            amount = 145f,
+                            pickup =
+                                "Indiranagar 100ft Rd, Bangalore",
+                            pickupDist = 1.4f,
+                            drop =
+                                "Koramangala 5th Block, Bangalore",
+                            dropDist = 6.8f,
+                            dropArea = "Koramangala",
+                            time = currentTimeStr,
+                            platform = "Rapido"
+                        )
+                    }
+                },
+                shape = RoundedCornerShape(8.dp),
+                colors =
+                    ButtonDefaults.buttonColors(
+                        containerColor = BlueDark
+                    ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(
+                        "test_overlay_button"
+                    )
+            ) {
+                Text(
+                    text = "Test Overlay",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    fontFamily = FontFamily.Default
+                )
+            }
         }
     }
 }
+
+
+// ============================================================
+// OLA ENGINE DIAGNOSTIC SIMULATION
+//
+// MOCK ORDER:
+// Fare        ₹150 total
+// Base Fare   ₹140
+// Tip         ₹10
+// Pickup      1.5 km
+// Drop        7.0 km
+// Pickup      Mehdipatnam, Hyderabad
+// Drop        Banjara Hills, Hyderabad
+//
+// IMPORTANT:
+// Uses CURRENT SmartDrivo settings / Go-To / No-Go.
+// No real Ola button is clicked.
+// ============================================================
+
+private suspend fun runOlaSimulationTest(
+    roomRepo: RideHistoryRepository,
+    prefs: PreferencesManager
+) {
+    val startMs =
+        System.currentTimeMillis()
+
+    val testId =
+        "OLA-TEST-${startMs.toString().takeLast(6)}"
+
+    val candidate =
+        RideCandidate(
+            platform = Platform.OLA,
+            vehicleType = VehicleType.AUTO,
+            fare = 150f,
+            baseFare = 140f,
+            tipAmount = 10f,
+            pickupDistKm = 1.5f,
+            dropDistKm = 7.0f,
+            pickupAddress =
+                "Mehdipatnam, Hyderabad",
+            dropAddress =
+                "Banjara Hills, Hyderabad",
+            dropArea =
+                "Banjara Hills",
+            bookingId = testId,
+            detectionTimeMs = startMs
+        )
+
+    // --------------------------------------------------------
+    // 1. Detection / history insert
+    // --------------------------------------------------------
+    val entity =
+        roomRepo.onOrderDetected(
+            candidate = candidate,
+            initialReasonCode =
+                "OLA_TEST_PROCESSING",
+            initialReasonText =
+                "Ola diagnostic ride detected. Evaluating current saved filters..."
+        )
+
+    RideDiagnosticsManager.recordDetection(
+        id = entity.id,
+        candidate = candidate,
+        insertLatencyMs =
+            entity.historyInsertLatencyMs
+    )
+
+    kotlinx.coroutines.delay(40L)
+
+    // --------------------------------------------------------
+    // 2. Load CURRENT real SmartDrivo settings
+    // --------------------------------------------------------
+    val settings =
+        prefs.loadSettings()
+
+    val goToAreas =
+        prefs.loadGoToAreas()
+
+    val noGoAreas =
+        prefs.loadNoGoAreas()
+
+    // --------------------------------------------------------
+    // 3. Use actual SmartDrivo filter/rules engine
+    // --------------------------------------------------------
+    val decision: DecisionResult =
+        when {
+
+            !settings.isAutoAcceptActive ->
+                DecisionResult.Ignore(
+                    "Master Auto-Accept is OFF"
+                )
+
+            !settings.olaEnabled ->
+                DecisionResult.Ignore(
+                    "Ola platform is OFF in Settings"
+                )
+
+            else ->
+                AreaRulesEngine.evaluateRide(
+                    candidate = candidate,
+                    areas =
+                        goToAreas + noGoAreas,
+                    settings = settings,
+                    goToAreas = goToAreas,
+                    noGoAreas = noGoAreas,
+                    pickupLocationTextOverride =
+                        candidate.pickupAddress
+                )
+        }
+
+    val status: OrderStatus
+    val reasonCode: String
+    val reasonText: String
+
+    when (decision) {
+
+        is DecisionResult.Accept -> {
+            status =
+                OrderStatus.ACCEPTED
+
+            reasonCode =
+                "OLA_TEST_FILTERS_MATCHED"
+
+            reasonText =
+                "OLA TEST • ${decision.reason}"
+        }
+
+        is DecisionResult.Reject -> {
+            status =
+                OrderStatus.REJECTED
+
+            reasonCode =
+                "OLA_TEST_FILTER_REJECTED"
+
+            reasonText =
+                "OLA TEST • ${decision.reason}"
+        }
+
+        is DecisionResult.Ignore -> {
+            status =
+                OrderStatus.IGNORED
+
+            reasonCode =
+                "OLA_TEST_IGNORED"
+
+            reasonText =
+                "OLA TEST • ${decision.reason}"
+        }
+    }
+
+    val decisionEntity =
+        roomRepo.onOrderDecision(
+            id = entity.id,
+            status = status,
+            reasonCode = reasonCode,
+            reasonText = reasonText
+        )
+
+    RideDiagnosticsManager.recordDecision(
+        id = entity.id,
+        status = status,
+        ruleCode = reasonCode,
+        exactRule = reasonText,
+        decisionLatencyMs =
+            decisionEntity
+                ?.decisionLatencyMs
+                ?: 0L
+    )
+
+    // --------------------------------------------------------
+    // 4. If filters ACCEPT:
+    //    simulate Ola Accept / Confirm node path.
+    //
+    //    NO REAL external Ola app click happens here.
+    // --------------------------------------------------------
+    if (status == OrderStatus.ACCEPTED) {
+
+        kotlinx.coroutines.delay(25L)
+
+        roomRepo.onOrderActionAttempt(
+            entity.id
+        )
+
+        kotlinx.coroutines.delay(20L)
+
+        val completed =
+            roomRepo.onOrderActionCompleted(
+                id = entity.id,
+                status =
+                    OrderStatus.ACCEPTED,
+                reasonCode =
+                    "OLA_TEST_AUTO_ACCEPTED",
+                reasonText =
+                    reasonText,
+                actionSucceeded = true,
+                timesClicked = 1
+            )
+
+        RideDiagnosticsManager.recordAction(
+            id = entity.id,
+            status =
+                OrderStatus.ACCEPTED,
+            buttonFound = true,
+            buttonDetails =
+                "MOCK OLA: Accept / Confirm node detected",
+            clickMethod =
+                "SIMULATED Ola ACTION_CLICK — no external app tap",
+            finalAction =
+                "OLA TEST PASSED • Filters matched • Accept/Confirm path ready",
+            actionLatencyMs =
+                completed
+                    ?.actionLatencyMs
+                    ?: 20L,
+            totalLatencyMs =
+                completed
+                    ?.totalProcessingMs
+                    ?: (
+                        System.currentTimeMillis() -
+                            startMs
+                        )
+        )
+
+    } else {
+
+        RideDiagnosticsManager.recordAction(
+            id = entity.id,
+            status = status,
+            buttonFound = false,
+            buttonDetails =
+                "Button action skipped because current filters did not accept this mock Ola ride",
+            clickMethod =
+                "No click — filter decision",
+            finalAction =
+                when (status) {
+                    OrderStatus.REJECTED ->
+                        "OLA TEST REJECTED • $reasonText"
+
+                    OrderStatus.IGNORED ->
+                        "OLA TEST IGNORED • $reasonText"
+
+                    else ->
+                        "OLA TEST • $reasonText"
+                },
+            actionLatencyMs = 0L,
+            totalLatencyMs =
+                decisionEntity
+                    ?.totalProcessingMs
+                    ?: (
+                        System.currentTimeMillis() -
+                            startMs
+                        )
+        )
+    }
+
+    prefs.notifyOrderHistoryChanged()
+}
+
 
 private suspend fun runSimulationTest(roomRepo: RideHistoryRepository, prefs: PreferencesManager) {
     val startMs = System.currentTimeMillis()

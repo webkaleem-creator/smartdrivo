@@ -345,6 +345,7 @@ private val processingTimeoutRunnable = Runnable {
             "com.ubercab",
             "com.ubercab.driver",
             "ola.cabs",
+            "com.ola.partner",
             "com.olacabs.oladriver",
             "com.olacabs.driver",
             "com.olacabs.customer",
@@ -1013,7 +1014,30 @@ private val processingTimeoutRunnable = Runnable {
                 activeRootPkg == "com.rapido.passenger" ||
                 isRapidoPackage(activeRootPkg)
         val isUber = isUberPackage(eventPkg) || isUberPackage(activeRootPkg) || hasUberAccessibilityWindow
-        val isOla = isOlaPackage(eventPkg) || isOlaPackage(activeRootPkg)
+        // OLA_REFERENCE_WINDOW_SCAN_V1
+        // Ola can expose the incoming order in another accessibility
+        // window instead of rootInActiveWindow.
+        val hasOlaAccessibilityWindow =
+            try {
+                windows.any { window ->
+                    val pkg =
+                        window.root
+                            ?.packageName
+                            ?.toString()
+                            .orEmpty()
+                            .trim()
+                            .lowercase()
+
+                    isOlaPackage(pkg)
+                }
+            } catch (_: Exception) {
+                false
+            }
+
+        val isOla =
+            isOlaPackage(eventPkg) ||
+                isOlaPackage(activeRootPkg) ||
+                hasOlaAccessibilityWindow
 
         if (!isRapido && !isUber && !isOla) {
             return
@@ -1026,6 +1050,9 @@ private val processingTimeoutRunnable = Runnable {
         val isDirectUberEvent =
             isUberPackage(eventPkg)
 
+        val isDirectOlaEvent =
+            isOlaPackage(eventPkg)
+
         // Rapido/Uber can show a genuine incoming ride popup while
         // SmartDrivo itself is still the foreground/root window.
         // Never drop those direct accessibility events.
@@ -1033,7 +1060,9 @@ private val processingTimeoutRunnable = Runnable {
             activeRootPkg == selfPkg &&
             !isDirectRapidoEvent &&
             !isDirectUberEvent &&
-            !hasUberAccessibilityWindow
+            !isDirectOlaEvent &&
+            !hasUberAccessibilityWindow &&
+            !hasOlaAccessibilityWindow
         ) {
             return
         }
@@ -4113,7 +4142,7 @@ private val processingTimeoutRunnable = Runnable {
         }
 
         // 4. Direct text search queries for accept
-        for (query in listOf("Accept", "ACCEPT", "Accept Ride", "Accept Order", "Accept Booking", "स्वीकार करें", "स्वीकार", "Slide to Accept", "Swipe to Accept")) {
+        for (query in listOf("Accept", "ACCEPT", "Accept Ride", "Accept Order", "Accept Booking", "Confirm", "Confirm Ride", "Confirm Booking", "स्वीकार करें", "स्वीकार", "Slide to Accept", "Swipe to Accept")) {
             val list = root.findAccessibilityNodeInfosByText(query)
             if (!list.isNullOrEmpty()) {
                 val candidate = list[0]

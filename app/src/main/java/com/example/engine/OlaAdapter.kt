@@ -1,7 +1,11 @@
 package com.example.engine
 
+import android.graphics.Rect
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import com.example.model.Platform
+import com.example.model.RideCandidate
+import com.example.model.VehicleType
 import java.util.regex.Pattern
 
 object OlaAdapter {
@@ -9,6 +13,7 @@ object OlaAdapter {
     private const val TAG = "OlaAdapter"
 
     val OLA_PACKAGES = listOf(
+        "com.ola.partner",
         "com.olacabs.oladriver",
         "com.olacabs.driver",
         "com.olacabs.consumer",
@@ -106,7 +111,13 @@ object OlaAdapter {
         "tvAccept",
         "acceptTextView",
         "accept_container",
-        "accept_card"
+        "accept_card",
+        "btn_confirm",
+        "confirm_btn",
+        "confirm_button",
+        "button_confirm",
+        "confirm_ride",
+        "confirm_booking"
     )
 
     val ACCEPT_TEXTS = listOf(
@@ -118,6 +129,11 @@ object OlaAdapter {
         "Accept Trip",
         "Accept Duty",
         "Tap to Accept",
+        "Confirm",
+        "CONFIRM",
+        "Confirm Ride",
+        "Confirm Booking",
+        "Confirm Trip",
         "Swipe to Accept",
         "Slide to Accept",
         "SLIDE TO ACCEPT",
@@ -158,6 +174,841 @@ object OlaAdapter {
         "అంగీకరించు"
     )
 
+
+    // =========================================================
+    // OLA_REFERENCE_SCANNER_V1
+    //
+    // Derived from observed Ola behaviour in the reference APK:
+    // - scan the full Accessibility tree
+    // - pickup/green + drop/red positional association
+    // - preserve partial data for 2 seconds because Ola may
+    //   publish fare / distances / addresses in separate events
+    // =========================================================
+
+    private const val OLA_CACHE_WINDOW_MS = 2_000L
+
+    private data class OlaTextNode(
+        val text: String,
+        val centerY: Int
+    )
+
+    private data class OlaDistanceNode(
+        val km: Float,
+        val centerY: Int
+    )
+
+    private data class OlaFareParts(
+        val base: Float?,
+        val tip: Float?,
+        val total: Float?
+    )
+
+    private data class OlaTransientCache(
+        val baseFare: Float? = null,
+        val tip: Float? = null,
+        val pickupKm: Float? = null,
+        val dropKm: Float? = null,
+        val pickupAddress: String? = null,
+        val dropAddress: String? = null,
+        val bookingId: String? = null,
+        val timestamp: Long = 0L
+    )
+
+    private val olaCacheLock = Any()
+
+    private var olaTransientCache =
+        OlaTransientCache()
+
+    private val OLA_RUPEE_REGEX =
+        Regex("""₹\s*([0-9]+(?:\.[0-9]+)?)""")
+
+    private val OLA_KM_REGEX =
+        Regex(
+            """\b([0-9]+(?:\.[0-9]+)?)\s*km\b""",
+            RegexOption.IGNORE_CASE
+        )
+
+    private val OLA_METER_REGEX =
+        Regex(
+            """\b([0-9]+(?:\.[0-9]+)?)\s*m\b""",
+            RegexOption.IGNORE_CASE
+        )
+
+    fun clearTransientCache() {
+        synchronized(olaCacheLock) {
+            olaTransientCache =
+                OlaTransientCache()
+        }
+    }
+
+    private fun collectOlaTextNodes(
+        node: AccessibilityNodeInfo?,
+        out: MutableList<OlaTextNode>
+    ) {
+        if (node == null) return
+
+        val rect = Rect()
+
+        try {
+            node.getBoundsInScreen(rect)
+        } catch (_: Exception) {
+        }
+
+        val centerY =
+            if (!rect.isEmpty)
+                rect.centerY()
+            else
+                0
+
+        val text =
+            node.text
+                ?.toString()
+                ?.trim()
+                .orEmpty()
+
+        if (text.isNotBlank()) {
+            out +=
+                OlaTextNode(
+                    text = text,
+                    centerY = centerY
+                )
+        }
+
+        val desc =
+            node.contentDescription
+                ?.toString()
+                ?.trim()
+                .orEmpty()
+
+        if (
+            desc.isNotBlank() &&
+            !desc.equals(text, ignoreCase = false)
+        ) {
+            out +=
+                OlaTextNode(
+                    text = desc,
+                    centerY = centerY
+                )
+        }
+
+        for (i in 0 until node.childCount) {
+            val child =
+                try {
+                    node.getChild(i)
+                } catch (_: Exception) {
+                    null
+                }
+
+            if (child != null) {
+                collectOlaTextNodes(
+                    child,
+                    out
+                )
+
+                try {
+                    child.recycle()
+                } catch (_: Exception) {
+                }
+            }
+        }
+    }
+
+    fun collectAllNodeTexts(
+        root: AccessibilityNodeInfo
+    ): List<String> {
+        val nodes =
+            mutableListOf<OlaTextNode>()
+
+        collectOlaTextNodes(
+            root,
+            nodes
+        )
+
+        return nodes
+            .map { it.text }
+            .distinct()
+    }
+
+    fun scoreOrderRoot(
+        root: AccessibilityNodeInfo
+    ): Int {
+        val texts =
+            collectAllNodeTexts(root)
+
+        if (texts.isEmpty()) {
+            return Int.MIN_VALUE
+        }
+
+        val fullText =
+            texts.joinToString(" \n ")
+
+        val lower =
+            fullText.lowercase()
+
+        var score = 0
+
+        if (fullText.contains("₹")) {
+            score += 100
+        }
+
+        val kmCount =
+            OLA_KM_REGEX
+                .findAll(fullText)
+                .count()
+
+        if (kmCount >= 2) {
+            score += 80
+        } else if (kmCount == 1) {
+            score += 30
+        }
+
+        if (
+            texts.any {
+                isAcceptText(it) ||
+                    isAcceptDesc(it)
+            } ||
+            lower.contains("confirm")
+        ) {
+            score += 120
+        }
+
+        if (
+            lower.contains("pickup") ||
+            lower.contains("green")
+        ) {
+            score += 20
+        }
+
+        if (
+            lower.contains("drop") ||
+            lower.contains("destination") ||
+            lower.contains("red")
+        ) {
+            score += 20
+        }
+
+        return score
+    }
+
+    private fun extractOlaFare(
+        nodes: List<OlaTextNode>
+    ): OlaFareParts {
+
+        var baseFare: Float? = null
+        var tip: Float? = null
+
+        for (node in nodes) {
+
+            val raw =
+                node.text.trim()
+
+            val lower =
+                raw.lowercase()
+
+            if (!raw.contains("₹")) {
+                continue
+            }
+
+            // Ignore price-per-km/rate text.
+            if (
+                lower.contains("/km") ||
+                lower.contains("per km") ||
+                lower.contains("₹/km") ||
+                lower.contains("discount")
+            ) {
+                continue
+            }
+
+            val amounts =
+                OLA_RUPEE_REGEX
+                    .findAll(raw)
+                    .mapNotNull {
+                        it.groupValues
+                            .getOrNull(1)
+                            ?.toFloatOrNull()
+                    }
+                    .toList()
+
+            if (amounts.isEmpty()) {
+                continue
+            }
+
+            if (lower.contains("tip")) {
+
+                val foundTip =
+                    amounts.sum()
+
+                tip =
+                    maxOf(
+                        tip ?: 0f,
+                        foundTip
+                    )
+
+                continue
+            }
+
+            if (
+                raw.contains("+") &&
+                amounts.size >= 2
+            ) {
+
+                val candidateBase =
+                    amounts.first()
+
+                val candidateTip =
+                    amounts.drop(1).sum()
+
+                baseFare =
+                    maxOf(
+                        baseFare ?: 0f,
+                        candidateBase
+                    )
+
+                tip =
+                    maxOf(
+                        tip ?: 0f,
+                        candidateTip
+                    )
+
+            } else {
+
+                val candidateBase =
+                    amounts.first()
+
+                baseFare =
+                    maxOf(
+                        baseFare ?: 0f,
+                        candidateBase
+                    )
+            }
+        }
+
+        val total =
+            when {
+                baseFare != null ->
+                    baseFare + (tip ?: 0f)
+
+                tip != null ->
+                    tip
+
+                else ->
+                    null
+            }
+
+        return OlaFareParts(
+            base = baseFare,
+            tip = tip,
+            total = total
+        )
+    }
+
+    private fun extractOlaDistance(
+        text: String
+    ): Float? {
+
+        val lower =
+            text.lowercase()
+
+        if (
+            lower.contains("km/h") ||
+            lower.contains("kmph") ||
+            lower.contains("km/hr")
+        ) {
+            return null
+        }
+
+        val km =
+            OLA_KM_REGEX
+                .find(text)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.toFloatOrNull()
+
+        if (
+            km != null &&
+            km >= 0f
+        ) {
+            return km
+        }
+
+        val meters =
+            OLA_METER_REGEX
+                .find(text)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.toFloatOrNull()
+
+        if (
+            meters != null &&
+            meters >= 0f
+        ) {
+            return meters / 1000f
+        }
+
+        return null
+    }
+
+    private fun isOlaAddressCandidate(
+        text: String
+    ): Boolean {
+
+        val clean =
+            text.trim()
+
+        if (clean.length < 4) {
+            return false
+        }
+
+        val lower =
+            clean.lowercase()
+
+        if (
+            clean.contains("₹") ||
+            OLA_KM_REGEX.containsMatchIn(clean) ||
+            OLA_METER_REGEX.containsMatchIn(clean)
+        ) {
+            return false
+        }
+
+        if (
+            Regex(
+                """\b[0-9]+\s*(?:min|mins|minute|minutes)\b""",
+                RegexOption.IGNORE_CASE
+            ).containsMatchIn(clean)
+        ) {
+            return false
+        }
+
+        val blocked =
+            listOf(
+                "pickup",
+                "pick up",
+                "drop",
+                "destination",
+                "accept",
+                "confirm",
+                "pass",
+                "skip",
+                "close",
+                "dismiss",
+                "cash",
+                "payment",
+                "pay online",
+                "online",
+                "mini",
+                "prime",
+                "sedan",
+                "sniper",
+                "logs",
+                "discount",
+                "away"
+            )
+
+        if (
+            blocked.any {
+                lower == it ||
+                    lower.startsWith("$it:") ||
+                    lower.startsWith("$it ")
+            }
+        ) {
+            return false
+        }
+
+        if (
+            lower == "x" ||
+            lower == "✕"
+        ) {
+            return false
+        }
+
+        // Address should contain at least one letter.
+        return clean.any {
+            it.isLetter()
+        }
+    }
+
+    private fun nearestIndex(
+        values: List<Pair<Int, Int>>,
+        targetY: Int?,
+        excluded: Set<Int> = emptySet()
+    ): Int? {
+
+        val candidates =
+            values.filter {
+                it.first !in excluded
+            }
+
+        if (candidates.isEmpty()) {
+            return null
+        }
+
+        if (
+            targetY == null ||
+            targetY <= 0
+        ) {
+            return candidates
+                .minByOrNull { it.second }
+                ?.first
+        }
+
+        return candidates
+            .minByOrNull {
+                kotlin.math.abs(
+                    it.second - targetY
+                )
+            }
+            ?.first
+    }
+
+    fun extractCandidate(
+        root: AccessibilityNodeInfo,
+        defaultVehicle: VehicleType =
+            VehicleType.AUTO
+    ): RideCandidate {
+
+        val detectedAt =
+            System.currentTimeMillis()
+
+        val nodes =
+            mutableListOf<OlaTextNode>()
+
+        collectOlaTextNodes(
+            root,
+            nodes
+        )
+
+        val textLines =
+            nodes
+                .map { it.text }
+                .distinct()
+
+        val fullText =
+            textLines.joinToString(" \n ")
+
+        val fareParts =
+            extractOlaFare(nodes)
+
+        val pickupLabelY =
+            nodes.firstOrNull {
+                val lower =
+                    it.text.lowercase()
+
+                lower.contains("pickup") ||
+                    lower.contains("pick up") ||
+                    lower == "green" ||
+                    lower.contains("green pin")
+            }?.centerY
+
+        val dropLabelY =
+            nodes.firstOrNull {
+                val lower =
+                    it.text.lowercase()
+
+                lower.contains("drop") ||
+                    lower.contains("destination") ||
+                    lower == "red" ||
+                    lower.contains("red pin")
+            }?.centerY
+
+        val distanceNodes =
+            nodes.mapNotNull { node ->
+
+                val km =
+                    extractOlaDistance(
+                        node.text
+                    )
+                        ?: return@mapNotNull null
+
+                OlaDistanceNode(
+                    km = km,
+                    centerY = node.centerY
+                )
+            }
+                .distinctBy {
+                    "${it.centerY}:${"%.3f".format(it.km)}"
+                }
+                .sortedBy {
+                    it.centerY
+                }
+
+        val distancePositions =
+            distanceNodes.mapIndexed {
+                    index,
+                    node ->
+
+                index to node.centerY
+            }
+
+        val pickupDistanceIndex =
+            nearestIndex(
+                values = distancePositions,
+                targetY = pickupLabelY
+            )
+
+        val dropDistanceIndex =
+            nearestIndex(
+                values = distancePositions,
+                targetY = dropLabelY,
+                excluded =
+                    pickupDistanceIndex
+                        ?.let { setOf(it) }
+                        ?: emptySet()
+            )
+
+        var pickupKm =
+            pickupDistanceIndex
+                ?.let {
+                    distanceNodes
+                        .getOrNull(it)
+                        ?.km
+                }
+
+        var dropKm =
+            dropDistanceIndex
+                ?.let {
+                    distanceNodes
+                        .getOrNull(it)
+                        ?.km
+                }
+
+        // When labels aren't exposed, Ola normally displays
+        // pickup first and trip/drop second.
+        if (
+            pickupKm == null &&
+            distanceNodes.isNotEmpty()
+        ) {
+            pickupKm =
+                distanceNodes[0].km
+        }
+
+        if (
+            dropKm == null &&
+            distanceNodes.size >= 2
+        ) {
+            dropKm =
+                distanceNodes[1].km
+        }
+
+        val addressNodes =
+            nodes.filter {
+                isOlaAddressCandidate(
+                    it.text
+                )
+            }
+
+        val addressPositions =
+            addressNodes.mapIndexed {
+                    index,
+                    node ->
+
+                index to node.centerY
+            }
+
+        val pickupAddressIndex =
+            nearestIndex(
+                values = addressPositions,
+                targetY = pickupLabelY
+            )
+
+        val dropAddressIndex =
+            nearestIndex(
+                values = addressPositions,
+                targetY = dropLabelY,
+                excluded =
+                    pickupAddressIndex
+                        ?.let { setOf(it) }
+                        ?: emptySet()
+            )
+
+        var pickupAddress =
+            pickupAddressIndex
+                ?.let {
+                    addressNodes
+                        .getOrNull(it)
+                        ?.text
+                }
+
+        var dropAddress =
+            dropAddressIndex
+                ?.let {
+                    addressNodes
+                        .getOrNull(it)
+                        ?.text
+                }
+
+        if (
+            pickupAddress.isNullOrBlank() &&
+            addressNodes.isNotEmpty()
+        ) {
+            pickupAddress =
+                addressNodes.first().text
+        }
+
+        if (
+            dropAddress.isNullOrBlank() &&
+            addressNodes.size >= 2
+        ) {
+            dropAddress =
+                addressNodes
+                    .firstOrNull {
+                        it.text != pickupAddress
+                    }
+                    ?.text
+        }
+
+        val bookingId =
+            OrderDataExtractor
+                .extractBookingId(fullText)
+
+        var baseFare =
+            fareParts.base
+
+        var tip =
+            fareParts.tip
+
+        var totalFare =
+            fareParts.total
+
+        // -----------------------------------------------------
+        // 2-second partial-data cache.
+        // Ola can update parts of the card in separate
+        // TYPE_WINDOW_CONTENT_CHANGED events.
+        // -----------------------------------------------------
+        synchronized(olaCacheLock) {
+
+            val old =
+                olaTransientCache
+
+            val cacheFresh =
+                detectedAt -
+                    old.timestamp <=
+                    OLA_CACHE_WINDOW_MS
+
+            val sameOrder =
+                old.bookingId.isNullOrBlank() ||
+                    bookingId.isNullOrBlank() ||
+                    old.bookingId == bookingId
+
+            if (
+                cacheFresh &&
+                sameOrder
+            ) {
+
+                baseFare =
+                    baseFare
+                        ?: old.baseFare
+
+                tip =
+                    tip
+                        ?: old.tip
+
+                if (totalFare == null) {
+                    totalFare =
+                        when {
+                            baseFare != null ->
+                                baseFare +
+                                    (tip ?: 0f)
+
+                            else ->
+                                null
+                        }
+                }
+
+                pickupKm =
+                    pickupKm
+                        ?: old.pickupKm
+
+                dropKm =
+                    dropKm
+                        ?: old.dropKm
+
+                pickupAddress =
+                    pickupAddress
+                        ?: old.pickupAddress
+
+                dropAddress =
+                    dropAddress
+                        ?: old.dropAddress
+            }
+
+            val currentHasUsefulData =
+                fareParts.total != null ||
+                    distanceNodes.isNotEmpty() ||
+                    !pickupAddress.isNullOrBlank() ||
+                    !dropAddress.isNullOrBlank()
+
+            if (currentHasUsefulData) {
+
+                olaTransientCache =
+                    OlaTransientCache(
+                        baseFare = baseFare,
+                        tip = tip,
+                        pickupKm = pickupKm,
+                        dropKm = dropKm,
+                        pickupAddress =
+                            pickupAddress,
+                        dropAddress =
+                            dropAddress,
+                        bookingId =
+                            bookingId
+                                ?: old.bookingId,
+                        timestamp =
+                            detectedAt
+                    )
+            }
+        }
+
+        val safePickup =
+            pickupAddress
+                ?.takeIf {
+                    it.isNotBlank()
+                }
+                ?: "Address unavailable"
+
+        val safeDrop =
+            dropAddress
+                ?.takeIf {
+                    it.isNotBlank()
+                }
+                ?: "Address unavailable"
+
+        val dropArea =
+            if (
+                safeDrop !=
+                "Address unavailable"
+            ) {
+                safeDrop
+                    .substringBefore(",")
+                    .trim()
+                    .ifBlank {
+                        "Main City Area"
+                    }
+            } else {
+                "Main City Area"
+            }
+
+        val vehicle =
+            OrderDataExtractor
+                .detectVehicleType(
+                    fullText,
+                    defaultVehicle
+                )
+
+        return RideCandidate(
+            fare = totalFare,
+            pickupDistKm = pickupKm,
+            dropDistKm = dropKm,
+            pickupAddress = safePickup,
+            dropAddress = safeDrop,
+            dropArea = dropArea,
+            platform = Platform.OLA,
+            vehicleType = vehicle,
+            bookingId = bookingId,
+            baseFare = baseFare,
+            tipAmount = tip,
+            detectionTimeMs = detectedAt
+        )
+    }
     private val ACCEPT_REGEX = Pattern.compile(
         "(?:tap\\s*to\\s*|swipe\\s*to\\s*|slide\\s*to\\s*)?accept(?:\\s*(?:ride|order|booking|trip|duty))?",
         Pattern.CASE_INSENSITIVE
@@ -219,7 +1070,12 @@ object OlaAdapter {
         // 1. Direct text search queries for accept
         for (q in listOf(
             "Accept", "ACCEPT", "Accept Ride", "Accept Booking", "Accept Order", "Accept Trip",
-            "Tap to Accept", "Swipe to Accept", "Slide to Accept",
+            "Tap to Accept",
+        "Confirm",
+        "CONFIRM",
+        "Confirm Ride",
+        "Confirm Booking",
+        "Confirm Trip", "Swipe to Accept", "Slide to Accept",
             "स्वीकार करें", "स्वीकार", "राइड स्वीकार करें"
         )) {
             val list = root.findAccessibilityNodeInfosByText(q)
