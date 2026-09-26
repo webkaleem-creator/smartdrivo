@@ -179,65 +179,103 @@ object AreaRulesEngine {
             )
         }
 
-        // Normal Fare / Distance / Both modes.
-        val checkFare =
-            settings.filterMode == FilterMode.FARE_ONLY ||
-                settings.filterMode == FilterMode.BOTH
+        // Normal Home filter + independent Separate Both filter.
+        //
+        // Home MATCH OR Separate Both MATCH = ACCEPT.
+        // Both FAIL = No condition matched.
+        //
+        // No-Go / Go-To / Fastest rules above keep their existing priority.
 
-        val checkDistance =
-            settings.filterMode == FilterMode.DISTANCE_ONLY ||
-                settings.filterMode == FilterMode.BOTH
+        val fare = candidate.fare
+        val pickup = candidate.pickupDistKm
+        val drop = candidate.dropDistKm
 
-        if (checkFare) {
-            val fare = candidate.fare
+        val homeFareMatches =
+            when {
+                settings.filterMode == FilterMode.DISTANCE_ONLY ->
+                    true
 
-            if (fare != null && fare > 0f) {
-                if (
-                    settings.minFare > 0f &&
-                    fare < settings.minFare
-                ) {
-                    return DecisionResult.Reject(
-                        "Fare Filter: Fare ₹${fare.toInt()} is below minimum ₹${settings.minFare.toInt()}"
-                    )
-                }
+                fare == null || fare <= 0f ->
+                    true
 
-                if (
-                    settings.maxFare > 0f &&
-                    fare > settings.maxFare
-                ) {
-                    return DecisionResult.Reject(
-                        "Fare Filter: Fare ₹${fare.toInt()} exceeds maximum ₹${settings.maxFare.toInt()}"
-                    )
-                }
+                settings.minFare > 0f &&
+                    fare < settings.minFare ->
+                    false
+
+                settings.maxFare > 0f &&
+                    fare > settings.maxFare ->
+                    false
+
+                else ->
+                    true
             }
-        }
 
-        if (checkDistance) {
-            val pickup = candidate.pickupDistKm
-            if (
+        val homeDistanceMatches =
+            when {
+                settings.filterMode == FilterMode.FARE_ONLY ->
+                    true
+
                 pickup != null &&
-                settings.maxPickupDistanceKm > 0f &&
-                pickup > settings.maxPickupDistanceKm
-            ) {
-                return DecisionResult.Reject(
-                    "Distance Filter: Pickup ${pickup}km exceeds ${settings.maxPickupDistanceKm}km"
-                )
+                    settings.maxPickupDistanceKm > 0f &&
+                    pickup > settings.maxPickupDistanceKm ->
+                    false
+
+                drop != null &&
+                    settings.maxDropDistanceKm > 0f &&
+                    drop > settings.maxDropDistanceKm ->
+                    false
+
+                else ->
+                    true
             }
 
-            val drop = candidate.dropDistKm
-            if (
+        val homeMatched =
+            homeFareMatches &&
+                homeDistanceMatches
+
+        val secondaryMatched =
+            settings.isSecondaryBothFilterEnabled &&
+                fare != null &&
+                fare > 0f &&
+                pickup != null &&
                 drop != null &&
-                settings.maxDropDistanceKm > 0f &&
-                drop > settings.maxDropDistanceKm
-            ) {
-                return DecisionResult.Reject(
-                    "Distance Filter: Drop ${drop}km exceeds ${settings.maxDropDistanceKm}km"
+                (
+                    settings.secondaryBothMinFare <= 0f ||
+                        fare >= settings.secondaryBothMinFare
+                ) &&
+                (
+                    settings.secondaryBothMaxPickupDistanceKm <= 0f ||
+                        pickup <=
+                            settings.secondaryBothMaxPickupDistanceKm
+                ) &&
+                (
+                    settings.secondaryBothMaxDropDistanceKm <= 0f ||
+                        drop <=
+                            settings.secondaryBothMaxDropDistanceKm
                 )
-            }
+
+        if (homeMatched || secondaryMatched) {
+            return DecisionResult.Accept(
+                when {
+                    homeMatched && secondaryMatched ->
+                        "Home ${settings.filterMode.displayName} and Separate Both filters matched"
+
+                    secondaryMatched ->
+                        "Separate Both filter matched"
+
+                    else ->
+                        "Home ${settings.filterMode.displayName} filter matched"
+                }
+            )
         }
 
-        return DecisionResult.Accept(
-            "Order satisfies ${settings.filterMode.displayName} criteria"
+        return DecisionResult.Reject(
+            "No condition matched • Home ${settings.filterMode.displayName} failed" +
+                if (settings.isSecondaryBothFilterEnabled) {
+                    " • Separate Both failed"
+                } else {
+                    " • Separate Both OFF"
+                }
         )
     }
 

@@ -381,6 +381,23 @@ class PreferencesManager(private val context: Context) {
             putBoolean(KEY_AUTO_ACCEPT, settings.isAutoAcceptActive)
             putBoolean(KEY_AUTO_REJECT_BAD_FARES, settings.isAutoRejectBadFaresEnabled)
             putBoolean(KEY_FASTEST_MODE, settings.isFastestModeEnabled)
+
+            putBoolean(
+                KEY_SECONDARY_BOTH_ENABLED,
+                settings.isSecondaryBothFilterEnabled
+            )
+            putFloat(
+                KEY_SECONDARY_BOTH_MIN_FARE,
+                settings.secondaryBothMinFare
+            )
+            putFloat(
+                KEY_SECONDARY_BOTH_MAX_PICKUP,
+                settings.secondaryBothMaxPickupDistanceKm
+            )
+            putFloat(
+                KEY_SECONDARY_BOTH_MAX_DROP,
+                settings.secondaryBothMaxDropDistanceKm
+            )
             putBoolean(KEY_RAPIDO_ENABLED, settings.rapidoEnabled)
             putBoolean(KEY_UBER_ENABLED, settings.uberEnabled)
             putBoolean(KEY_OLA_ENABLED, settings.olaEnabled)
@@ -445,6 +462,30 @@ class PreferencesManager(private val context: Context) {
             isAutoAcceptActive = prefs.getBoolean(KEY_AUTO_ACCEPT, true),
             isAutoRejectBadFaresEnabled = prefs.getBoolean(KEY_AUTO_REJECT_BAD_FARES, false),
             isFastestModeEnabled = prefs.getBoolean(KEY_FASTEST_MODE, false),
+
+            isSecondaryBothFilterEnabled =
+                prefs.getBoolean(
+                    KEY_SECONDARY_BOTH_ENABLED,
+                    false
+                ),
+
+            secondaryBothMinFare =
+                getSafeFloat(
+                    KEY_SECONDARY_BOTH_MIN_FARE,
+                    50f
+                ),
+
+            secondaryBothMaxPickupDistanceKm =
+                getSafeFloat(
+                    KEY_SECONDARY_BOTH_MAX_PICKUP,
+                    3.0f
+                ),
+
+            secondaryBothMaxDropDistanceKm =
+                getSafeFloat(
+                    KEY_SECONDARY_BOTH_MAX_DROP,
+                    7.5f
+                ),
             rapidoEnabled = prefs.getBoolean(KEY_RAPIDO_ENABLED, true),
             uberEnabled = prefs.getBoolean(KEY_UBER_ENABLED, true),
             olaEnabled = prefs.getBoolean(KEY_OLA_ENABLED, true),
@@ -1206,8 +1247,10 @@ class PreferencesManager(private val context: Context) {
         _communityLinks.value =
             com.example.model.CommunityLinks(
                 whatsappUrl = whatsapp,
+
                 telegramUrl = telegram,
                 instagramUrl = instagram,
+
                 supportTelegramUrl = supportTelegram
             )
     }
@@ -1255,6 +1298,15 @@ class PreferencesManager(private val context: Context) {
         private const val KEY_AUTO_ACCEPT = "setting_auto_accept"
         private const val KEY_AUTO_REJECT_BAD_FARES = "setting_auto_reject_bad_fares"
         private const val KEY_FASTEST_MODE = "setting_fastest_mode"
+
+        private const val KEY_SECONDARY_BOTH_ENABLED =
+            "setting_secondary_both_filter_enabled"
+        private const val KEY_SECONDARY_BOTH_MIN_FARE =
+            "setting_secondary_both_min_fare"
+        private const val KEY_SECONDARY_BOTH_MAX_PICKUP =
+            "setting_secondary_both_max_pickup_km"
+        private const val KEY_SECONDARY_BOTH_MAX_DROP =
+            "setting_secondary_both_max_drop_km"
         private const val KEY_RAPIDO_ENABLED = "setting_rapido"
         private const val KEY_UBER_ENABLED = "setting_uber"
         private const val KEY_OLA_ENABLED = "setting_ola"

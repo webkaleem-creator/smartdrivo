@@ -59,6 +59,13 @@ data class AppSettings(
     // when ON, Rapido offers that fail SAVED conditions can be skipped automatically.
     val isAutoRejectBadFaresEnabled: Boolean = false,
     val isFastestModeEnabled: Boolean = false,
+
+    // Separate BOTH filter from Smart Filter screen.
+    // Completely independent from Home page Fare/Distance/Both.
+    val isSecondaryBothFilterEnabled: Boolean = false,
+    val secondaryBothMinFare: Float = 50f,
+    val secondaryBothMaxPickupDistanceKm: Float = 3.0f,
+    val secondaryBothMaxDropDistanceKm: Float = 7.5f,
     // Platforms enabled
     val rapidoEnabled: Boolean = true,
     val uberEnabled: Boolean = true,

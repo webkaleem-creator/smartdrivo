@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.NearMe
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -139,6 +140,34 @@ fun SettingsScreen(
         )
     }
 
+
+    // Separate Both filter inputs - independent from Home page.
+    var secondaryMinFareText by rememberSaveable {
+        mutableStateOf(
+            if (settings.secondaryBothMinFare % 1.0f == 0f)
+                settings.secondaryBothMinFare.toInt().toString()
+            else
+                settings.secondaryBothMinFare.toString()
+        )
+    }
+
+    var secondaryMaxPickupText by rememberSaveable {
+        mutableStateOf(
+            if (settings.secondaryBothMaxPickupDistanceKm % 1.0f == 0f)
+                settings.secondaryBothMaxPickupDistanceKm.toInt().toString()
+            else
+                settings.secondaryBothMaxPickupDistanceKm.toString()
+        )
+    }
+
+    var secondaryMaxDropText by rememberSaveable {
+        mutableStateOf(
+            if (settings.secondaryBothMaxDropDistanceKm % 1.0f == 0f)
+                settings.secondaryBothMaxDropDistanceKm.toInt().toString()
+            else
+                settings.secondaryBothMaxDropDistanceKm.toString()
+        )
+    }
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
@@ -408,9 +437,266 @@ fun SettingsScreen(
                     }
                 }
             }
-            // 2. BUNDLE ORDER
+            // 2. SEPARATE ORDER FILTER - BOTH ONLY
             item {
-                SectionHeader("2. BUNDLE ORDER")
+                SectionHeader("2. ORDER FILTER — BOTH")
+
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = CardBackground
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(
+                        1.dp,
+                        CardBorderDefault
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+
+                        val secondaryMinFare =
+                            secondaryMinFareText.toFloatOrNull()
+
+                        val secondaryMaxPickup =
+                            secondaryMaxPickupText.toFloatOrNull()
+
+                        val secondaryMaxDrop =
+                            secondaryMaxDropText.toFloatOrNull()
+
+                        val secondaryValid =
+                            secondaryMinFare != null &&
+                                secondaryMinFare > 0f &&
+                                secondaryMaxPickup != null &&
+                                secondaryMaxPickup > 0f &&
+                                secondaryMaxDrop != null &&
+                                secondaryMaxDrop > 0f
+
+                        SettingToggleRow(
+                            icon = Icons.Default.Tune,
+                            title = "Order Filter — Both",
+                            subtitle =
+                                if (settings.isSecondaryBothFilterEnabled)
+                                    "ON — Home filter OR this filter can match"
+                                else
+                                    "OFF — Separate from Home page Both",
+                            isChecked =
+                                settings.isSecondaryBothFilterEnabled,
+                            onCheckedChange = { enabled ->
+
+                                if (enabled && !secondaryValid) {
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar(
+                                            "Enter valid Minimum Fare, Pickup and Drop first"
+                                        )
+                                    }
+                                } else {
+                                    prefs.saveAppSettings(
+                                        settings.copy(
+                                            isSecondaryBothFilterEnabled =
+                                                enabled,
+                                            secondaryBothMinFare =
+                                                secondaryMinFare
+                                                    ?: settings.secondaryBothMinFare,
+                                            secondaryBothMaxPickupDistanceKm =
+                                                secondaryMaxPickup
+                                                    ?: settings.secondaryBothMaxPickupDistanceKm,
+                                            secondaryBothMaxDropDistanceKm =
+                                                secondaryMaxDrop
+                                                    ?: settings.secondaryBothMaxDropDistanceKm
+                                        )
+                                    )
+
+                                    showSavedSnackbar()
+                                }
+                            }
+                        )
+
+                        HorizontalDivider(
+                            color = CardBorderDefault
+                        )
+
+                        Text(
+                            text =
+                                "All 3 must match: Fare ≥ Minimum • Pickup ≤ Maximum • Drop ≤ Maximum",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = BluePrimary
+                        )
+
+                        Text(
+                            text =
+                                "Final rule: Home Filter OR this Both Filter = eligible order.",
+                            fontSize = 11.sp,
+                            color = TextDarkSecondary
+                        )
+
+                        OutlinedTextField(
+                            value = secondaryMinFareText,
+                            onValueChange = { value ->
+                                if (
+                                    value.isEmpty() ||
+                                    value.matches(
+                                        Regex("""^\d*\.?\d*$""")
+                                    )
+                                ) {
+                                    secondaryMinFareText = value
+                                }
+                            },
+                            label = {
+                                Text(
+                                    "Minimum Fare (₹)",
+                                    fontSize = 12.sp
+                                )
+                            },
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Decimal
+                            ),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = BluePrimary,
+                                focusedLabelColor = BluePrimary,
+                                unfocusedBorderColor = CardBorderDefault,
+                                focusedTextColor = TextDarkPrimary,
+                                unfocusedTextColor = TextDarkPrimary
+                            )
+                        )
+
+                        OutlinedTextField(
+                            value = secondaryMaxPickupText,
+                            onValueChange = { value ->
+                                if (
+                                    value.isEmpty() ||
+                                    value.matches(
+                                        Regex("""^\d*\.?\d*$""")
+                                    )
+                                ) {
+                                    secondaryMaxPickupText = value
+                                }
+                            },
+                            label = {
+                                Text(
+                                    "Maximum Pickup (km)",
+                                    fontSize = 12.sp
+                                )
+                            },
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Decimal
+                            ),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = BluePrimary,
+                                focusedLabelColor = BluePrimary,
+                                unfocusedBorderColor = CardBorderDefault,
+                                focusedTextColor = TextDarkPrimary,
+                                unfocusedTextColor = TextDarkPrimary
+                            )
+                        )
+
+                        OutlinedTextField(
+                            value = secondaryMaxDropText,
+                            onValueChange = { value ->
+                                if (
+                                    value.isEmpty() ||
+                                    value.matches(
+                                        Regex("""^\d*\.?\d*$""")
+                                    )
+                                ) {
+                                    secondaryMaxDropText = value
+                                }
+                            },
+                            label = {
+                                Text(
+                                    "Maximum Drop (km)",
+                                    fontSize = 12.sp
+                                )
+                            },
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Decimal
+                            ),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = BluePrimary,
+                                focusedLabelColor = BluePrimary,
+                                unfocusedBorderColor = CardBorderDefault,
+                                focusedTextColor = TextDarkPrimary,
+                                unfocusedTextColor = TextDarkPrimary
+                            )
+                        )
+
+                        Button(
+                            onClick = {
+                                val minFare =
+                                    secondaryMinFareText.toFloatOrNull()
+                                val maxPickup =
+                                    secondaryMaxPickupText.toFloatOrNull()
+                                val maxDrop =
+                                    secondaryMaxDropText.toFloatOrNull()
+
+                                if (
+                                    minFare != null &&
+                                    minFare > 0f &&
+                                    maxPickup != null &&
+                                    maxPickup > 0f &&
+                                    maxDrop != null &&
+                                    maxDrop > 0f
+                                ) {
+                                    prefs.saveAppSettings(
+                                        settings.copy(
+                                            secondaryBothMinFare = minFare,
+                                            secondaryBothMaxPickupDistanceKm =
+                                                maxPickup,
+                                            secondaryBothMaxDropDistanceKm =
+                                                maxDrop
+                                        )
+                                    )
+
+                                    showSavedSnackbar()
+                                }
+                            },
+                            enabled = secondaryValid,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .testTag(
+                                    "save_secondary_both_filter"
+                                ),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = BluePrimary,
+                                contentColor = Color.White
+                            )
+                        ) {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                modifier = Modifier.size(17.dp)
+                            )
+
+                            Spacer(
+                                modifier = Modifier.width(8.dp)
+                            )
+
+                            Text(
+                                text = "Save Order Filter",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+            }
+            // 3. BUNDLE ORDER
+            item {
+                SectionHeader("3. BUNDLE ORDER")
                 Card(
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
                     shape = RoundedCornerShape(14.dp),
@@ -451,9 +737,9 @@ fun SettingsScreen(
                 }
             }
 
-            // 3. SUPPORTED PLATFORMS (Rapido, Uber, Ola toggles)
+            // 4. SUPPORTED PLATFORMS (Rapido, Uber, Ola toggles)
             item {
-                SectionHeader("3. SUPPORTED PLATFORMS")
+                SectionHeader("4. SUPPORTED PLATFORMS")
                 Card(
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
                     shape = RoundedCornerShape(14.dp),

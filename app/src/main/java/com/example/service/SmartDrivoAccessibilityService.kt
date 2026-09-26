@@ -303,7 +303,8 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
     @Volatile
     private var lastRapidoEventDispatchAt = 0L
-
+
+
 
     @Volatile
     private var activeRapidoPopupOrderId: String? = null
@@ -675,7 +676,12 @@ private val processingTimeoutRunnable = Runnable {
         val maxFare: Float,
         val maxPickupKm: Float,
         val maxDropKm: Float,
-        val filterMode: String = "both"
+        val filterMode: String = "both",
+
+        val secondaryBothEnabled: Boolean = false,
+        val secondaryBothMinFare: Float = 50f,
+        val secondaryBothMaxPickupKm: Float = 3.0f,
+        val secondaryBothMaxDropKm: Float = 7.5f
     )
 
     private fun getDirectPreferencesString(sp: SharedPreferences, keys: List<String>, defaultVal: String): String {
@@ -740,12 +746,52 @@ private val processingTimeoutRunnable = Runnable {
             rawMode.contains("distance", ignoreCase = true) && !rawMode.contains("fare", ignoreCase = true) -> "distance_only"
             else -> "both"
         }
+
+        val secondaryBothEnabled =
+            try {
+                sp.getBoolean(
+                    "setting_secondary_both_filter_enabled",
+                    false
+                )
+            } catch (_: Exception) {
+                false
+            }
+
+        val secondaryBothMinFare =
+            getDirectPreferencesFloat(
+                sp,
+                listOf("setting_secondary_both_min_fare"),
+                50f
+            )
+
+        val secondaryBothMaxPickupKm =
+            getDirectPreferencesFloat(
+                sp,
+                listOf("setting_secondary_both_max_pickup_km"),
+                3.0f
+            )
+
+        val secondaryBothMaxDropKm =
+            getDirectPreferencesFloat(
+                sp,
+                listOf("setting_secondary_both_max_drop_km"),
+                7.5f
+            )
         return DirectRideFilterSettings(
             minFare = minFare,
             maxFare = maxFare,
             maxPickupKm = maxPickupKm,
             maxDropKm = maxDropKm,
-            filterMode = normalizedFilterMode
+            filterMode = normalizedFilterMode,
+
+            secondaryBothEnabled =
+                secondaryBothEnabled,
+            secondaryBothMinFare =
+                secondaryBothMinFare,
+            secondaryBothMaxPickupKm =
+                secondaryBothMaxPickupKm,
+            secondaryBothMaxDropKm =
+                secondaryBothMaxDropKm
         )
     }
 
@@ -893,6 +939,66 @@ private val processingTimeoutRunnable = Runnable {
             }
         }
 
+        // Separate Both filter.
+        // It is independent from Home settings.
+        val secondaryFailureReasons =
+            mutableListOf<String>()
+
+        if (direct.secondaryBothEnabled) {
+
+            if (fare == null || fare <= 0f) {
+                secondaryFailureReasons +=
+                    "Fare unavailable"
+            } else if (
+                direct.secondaryBothMinFare > 0f &&
+                fare < direct.secondaryBothMinFare
+            ) {
+                secondaryFailureReasons +=
+                    "Fare ₹${fare.toInt()} < min ₹${direct.secondaryBothMinFare.toInt()}"
+            }
+
+            if (pickup == null) {
+                secondaryFailureReasons +=
+                    "Pickup unavailable"
+            } else if (
+                direct.secondaryBothMaxPickupKm > 0f &&
+                pickup > direct.secondaryBothMaxPickupKm
+            ) {
+                secondaryFailureReasons +=
+                    "Pickup ${String.format(Locale.ENGLISH, "%.1f", pickup)} km > max ${String.format(Locale.ENGLISH, "%.1f", direct.secondaryBothMaxPickupKm)} km"
+            }
+
+            if (drop == null) {
+                secondaryFailureReasons +=
+                    "Trip unavailable"
+            } else if (
+                direct.secondaryBothMaxDropKm > 0f &&
+                drop > direct.secondaryBothMaxDropKm
+            ) {
+                secondaryFailureReasons +=
+                    "Trip ${String.format(Locale.ENGLISH, "%.1f", drop)} km > max ${String.format(Locale.ENGLISH, "%.1f", direct.secondaryBothMaxDropKm)} km"
+            }
+        }
+
+        val secondaryMatched =
+            direct.secondaryBothEnabled &&
+                secondaryFailureReasons.isEmpty()
+
+        // Home failed but Separate Both passed -> ACCEPT.
+        if (
+            failureReasons.isNotEmpty() &&
+            secondaryMatched
+        ) {
+            Log.i(
+                TAG,
+                "✅ [Filter OR MATCH] Home failed, Separate Both matched"
+            )
+
+            return DirectFilterResult(
+                OrderStatus.ACCEPTED,
+                "Separate Both filter matched"
+            )
+        }
         if (failureReasons.isNotEmpty()) {
             val modeLabel = when (filterMode) {
                 "fare_only" -> "Fare Only"
@@ -923,6 +1029,19 @@ private val processingTimeoutRunnable = Runnable {
                 append("Mode: $modeLabel")
                 append("\nLimits: ${limitParts.joinToString(" | ")}")
                 append("\nWhy ignored: ${failureReasons.joinToString("; ")}")
+
+                if (direct.secondaryBothEnabled) {
+                    append(
+                        "\nSeparate Both: ${
+                            if (secondaryFailureReasons.isEmpty())
+                                "matched"
+                            else
+                                secondaryFailureReasons.joinToString("; ")
+                        }"
+                    )
+                } else {
+                    append("\nSeparate Both: OFF")
+                }
             }
 
             Log.w(TAG, "⏭️ [Direct Filter IGNORED] $reason")
@@ -4642,7 +4761,7 @@ private val processingTimeoutRunnable = Runnable {
             return
         }
 
-        
+
         // RAPIDO_POST_ACCEPT_FIX_V1
         // Never parse Rapido confirmation/status UI as a fresh ride.
         // The running accept-verification coroutine will finalize the ORIGINAL
@@ -6507,6 +6626,88 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
             }
         }
 
+        val homeFareMatched =
+            when {
+                settings.filterMode ==
+                    com.example.model.FilterMode.DISTANCE_ONLY ->
+                    true
+
+                fare <= 0f ->
+                    true
+
+                settings.minFare > 0f &&
+                    fare < settings.minFare ->
+                    false
+
+                settings.maxFare > 0f &&
+                    fare > settings.maxFare ->
+                    false
+
+                else ->
+                    true
+            }
+
+        val homeDistanceMatched =
+            when {
+                settings.filterMode ==
+                    com.example.model.FilterMode.FARE_ONLY ->
+                    true
+
+                candidate.pickupDistKm != null &&
+                    settings.maxPickupDistanceKm > 0f &&
+                    pickup > settings.maxPickupDistanceKm ->
+                    false
+
+                candidate.dropDistKm != null &&
+                    settings.maxDropDistanceKm > 0f &&
+                    trip > settings.maxDropDistanceKm ->
+                    false
+
+                else ->
+                    true
+            }
+
+        val homeMatched =
+            homeFareMatched &&
+                homeDistanceMatched
+
+        val secondaryMatched =
+            settings.isSecondaryBothFilterEnabled &&
+                fare > 0f &&
+                candidate.pickupDistKm != null &&
+                candidate.dropDistKm != null &&
+                (
+                    settings.secondaryBothMinFare <= 0f ||
+                        fare >= settings.secondaryBothMinFare
+                ) &&
+                (
+                    settings.secondaryBothMaxPickupDistanceKm <= 0f ||
+                        pickup <=
+                            settings.secondaryBothMaxPickupDistanceKm
+                ) &&
+                (
+                    settings.secondaryBothMaxDropDistanceKm <= 0f ||
+                        trip <=
+                            settings.secondaryBothMaxDropDistanceKm
+                )
+
+        if (!homeMatched && secondaryMatched) {
+            return buildString {
+                append("Mode: Separate Both")
+
+                append(
+                    "\nFare ₹${fare.toInt()} ≥ ₹${settings.secondaryBothMinFare.toInt()}"
+                )
+
+                append(
+                    " | Pickup ${km(pickup)} ≤ ${km(settings.secondaryBothMaxPickupDistanceKm)}"
+                )
+
+                append(
+                    " | Trip ${km(trip)} ≤ ${km(settings.secondaryBothMaxDropDistanceKm)}"
+                )
+            }
+        }
         return when (settings.filterMode) {
             com.example.model.FilterMode.FARE_ONLY -> {
                 buildString {
