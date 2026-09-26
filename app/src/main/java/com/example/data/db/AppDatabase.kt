@@ -1,4 +1,4 @@
-package com.example.data.db
+﻿package com.example.data.db
 
 import android.content.Context
 import androidx.room.Database
@@ -27,10 +27,10 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "smartdrivo_history.db"
                 )
-                .fallbackToDestructiveMigration()
                 .build()
                 .also { INSTANCE = it }
             }
         }
     }
 }
+
