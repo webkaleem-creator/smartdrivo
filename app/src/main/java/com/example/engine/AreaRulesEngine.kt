@@ -161,23 +161,6 @@ object AreaRulesEngine {
             }
         }
 
-        // Fastest mode only when Go-To priority is not active.
-        if (settings.isFastestModeEnabled) {
-            val pickup = candidate.pickupDistKm
-            if (
-                pickup != null &&
-                settings.maxPickupDistanceKm > 0f &&
-                pickup > settings.maxPickupDistanceKm
-            ) {
-                return DecisionResult.Reject(
-                    "Fastest Mode: Pickup ${pickup}km exceeds ${settings.maxPickupDistanceKm}km"
-                )
-            }
-
-            return DecisionResult.Accept(
-                "Fastest Mode: pickup distance passed"
-            )
-        }
 
         // Normal Home filter + independent Separate Both filter.
         //
