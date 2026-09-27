@@ -892,10 +892,10 @@ private val processingTimeoutRunnable = Runnable {
                 }
             }
 
-        if (hasActiveGoTo || prioritySettings.isFastestModeEnabled) {
+        if (hasActiveGoTo) {
             return DirectFilterResult(
                 OrderStatus.ACCEPTED,
-                if (hasActiveGoTo) "Go-To priority mode" else "Fastest priority mode"
+                "Go-To priority mode"
             )
         }
 

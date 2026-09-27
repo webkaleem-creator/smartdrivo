@@ -1,4 +1,4 @@
-package com.example.data
+﻿package com.example.data
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -651,7 +651,7 @@ class PreferencesManager(private val context: Context) {
     fun loadNoGoAreas(): List<AreaGroup> = loadNoGoAreaGroups()
 
     fun saveGoToAreas(list: List<AreaGroup>) {
-        _goToAreas.value = list
+        saveAreaGroups(list, loadNoGoAreaGroups())
     }
 
     @JvmName("saveGoToAreasStrings")
@@ -661,7 +661,7 @@ class PreferencesManager(private val context: Context) {
     }
 
     fun saveNoGoAreas(list: List<AreaGroup>) {
-        _noGoAreas.value = list
+        saveAreaGroups(loadGoToAreaGroups(), list)
     }
 
     @JvmName("saveNoGoAreasStrings")
@@ -1362,3 +1362,4 @@ class PreferencesManager(private val context: Context) {
         private const val KEY_COMMUNITY_SUPPORT_TELEGRAM = "comm_support_telegram"
     }
 }
+
