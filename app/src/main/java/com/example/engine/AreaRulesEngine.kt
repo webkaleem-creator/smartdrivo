@@ -1,4 +1,4 @@
-package com.example.engine
+﻿package com.example.engine
 
 import androidx.compose.runtime.Immutable
 import com.example.model.AreaGroup
@@ -41,7 +41,7 @@ object AreaRulesEngine {
 
         if (candidate.isBundledOrder && !settings.isBundleOrderEnabled) {
             return DecisionResult.Ignore(
-                "Bundle Order OFF • Manual action"
+                "Bundle Order OFF â€¢ Manual action"
             )
         }
 
@@ -75,24 +75,68 @@ object AreaRulesEngine {
         // 3. If multiple groups match, accept when ANY matching group passes all 3 limits.
         // 4. Global Fare/Distance/Fastest filters are bypassed while Go-To priority is active.
         if (isGoToEnabled) {
-            val activeGoTo = goToAreas.filter {
-                it.isEnabled && it.keywords.isNotEmpty()
-            }
+            val activeGoTo = goToAreas.filter { it.isEnabled }
 
             if (activeGoTo.isNotEmpty()) {
-                val matchingGroups = activeGoTo.filter { group ->
-                    group.keywords
-                        .map { it.trim() }
-                        .filter {
-                            it.isNotBlank() &&
-                                !it.equals(group.name, ignoreCase = true)
+                data class GoToMatch(
+                    val group: com.example.model.AreaGroup,
+                    val area: com.example.model.AreaEntry
+                )
+
+                val matches = mutableListOf<GoToMatch>()
+
+                for (group in activeGoTo) {
+                    // New per-area format.
+                    if (group.areas.isNotEmpty()) {
+                        for (area in group.areas) {
+                            val word = area.name.trim()
+                            if (
+                                word.isNotBlank() &&
+                                Regex(
+                                    "(?<![\\p{L}\\p{N}])" +
+                                        Regex.escape(word) +
+                                        "(?![\\p{L}\\p{N}])",
+                                    RegexOption.IGNORE_CASE
+                                ).containsMatchIn(dropText)
+                            ) {
+                                matches.add(GoToMatch(group, area))
+                            }
                         }
-                        .any { word ->
-                            Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(word.lowercase()) + "(?![\\p{L}\\p{N}])", RegexOption.IGNORE_CASE).containsMatchIn(dropText)
+                    } else {
+                        // Backward compatibility for old saved groups.
+                        for (wordRaw in group.keywords) {
+                            val word = wordRaw.trim()
+                            if (
+                                word.isNotBlank() &&
+                                !word.equals(group.name, ignoreCase = true) &&
+                                Regex(
+                                    "(?<![\\p{L}\\p{N}])" +
+                                        Regex.escape(word) +
+                                        "(?![\\p{L}\\p{N}])",
+                                    RegexOption.IGNORE_CASE
+                                ).containsMatchIn(dropText)
+                            ) {
+                                val oldMinFare =
+                                    if (group.maxFare > 0f) group.maxFare
+                                    else group.minFare
+
+                                matches.add(
+                                    GoToMatch(
+                                        group,
+                                        com.example.model.AreaEntry(
+                                            name = word,
+                                            minFare = oldMinFare,
+                                            maxPickupKm = group.maxPickupKm,
+                                            maxDropKm = group.maxDropKm
+                                        )
+                                    )
+                                )
+                            }
                         }
+                    }
                 }
 
-                if (matchingGroups.isEmpty()) {
+                if (matches.isEmpty()) {
                     return DecisionResult.Reject(
                         "Go-To Area Filter: destination not found in any active Go-To area"
                     )
@@ -103,64 +147,55 @@ object AreaRulesEngine {
                 val drop = candidate.dropDistKm
                 var firstFailure: String? = null
 
-                for (matchedGroup in matchingGroups) {
-                    // Backward compatibility:
-                    // Old GO TO groups stored this value in maxFare.
-                    // Until that group is saved again, treat it as Minimum Fare.
-                    val effectiveMinFare =
-                        if (matchedGroup.maxFare > 0f) {
-                            matchedGroup.maxFare
-                        } else {
-                            matchedGroup.minFare
-                        }
+                for (match in matches) {
+                    val area = match.area
 
                     if (
-                        effectiveMinFare > 0f &&
+                        area.minFare > 0f &&
                         fare != null &&
-                        fare < effectiveMinFare
+                        fare < area.minFare
                     ) {
                         if (firstFailure == null) {
                             firstFailure =
-                                "Go-To '${matchedGroup.name}': fare ₹${fare.toInt()} is below minimum ₹${effectiveMinFare.toInt()}"
+                                "Go-To '${area.name}': fare ₹${fare.toInt()} is below minimum ₹${area.minFare.toInt()}"
                         }
                         continue
                     }
 
                     if (
-                        matchedGroup.maxPickupKm > 0f &&
+                        area.maxPickupKm > 0f &&
                         pickup != null &&
-                        pickup > matchedGroup.maxPickupKm
+                        pickup > area.maxPickupKm
                     ) {
                         if (firstFailure == null) {
                             firstFailure =
-                                "Go-To '${matchedGroup.name}': pickup ${pickup}km exceeds max ${matchedGroup.maxPickupKm}km"
+                                "Go-To '${area.name}': pickup ${pickup}km exceeds max ${area.maxPickupKm}km"
                         }
                         continue
                     }
 
                     if (
-                        matchedGroup.maxDropKm > 0f &&
+                        area.maxDropKm > 0f &&
                         drop != null &&
-                        drop > matchedGroup.maxDropKm
+                        drop > area.maxDropKm
                     ) {
                         if (firstFailure == null) {
                             firstFailure =
-                                "Go-To '${matchedGroup.name}': drop ${drop}km exceeds max ${matchedGroup.maxDropKm}km"
+                                "Go-To '${area.name}': drop ${drop}km exceeds max ${area.maxDropKm}km"
                         }
                         continue
                     }
 
                     return DecisionResult.Accept(
-                        "Go-To destination matched '${matchedGroup.name}' and group limits passed"
+                        "Go-To destination matched '${area.name}' and area limits passed"
                     )
                 }
 
                 return DecisionResult.Reject(
-                    firstFailure ?: "Go-To Area: matched groups did not pass their limits"
+                    firstFailure ?: "Go-To Area: matched areas did not pass their limits"
                 )
             }
         }
-
 
         // Normal Home filter + independent Separate Both filter.
         //
@@ -253,11 +288,11 @@ object AreaRulesEngine {
         }
 
         return DecisionResult.Reject(
-            "No condition matched • Home ${settings.filterMode.displayName} failed" +
+            "No condition matched â€¢ Home ${settings.filterMode.displayName} failed" +
                 if (settings.isSecondaryBothFilterEnabled) {
-                    " • Separate Both failed"
+                    " â€¢ Separate Both failed"
                 } else {
-                    " • Separate Both OFF"
+                    " â€¢ Separate Both OFF"
                 }
         )
     }

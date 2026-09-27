@@ -1,4 +1,4 @@
-package com.example.ui.screens
+﻿package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -171,7 +171,7 @@ fun AreaManagerScreen(
 
             scope.launch {
                 val message =
-                    "Go-To '${saved.name}' $saveAction ✓ • $status"
+                    "Go-To '${saved.name}' $saveAction âœ“ • $status"
                 snackbar.showSnackbar(message)
             }
         } else {
@@ -203,7 +203,7 @@ fun AreaManagerScreen(
 
             scope.launch {
                 val message =
-                    "No-Go '${saved.name}' $saveAction ✓ • $status"
+                    "No-Go '${saved.name}' $saveAction âœ“ • $status"
                 snackbar.showSnackbar(message)
             }
         }
@@ -675,69 +675,139 @@ private fun GroupEditorDialog(
     val accent = if (isGoTo) GoToGreen else NoGoRed
     val bg = if (isGoTo) GoToGreenBg else NoGoRedBg
 
+    val initialAreas = remember(group?.id, type) {
+        if (isGoTo) {
+            val savedAreas = group?.areas.orEmpty()
+
+            if (savedAreas.isNotEmpty()) {
+                savedAreas
+            } else {
+                group?.keywords.orEmpty()
+                    .flatMap { raw ->
+                        raw.split(",")
+                            .map { it.trim() }
+                            .filter { it.isNotBlank() }
+                    }
+                    .distinctBy { it.lowercase() }
+                    .map { areaName ->
+                        com.example.model.AreaEntry(
+                            name = areaName,
+                            minFare = group?.minFare ?: 0f,
+                            maxPickupKm = group?.maxPickupKm ?: 0f,
+                            maxDropKm = group?.maxDropKm ?: 0f
+                        )
+                    }
+            }
+        } else {
+            emptyList()
+        }
+    }
+
+    val initialKeywords = remember(group?.id, type) {
+        if (isGoTo && initialAreas.isNotEmpty()) {
+            initialAreas.map { it.name }
+        } else {
+            group?.keywords.orEmpty()
+                .flatMap { raw ->
+                    if (isGoTo) {
+                        raw.split(",")
+                    } else {
+                        listOf(raw)
+                    }
+                }
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinctBy { it.lowercase() }
+        }
+    }
+
     var name by remember(group?.id, type) {
         mutableStateOf(group?.name.orEmpty())
     }
-    var minFareText by remember(group?.id, type) {
-        mutableStateOf(
-            group
-                ?.let { saved ->
-                    if (saved.maxFare > 0f) saved.maxFare else saved.minFare
-                }
-                ?.takeIf { it > 0f }
-                ?.let {
-                    if (it % 1f == 0f) it.toInt().toString()
-                    else it.toString()
-                }
-                .orEmpty()
-        )
-    }
-    var maxPickupText by remember(group?.id, type) {
-        mutableStateOf(
-            group?.maxPickupKm
-                ?.takeIf { it > 0f }
-                ?.let { it.toString() }
-                .orEmpty()
-        )
-    }
-    var maxDropText by remember(group?.id, type) {
-        mutableStateOf(
-            group?.maxDropKm
-                ?.takeIf { it > 0f }
-                ?.let { it.toString() }
-                .orEmpty()
-        )
-    }
+
     var keywords by remember(group?.id, type) {
-        mutableStateOf(group?.keywords ?: emptyList())
+        mutableStateOf(initialKeywords)
     }
+
+    var areaEntries by remember(group?.id, type) {
+        mutableStateOf(initialAreas)
+    }
+
     var areaInput by remember(group?.id, type) {
         mutableStateOf("")
     }
+
     var editingIndex by remember(group?.id, type) {
         mutableStateOf<Int?>(null)
     }
 
     fun submitArea() {
-        val value = areaInput.trim()
-        if (value.isBlank()) return
-        if (value.equals(name.trim(), ignoreCase = true)) return
+        val names = areaInput
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .filterNot { it.equals(name.trim(), ignoreCase = true) }
+            .distinctBy { it.lowercase() }
 
-        val updated = keywords.toMutableList()
+        if (names.isEmpty()) return
+
+        val updatedKeywords = keywords.toMutableList()
+        val updatedEntries = areaEntries.toMutableList()
         val editAt = editingIndex
 
-        if (editAt != null && editAt in updated.indices) {
-            if (updated.withIndex().any {
-                    it.index != editAt &&
-                        it.value.equals(value, ignoreCase = true)
-                }) return
-            updated[editAt] = value
+        if (
+            editAt != null &&
+            editAt in updatedKeywords.indices &&
+            names.size == 1
+        ) {
+            val newName = names.first()
+
+            val duplicate = updatedKeywords.withIndex().any {
+                it.index != editAt &&
+                    it.value.equals(newName, ignoreCase = true)
+            }
+
+            if (!duplicate) {
+                updatedKeywords[editAt] = newName
+
+                while (updatedEntries.size <= editAt) {
+                    val idx = updatedEntries.size
+                    updatedEntries.add(
+                        com.example.model.AreaEntry(
+                            name = updatedKeywords.getOrNull(idx).orEmpty()
+                        )
+                    )
+                }
+
+                updatedEntries[editAt] =
+                    updatedEntries[editAt].copy(name = newName)
+            }
         } else {
-            if (updated.any { it.equals(value, ignoreCase = true) }) return
-            updated.add(value)
+            names.forEach { newName ->
+                if (
+                    updatedKeywords.none {
+                        it.equals(newName, ignoreCase = true)
+                    }
+                ) {
+                    updatedKeywords.add(newName)
+
+                    if (isGoTo) {
+                        updatedEntries.add(
+                            com.example.model.AreaEntry(
+                                name = newName
+                            )
+                        )
+                    }
+                }
+            }
         }
 
-        keywords = updated
+        keywords = updatedKeywords
+
+        if (isGoTo) {
+            areaEntries = updatedEntries
+        }
+
         areaInput = ""
         editingIndex = null
     }
@@ -753,13 +823,22 @@ private fun GroupEditorDialog(
                 modifier = Modifier.padding(12.dp)
             ) {
                 Text(
-                    if (group == null) {
-                        if (isGoTo) "New GO TO Group" else "New NO GO Group"
-                    } else {
-                        if (isGoTo) "Edit GO TO Group" else "Edit NO GO Group"
-                    },
+                    text =
+                        if (group == null) {
+                            if (isGoTo) {
+                                "New GO TO Group"
+                            } else {
+                                "New NO GO Group"
+                            }
+                        } else {
+                            if (isGoTo) {
+                                "Edit GO TO Group"
+                            } else {
+                                "Edit NO GO Group"
+                            }
+                        },
                     fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
+                    fontSize = 20.sp
                 )
 
                 Spacer(Modifier.height(10.dp))
@@ -767,276 +846,664 @@ private fun GroupEditorDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Group Name") },
-                    placeholder = { Text("e.g. Home, Old City, Airport") },
+                    label = {
+                        Text(
+                            "Group Name",
+                            fontSize = 13.sp
+                        )
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = accent,
-                        cursorColor = accent
-                    )
-                )
-
-                if (isGoTo) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "GO TO Limits",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        color = accent
-                    )
-                    Text(
-                        "These group limits apply after destination area matches.",
-                        fontSize = 10.sp,
-                        color = Color(0xFF64748B)
-                    )
-                    Spacer(Modifier.height(6.dp))
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = minFareText,
-                            onValueChange = { input ->
-                                if (input.isEmpty() || input.matches(Regex("""^\d*\.?\d*$"""))) {
-                                    minFareText = input
-                                }
-                            },
-                            label = { Text("Minimum Fare", fontSize = 10.sp) },
-                            placeholder = { Text("No minimum", fontSize = 10.sp) },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier.weight(1f),
-                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = accent,
-                                cursorColor = accent
-                            )
-                        )
-
-                        OutlinedTextField(
-                            value = maxPickupText,
-                            onValueChange = { input ->
-                                if (input.isEmpty() || input.matches(Regex("""^\d*\.?\d*$"""))) {
-                                    maxPickupText = input
-                                }
-                            },
-                            label = { Text("Maximum Pickup", fontSize = 10.sp) },
-                            placeholder = { Text("km", fontSize = 10.sp) },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier.weight(1f),
-                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = accent,
-                                cursorColor = accent
-                            )
-                        )
-                    }
-
-                    Spacer(Modifier.height(6.dp))
-
-                    OutlinedTextField(
-                        value = maxDropText,
-                        onValueChange = { input ->
-                            if (input.isEmpty() || input.matches(Regex("""^\d*\.?\d*$"""))) {
-                                maxDropText = input
-                            }
-                        },
-                        label = { Text("Maximum Drop Distance (km)", fontSize = 10.sp) },
-                        placeholder = { Text("No limit", fontSize = 10.sp) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth(),
-                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
-                        colors = OutlinedTextFieldDefaults.colors(
+                    textStyle =
+                        androidx.compose.ui.text.TextStyle(
+                            fontSize = 16.sp
+                        ),
+                    colors =
+                        OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = accent,
                             cursorColor = accent
                         )
-                    )
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                Text(
-                    if (isGoTo) "Destination Areas (${keywords.size})"
-                    else "Blocked Areas (${keywords.size})",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp
                 )
 
-                Spacer(Modifier.height(5.dp))
+                Spacer(Modifier.height(12.dp))
+
+                Text(
+                    text =
+                        if (isGoTo) {
+                            "Destination Areas (${keywords.size})"
+                        } else {
+                            "Blocked Areas (${keywords.size})"
+                        },
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                )
+
+                Spacer(Modifier.height(6.dp))
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     OutlinedTextField(
                         value = areaInput,
-                        onValueChange = { areaInput = it },
+                        onValueChange = {
+                            areaInput = it
+                        },
                         placeholder = {
                             Text(
-                                if (editingIndex == null) "Add area name"
-                                else "Edit area name"
+                                if (editingIndex == null) {
+                                    "Add area name"
+                                } else {
+                                    "Edit area name"
+                                },
+                                fontSize = 14.sp
                             )
                         },
                         singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            imeAction = ImeAction.Done
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onDone = { submitArea() }
-                        ),
+                        keyboardOptions =
+                            KeyboardOptions(
+                                imeAction = ImeAction.Done
+                            ),
+                        keyboardActions =
+                            KeyboardActions(
+                                onDone = {
+                                    submitArea()
+                                }
+                            ),
                         modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = accent,
-                            cursorColor = accent
-                        )
+                        textStyle =
+                            androidx.compose.ui.text.TextStyle(
+                                fontSize = 16.sp
+                            ),
+                        colors =
+                            OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = accent,
+                                cursorColor = accent
+                            )
                     )
 
                     Spacer(Modifier.width(8.dp))
 
                     Button(
-                        onClick = { submitArea() },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = accent
-                        ),
+                        onClick = {
+                            submitArea()
+                        },
+                        colors =
+                            ButtonDefaults.buttonColors(
+                                containerColor = accent
+                            ),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.height(48.dp)
+                        modifier = Modifier.height(54.dp)
                     ) {
-                        Text(if (editingIndex == null) "Add" else "Save")
+                        Text(
+                            if (editingIndex == null) {
+                                "Add"
+                            } else {
+                                "Save"
+                            },
+                            fontSize = 15.sp
+                        )
                     }
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
 
                 if (keywords.isEmpty()) {
                     Surface(
                         color = bg.copy(alpha = 0.65f),
-                        shape = RoundedCornerShape(9.dp)
+                        shape = RoundedCornerShape(10.dp)
                     ) {
                         Text(
                             "No areas added yet",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(10.dp),
-                            fontSize = 12.sp,
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                            fontSize = 14.sp,
                             color = Color(0xFF64748B)
                         )
                     }
                 } else {
                     LazyColumn(
-                        modifier = Modifier.heightIn(max = 260.dp),
-                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                        modifier =
+                            Modifier.heightIn(
+                                max = 320.dp
+                            ),
+                        verticalArrangement =
+                            Arrangement.spacedBy(8.dp)
                     ) {
                         itemsIndexed(
                             items = keywords,
-                            key = { index, word -> "$index-$word" }
+                            key = { index, word ->
+                                "$index-$word"
+                            }
                         ) { index, word ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(
-                                        bg.copy(alpha = 0.65f),
-                                        RoundedCornerShape(9.dp)
-                                    )
-                                    .padding(horizontal = 10.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    word,
-                                    modifier = Modifier.weight(1f),
-                                    fontSize = 12.sp
-                                )
 
-                                IconButton(
-                                    onClick = {
-                                        keywords = keywords.toMutableList().also {
-                                            if (index in it.indices) it.removeAt(index)
-                                        }
-                                        if (editingIndex == index) {
-                                            editingIndex = null
-                                            areaInput = ""
-                                        }
-                                    },
-                                    modifier = Modifier.size(32.dp)
+                            if (isGoTo) {
+                                val currentEntry =
+                                    areaEntries.getOrNull(index)
+                                        ?: com.example.model.AreaEntry(
+                                            name = word
+                                        )
+
+                                var fareText by remember(
+                                    group?.id,
+                                    type,
+                                    word
                                 ) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = "Delete area",
-                                        tint = NoGoRed,
-                                        modifier = Modifier.size(18.dp)
+                                    mutableStateOf(
+                                        currentEntry.minFare
+                                            .takeIf { it > 0f }
+                                            ?.let {
+                                                if (it % 1f == 0f) {
+                                                    it.toInt().toString()
+                                                } else {
+                                                    it.toString()
+                                                }
+                                            }
+                                            .orEmpty()
                                     )
+                                }
+
+                                var pickupText by remember(
+                                    group?.id,
+                                    type,
+                                    word
+                                ) {
+                                    mutableStateOf(
+                                        currentEntry.maxPickupKm
+                                            .takeIf { it > 0f }
+                                            ?.let {
+                                                if (it % 1f == 0f) {
+                                                    it.toInt().toString()
+                                                } else {
+                                                    it.toString()
+                                                }
+                                            }
+                                            .orEmpty()
+                                    )
+                                }
+
+                                var dropText by remember(
+                                    group?.id,
+                                    type,
+                                    word
+                                ) {
+                                    mutableStateOf(
+                                        currentEntry.maxDropKm
+                                            .takeIf { it > 0f }
+                                            ?.let {
+                                                if (it % 1f == 0f) {
+                                                    it.toInt().toString()
+                                                } else {
+                                                    it.toString()
+                                                }
+                                            }
+                                            .orEmpty()
+                                    )
+                                }
+
+                                fun ensureEntry(
+                                    change:
+                                        (
+                                            com.example.model.AreaEntry
+                                        ) ->
+                                            com.example.model.AreaEntry
+                                ) {
+                                    val list =
+                                        areaEntries.toMutableList()
+
+                                    while (list.size <= index) {
+                                        val idx = list.size
+                                        list.add(
+                                            com.example.model.AreaEntry(
+                                                name =
+                                                    keywords
+                                                        .getOrNull(idx)
+                                                        .orEmpty()
+                                            )
+                                        )
+                                    }
+
+                                    list[index] =
+                                        change(
+                                            list[index].copy(
+                                                name = word
+                                            )
+                                        )
+
+                                    areaEntries = list
+                                }
+
+                                Column(
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .background(
+                                                bg.copy(
+                                                    alpha = 0.65f
+                                                ),
+                                                RoundedCornerShape(
+                                                    10.dp
+                                                )
+                                            )
+                                            .padding(10.dp)
+                                ) {
+                                    Row(
+                                        modifier =
+                                            Modifier.fillMaxWidth(),
+                                        verticalAlignment =
+                                            Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = word,
+                                            modifier =
+                                                Modifier.weight(1f),
+                                            fontSize = 15.sp,
+                                            fontWeight =
+                                                FontWeight.Bold
+                                        )
+
+                                        IconButton(
+                                            onClick = {
+                                                keywords =
+                                                    keywords
+                                                        .toMutableList()
+                                                        .also {
+                                                            if (
+                                                                index in
+                                                                    it.indices
+                                                            ) {
+                                                                it.removeAt(
+                                                                    index
+                                                                )
+                                                            }
+                                                        }
+
+                                                areaEntries =
+                                                    areaEntries
+                                                        .toMutableList()
+                                                        .also {
+                                                            if (
+                                                                index in
+                                                                    it.indices
+                                                            ) {
+                                                                it.removeAt(
+                                                                    index
+                                                                )
+                                                            }
+                                                        }
+                                            },
+                                            modifier =
+                                                Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription =
+                                                    "Delete area",
+                                                tint = NoGoRed,
+                                                modifier =
+                                                    Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(
+                                        Modifier.height(6.dp)
+                                    )
+
+                                    Row(
+                                        modifier =
+                                            Modifier.fillMaxWidth(),
+                                        horizontalArrangement =
+                                            Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = fareText,
+                                            onValueChange = { raw ->
+                                                val input =
+                                                    raw.replace(
+                                                        ',',
+                                                        '.'
+                                                    )
+
+                                                if (
+                                                    input.isEmpty() ||
+                                                    input.matches(
+                                                        Regex(
+                                                            """^\d*\.?\d*$"""
+                                                        )
+                                                    )
+                                                ) {
+                                                    fareText = input
+
+                                                    ensureEntry {
+                                                        it.copy(
+                                                            minFare =
+                                                                input
+                                                                    .toFloatOrNull()
+                                                                    ?: 0f
+                                                        )
+                                                    }
+                                                }
+                                            },
+                                            label = {
+                                                Text(
+                                                    "Min Fare",
+                                                    fontSize = 11.sp,
+                                                    maxLines = 1
+                                                )
+                                            },
+                                            singleLine = true,
+                                            keyboardOptions =
+                                                KeyboardOptions(
+                                                    keyboardType =
+                                                        KeyboardType.Decimal
+                                                ),
+                                            modifier =
+                                                Modifier.weight(1f),
+                                            textStyle =
+                                                androidx.compose.ui.text.TextStyle(
+                                                    fontSize = 16.sp
+                                                )
+                                        )
+
+                                        OutlinedTextField(
+                                            value = pickupText,
+                                            onValueChange = { raw ->
+                                                val input =
+                                                    raw.replace(
+                                                        ',',
+                                                        '.'
+                                                    )
+
+                                                if (
+                                                    input.isEmpty() ||
+                                                    input.matches(
+                                                        Regex(
+                                                            """^\d*\.?\d*$"""
+                                                        )
+                                                    )
+                                                ) {
+                                                    pickupText = input
+
+                                                    ensureEntry {
+                                                        it.copy(
+                                                            maxPickupKm =
+                                                                input
+                                                                    .toFloatOrNull()
+                                                                    ?: 0f
+                                                        )
+                                                    }
+                                                }
+                                            },
+                                            label = {
+                                                Text(
+                                                    "Max Pickup",
+                                                    fontSize = 11.sp,
+                                                    maxLines = 1
+                                                )
+                                            },
+                                            singleLine = true,
+                                            keyboardOptions =
+                                                KeyboardOptions(
+                                                    keyboardType =
+                                                        KeyboardType.Decimal
+                                                ),
+                                            modifier =
+                                                Modifier.weight(1f),
+                                            textStyle =
+                                                androidx.compose.ui.text.TextStyle(
+                                                    fontSize = 16.sp
+                                                )
+                                        )
+
+                                        OutlinedTextField(
+                                            value = dropText,
+                                            onValueChange = { raw ->
+                                                val input =
+                                                    raw.replace(
+                                                        ',',
+                                                        '.'
+                                                    )
+
+                                                if (
+                                                    input.isEmpty() ||
+                                                    input.matches(
+                                                        Regex(
+                                                            """^\d*\.?\d*$"""
+                                                        )
+                                                    )
+                                                ) {
+                                                    dropText = input
+
+                                                    ensureEntry {
+                                                        it.copy(
+                                                            maxDropKm =
+                                                                input
+                                                                    .toFloatOrNull()
+                                                                    ?: 0f
+                                                        )
+                                                    }
+                                                }
+                                            },
+                                            label = {
+                                                Text(
+                                                    "Max Drop",
+                                                    fontSize = 11.sp,
+                                                    maxLines = 1
+                                                )
+                                            },
+                                            singleLine = true,
+                                            keyboardOptions =
+                                                KeyboardOptions(
+                                                    keyboardType =
+                                                        KeyboardType.Decimal
+                                                ),
+                                            modifier =
+                                                Modifier.weight(1f),
+                                            textStyle =
+                                                androidx.compose.ui.text.TextStyle(
+                                                    fontSize = 16.sp
+                                                )
+                                        )
+                                    }
+                                }
+                            } else {
+                                Row(
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .background(
+                                                bg.copy(
+                                                    alpha = 0.65f
+                                                ),
+                                                RoundedCornerShape(
+                                                    9.dp
+                                                )
+                                            )
+                                            .padding(
+                                                horizontal = 10.dp,
+                                                vertical = 7.dp
+                                            ),
+                                    verticalAlignment =
+                                        Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        word,
+                                        modifier =
+                                            Modifier.weight(1f),
+                                        fontSize = 14.sp
+                                    )
+
+                                    IconButton(
+                                        onClick = {
+                                            keywords =
+                                                keywords
+                                                    .toMutableList()
+                                                    .also {
+                                                        if (
+                                                            index in
+                                                                it.indices
+                                                        ) {
+                                                            it.removeAt(
+                                                                index
+                                                            )
+                                                        }
+                                                    }
+                                        },
+                                        modifier =
+                                            Modifier.size(34.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription =
+                                                "Delete area",
+                                            tint = NoGoRed,
+                                            modifier =
+                                                Modifier.size(19.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement =
+                        Arrangement.End,
+                    verticalAlignment =
+                        Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = onDismiss) {
-                        Text("Cancel", color = Color(0xFF64748B))
+                    TextButton(
+                        onClick = onDismiss
+                    ) {
+                        Text(
+                            "Cancel",
+                            color = Color(0xFF64748B),
+                            fontSize = 15.sp
+                        )
                     }
 
                     Spacer(Modifier.width(8.dp))
 
                     Button(
-                        enabled = name.trim().isNotBlank(),
+                        enabled =
+                            name.trim().isNotBlank() &&
+                                keywords.isNotEmpty(),
                         onClick = {
+                            val cleanKeywords =
+                                keywords
+                                    .map { it.trim() }
+                                    .filter { it.isNotBlank() }
+                                    .distinctBy {
+                                        it.lowercase()
+                                    }
+
+                            val cleanAreas =
+                                if (isGoTo) {
+                                    cleanKeywords.mapIndexed {
+                                            index,
+                                            areaName ->
+
+                                        areaEntries
+                                            .getOrNull(index)
+                                            ?.copy(
+                                                name = areaName
+                                            )
+                                            ?: com.example.model.AreaEntry(
+                                                name = areaName
+                                            )
+                                    }
+                                } else {
+                                    group?.areas.orEmpty()
+                                }
+
+                            val firstArea =
+                                cleanAreas.firstOrNull()
+
                             onSave(
                                 AreaGroup(
-                                    id = group?.id ?: UUID.randomUUID().toString(),
+                                    id =
+                                        group?.id
+                                            ?: UUID
+                                                .randomUUID()
+                                                .toString(),
                                     name = name.trim(),
-                                    isEnabled = group?.isEnabled ?: true,
+                                    isEnabled =
+                                        group?.isEnabled
+                                            ?: true,
                                     type = type,
-                                    keywords = keywords
-                                        .map { it.trim() }
-                                        .filter {
-                                            it.isNotBlank() &&
-                                                !it.equals(name.trim(), ignoreCase = true)
-                                        }
-                                        .distinctBy { it.lowercase() },
+                                    keywords = cleanKeywords,
+                                    areas = cleanAreas,
                                     filtersEnabled = false,
-                                    minFare = if (isGoTo) {
-                                        minFareText.toFloatOrNull() ?: 0f
-                                    } else {
-                                        group?.minFare ?: 0f
-                                    },
-                                    // maxFare is legacy for GO TO. Clear it after
-                                    // saving so Minimum Fare becomes authoritative.
-                                    maxFare = if (isGoTo) {
-                                        0f
-                                    } else {
-                                        group?.maxFare ?: 0f
-                                    },
-                                    minPickupKm = group?.minPickupKm ?: 0f,
-                                    maxPickupKm = if (isGoTo) {
-                                        maxPickupText.toFloatOrNull() ?: 0f
-                                    } else {
-                                        group?.maxPickupKm ?: 0f
-                                    },
-                                    maxDropKm = if (isGoTo) {
-                                        maxDropText.toFloatOrNull() ?: 0f
-                                    } else {
-                                        group?.maxDropKm ?: 0f
-                                    }
+
+                                    // Legacy summary values kept
+                                    // compatible with the existing
+                                    // GO TO card display.
+                                    minFare =
+                                        if (isGoTo) {
+                                            firstArea?.minFare
+                                                ?: 0f
+                                        } else {
+                                            group?.minFare
+                                                ?: 0f
+                                        },
+
+                                    maxFare =
+                                        if (isGoTo) {
+                                            0f
+                                        } else {
+                                            group?.maxFare
+                                                ?: 0f
+                                        },
+
+                                    minPickupKm =
+                                        group?.minPickupKm
+                                            ?: 0f,
+
+                                    maxPickupKm =
+                                        if (isGoTo) {
+                                            firstArea?.maxPickupKm
+                                                ?: 0f
+                                        } else {
+                                            group?.maxPickupKm
+                                                ?: 0f
+                                        },
+
+                                    maxDropKm =
+                                        if (isGoTo) {
+                                            firstArea?.maxDropKm
+                                                ?: 0f
+                                        } else {
+                                            group?.maxDropKm
+                                                ?: 0f
+                                        }
                                 )
                             )
                         },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = accent
-                        ),
-                        shape = RoundedCornerShape(12.dp)
+                        colors =
+                            ButtonDefaults.buttonColors(
+                                containerColor = accent
+                            ),
+                        shape =
+                            RoundedCornerShape(12.dp)
                     ) {
-                        Text("Save Group")
+                        Text(
+                            "Save Group",
+                            fontSize = 16.sp
+                        )
                     }
                 }
             }
         }
     }
 }
+
+
+
+
+

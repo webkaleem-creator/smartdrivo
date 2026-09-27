@@ -1,5 +1,7 @@
 ﻿package com.example.data
 
+import com.example.model.AreaEntry
+
 import android.content.Context
 import android.content.SharedPreferences
 import com.example.model.AppSettings
@@ -549,8 +551,9 @@ class PreferencesManager(private val context: Context) {
         _noGoAreas.value = noGoGroups
     }
 
-    private fun areaGroupToJson(g: AreaGroup): JSONObject {
+      private fun areaGroupToJson(g: AreaGroup): JSONObject {
         val obj = JSONObject()
+
         obj.put("id", g.id)
         obj.put("name", g.name)
         obj.put("isEnabled", g.isEnabled)
@@ -562,10 +565,37 @@ class PreferencesManager(private val context: Context) {
         obj.put("minPickupKm", g.minPickupKm.toDouble())
         obj.put("maxPickupKm", g.maxPickupKm.toDouble())
         obj.put("maxDropKm", g.maxDropKm.toDouble())
+    val areasArr = JSONArray()
+    for (a in g.areas) {
+        areasArr.put(
+            JSONObject().apply {
+                put("name", a.name)
+                put("minFare", a.minFare.toDouble())
+                put("maxPickupKm", a.maxPickupKm.toDouble())
+                put("maxDropKm", a.maxDropKm.toDouble())
+            }
+        )
+    }
+    obj.put("areas", areasArr)
         return obj
     }
 
     private fun jsonToAreaGroup(obj: JSONObject): AreaGroup {
+        val areaEntries = mutableListOf<AreaEntry>()
+        val areasArr = obj.optJSONArray("areas")
+        if (areasArr != null) {
+            for (i in 0 until areasArr.length()) {
+                val a = areasArr.optJSONObject(i) ?: continue
+                areaEntries.add(
+                    AreaEntry(
+                        name = a.optString("name", ""),
+                        minFare = a.optDouble("minFare", 0.0).toFloat(),
+                        maxPickupKm = a.optDouble("maxPickupKm", 0.0).toFloat(),
+                        maxDropKm = a.optDouble("maxDropKm", 0.0).toFloat()
+                    )
+                )
+            }
+        }
         val kwList = mutableListOf<String>()
         val kwArr = obj.optJSONArray("keywords")
         if (kwArr != null) {
@@ -1362,4 +1392,9 @@ class PreferencesManager(private val context: Context) {
         private const val KEY_COMMUNITY_SUPPORT_TELEGRAM = "comm_support_telegram"
     }
 }
+
+
+
+
+
 
