@@ -1192,7 +1192,7 @@ private val processingTimeoutRunnable = Runnable {
             // TYPE_WINDOW_CONTENT_CHANGED is extremely noisy in the Rapido UI.
             // 80ms still keeps detection responsive while cutting duplicate parser work heavily.
             if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
-                now - lastRapidoEventDispatchAt < 80L
+                now - lastRapidoEventDispatchAt < 10L
             ) {
                 return
             }
@@ -5102,7 +5102,7 @@ private val processingTimeoutRunnable = Runnable {
             }
 
             // Execute Rapido auto-accept strictly targeting Accept button
-            executeRapidoAutoAccept(candidate, root)
+            executeRapidoAutoAccept(candidate, root, prevalidatedAcceptNode = validation.acceptButton?.node)
         } catch (e: Exception) {
             Log.e(TAG, "Error in handleRapidoOrder", e)
             resetProcessing()
@@ -5122,7 +5122,8 @@ private val processingTimeoutRunnable = Runnable {
     private fun executeRapidoAutoAccept(
         candidate: RideCandidate,
         orderRoot: AccessibilityNodeInfo? = null,
-        attemptNumber: Int = 1
+        attemptNumber: Int = 1,
+        prevalidatedAcceptNode: AccessibilityNodeInfo? = null
     ) {
         if (candidate.fare == null || candidate.fare <= 0f || candidate.pickupDistKm == null || candidate.pickupDistKm <= 0f) {
             Log.w(TAG, "Aborting executeRapidoAutoAccept: fare (${candidate.fare}) or pickup distance (${candidate.pickupDistKm}) invalid/unavailable")
@@ -5173,7 +5174,7 @@ private val processingTimeoutRunnable = Runnable {
         }
 
         // Requirement 2: Strict target check - only click node where text contains "Accept" or "ACCEPT" exactly
-        val acceptNode = findStrictRapidoAcceptNode(rapidoRoot)
+        val acceptNode = prevalidatedAcceptNode ?: findStrictRapidoAcceptNode(rapidoRoot)
         if (acceptNode == null) {
             // Requirement 4: If "Accept" button not found, do nothing - do not click randomly
             Log.w(
