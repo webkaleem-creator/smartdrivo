@@ -62,6 +62,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.PreferencesManager
+import com.example.model.AppSettings
 import com.example.model.OrderHistoryItem
 import com.example.model.OrderStatus
 import com.example.model.Platform
@@ -106,6 +107,7 @@ fun OrderHistoryScreen(
 ) {
     val historyEntities by viewModel.history.collectAsStateWithLifecycle()
     val userProfile by prefs.userProfile.collectAsStateWithLifecycle()
+    val appSettings by prefs.appSettings.collectAsStateWithLifecycle()
     val history = remember(historyEntities) {
         historyEntities.sortedByDescending { it.detectedAt }.map { it.toOrderHistoryItem() }
     }
@@ -479,7 +481,7 @@ fun OrderHistoryScreen(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     items(filteredList, key = { it.id }) { item ->
-                        HistoryCard(item)
+                        HistoryCard(item, appSettings)
                     }
                     item {
                         Spacer(modifier = Modifier.height(16.dp))
@@ -492,7 +494,7 @@ fun OrderHistoryScreen(
 
 // HISTORY COMPACT UI SAFE V3
 @Composable
-private fun HistoryCard(item: OrderHistoryItem) {
+private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
     val formattedTime = remember(item.timestamp) {
         val t = if (item.timestamp > 0L) item.timestamp else System.currentTimeMillis()
         val sdf = SimpleDateFormat("h:mm a", Locale.ENGLISH)
@@ -865,7 +867,7 @@ private fun HistoryCard(item: OrderHistoryItem) {
                                 )
                                 Spacer(modifier = Modifier.height(1.dp))
                                 Text(
-                                    text = ignoredReason,
+                                    text = formatIgnoredFilters(item, ignoredReason, appSettings),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = TextDarkPrimary
@@ -916,7 +918,7 @@ private fun HistoryCard(item: OrderHistoryItem) {
                                 )
                                 Spacer(modifier = Modifier.height(1.dp))
                                 Text(
-                                    text = rejectedReason,
+                                    text = formatRejectedReason(item, rejectedReason, appSettings),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = TextDarkPrimary
@@ -1103,6 +1105,161 @@ private fun formatAcceptedFilterReason(item: OrderHistoryItem): String {
  * Extract matched No-Go area name for REJECTED orders:
  * e.g. "No-Go area matched: Koramangala"
  */
+private fun formatRejectedReason(
+    item: OrderHistoryItem,
+    rawReason: String,
+    settings: AppSettings
+): String {
+    val raw = rawReason.trim()
+
+    // Keep No-Go history in its clean 2-line format.
+    if (
+        isNoGoOrder(item) ||
+        raw.contains("Drop matched:", ignoreCase = true)
+    ) {
+        val lines = raw.lines().map { it.trim() }
+
+        return lines
+            .filter {
+                it.startsWith("Group:", ignoreCase = true) ||
+                it.startsWith("Drop matched:", ignoreCase = true)
+            }
+            .joinToString("\n")
+            .ifBlank { raw }
+    }
+
+    // Auto-Rejected filter orders use the same short Filter 1 / Filter 2 reason.
+    if (
+        raw.contains("Limits:", ignoreCase = true) ||
+        raw.contains("Separate Both:", ignoreCase = true) ||
+        raw.contains("Distance Only", ignoreCase = true) ||
+        raw.contains("Why ignored:", ignoreCase = true)
+    ) {
+        return formatIgnoredFilters(item, raw, settings)
+    }
+
+    return raw
+}
+private fun formatIgnoredFilters(
+    item: OrderHistoryItem,
+    rawReason: String,
+    settings: AppSettings
+): String {
+    val lines = rawReason.lines().map { it.trim() }
+
+    val limitsLine =
+        lines.firstOrNull {
+            it.startsWith("Limits:", ignoreCase = true)
+        }.orEmpty()
+
+    val separateLine =
+        lines.firstOrNull {
+            it.startsWith("Separate Both:", ignoreCase = true)
+        }.orEmpty()
+
+    if (limitsLine.isBlank() && separateLine.isBlank()) {
+        return rawReason
+            .lines()
+            .map { it.trim() }
+            .filterNot {
+                it.startsWith("Mode:", ignoreCase = true) ||
+                it.startsWith("Why ignored:", ignoreCase = true)
+            }
+            .filter { it.isNotBlank() }
+            .joinToString("\n")
+            .ifBlank { rawReason }
+    }
+
+    fun getNumber(pattern: String, text: String): Float? =
+        Regex(pattern, RegexOption.IGNORE_CASE)
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toFloatOrNull()
+
+    fun km(value: Float): String =
+        if (value % 1f == 0f) {
+            value.toInt().toString()
+        } else {
+            String.format(Locale.ENGLISH, "%.1f", value)
+        }
+
+    val filter1PickupMax =
+        getNumber("""Pickup\s*[≤<]=?\s*([0-9.]+)""", limitsLine)
+
+    val filter1TripMax =
+        getNumber("""Trip\s*[≤<]=?\s*([0-9.]+)""", limitsLine)
+
+    val filter1PickupFailed =
+        filter1PickupMax != null &&
+        item.pickupDistKm > filter1PickupMax
+
+    val filter1TripFailed =
+        filter1TripMax != null &&
+        item.dropDistKm > filter1TripMax
+
+    val filter1Text = when {
+        filter1PickupFailed && filter1TripFailed ->
+            "Pickup + Trip exceed limits"
+
+        filter1PickupFailed ->
+            "Pickup exceeds ${km(filter1PickupMax!!)} km"
+
+        filter1TripFailed ->
+            "Trip exceeds ${km(filter1TripMax!!)} km"
+
+        else ->
+            "Filter not matched"
+    }
+
+    val result = mutableListOf(
+        "Filter 1: $filter1Text"
+    )
+
+    if (separateLine.isNotBlank()) {
+        val filter2PickupMax =
+            getNumber(
+                """Pickup.*?max\s*([0-9.]+)""",
+                separateLine
+            ) ?: settings.secondaryBothMaxPickupDistanceKm
+
+        val filter2TripMax =
+            getNumber(
+                """Trip.*?max\s*([0-9.]+)""",
+                separateLine
+            ) ?: settings.secondaryBothMaxDropDistanceKm
+
+        val filter2PickupFailed =
+            Regex(
+                """Pickup.*?>\s*max""",
+                RegexOption.IGNORE_CASE
+            ).containsMatchIn(separateLine)
+
+        val filter2TripFailed =
+            Regex(
+                """Trip.*?>\s*max""",
+                RegexOption.IGNORE_CASE
+            ).containsMatchIn(separateLine)
+
+        val filter2Text = when {
+            filter2PickupFailed && filter2TripFailed ->
+                "Pickup + Trip exceed limits"
+
+            filter2PickupFailed ->
+                "Pickup exceeds ${km(filter2PickupMax)} km"
+
+            filter2TripFailed ->
+                "Trip exceeds ${km(filter2TripMax)} km"
+
+            else ->
+                "Filter not matched"
+        }
+
+        result += "Filter 2: $filter2Text"
+    }
+
+    return result.joinToString("\n")
+}
 private fun extractAreaName(item: OrderHistoryItem): String {
     if (item.matchedNoGoGroup.isNotBlank()) {
         return item.matchedNoGoGroup.trim()
