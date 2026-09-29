@@ -24,7 +24,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AdminPanelSettings
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCopy
@@ -85,7 +84,6 @@ fun MoreScreen(
     onNavigateToPlanSelection: () -> Unit,
     onNavigateToPaymentHistory: () -> Unit,
     onNavigateToSettings: () -> Unit = {},
-    onNavigateToDiagnostics: () -> Unit = {},
     onNavigateToCommunity: () -> Unit = {},
     onNavigateToAdminPanel: () -> Unit = {},
     onLogout: () -> Unit,

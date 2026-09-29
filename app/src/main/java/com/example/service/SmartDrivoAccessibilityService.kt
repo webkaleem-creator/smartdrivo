@@ -6123,6 +6123,40 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
     private fun findStrictRapidoRejectNode(
         root: AccessibilityNodeInfo
     ): AccessibilityNodeInfo? {
+        // RAPIDO_AUTO_REJECT_FAST_LOOKUP_V1
+        // Fast path: RapidoAdapter already knows reject/decline/skip
+        // text and resource IDs. Use it first; keep the old strict
+        // geometric scan only as fallback.
+        RapidoAdapter.findRejectNode(
+            root,
+            root.packageName?.toString()
+        )?.let { fastNode ->
+
+            val fastPkg =
+                fastNode.packageName
+                    ?.toString()
+                    .orEmpty()
+                    .trim()
+                    .lowercase(Locale.ROOT)
+
+            if (
+                fastNode.isClickable &&
+                !isOrderCardOrDetailsNode(fastNode) &&
+                (
+                    fastPkg.isBlank() ||
+                        isRapidoPackage(fastPkg)
+                )
+            ) {
+                Log.i(
+                    TAG,
+                    "⛔ [Rapido Auto-Reject FAST] direct reject control found " +
+                        "text='${fastNode.text}', " +
+                        "id='${fastNode.viewIdResourceName}'"
+                )
+
+                return fastNode
+            }
+        }
         val acceptNode = findStrictRapidoAcceptNode(root) ?: return null
 
         val acceptBounds = Rect()
@@ -6364,7 +6398,7 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
                 status = OrderStatus.REJECTED,
                 reasonCode = "AUTO_REJECT_NO_MATCH",
                 reasonText =
-                    "Auto-Rejected (skipped): $reason"
+                    "Auto Reject: $reason"
             )
 
             Log.i(

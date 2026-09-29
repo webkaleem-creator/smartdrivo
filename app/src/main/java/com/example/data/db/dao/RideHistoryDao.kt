@@ -46,6 +46,11 @@ interface RideHistoryDao {
 
     @Query("DELETE FROM ride_history")
     suspend fun clearAll()
+    @Query("DELETE FROM ride_history WHERE dateStr != :todayStr")
+    suspend fun deleteOtherDates(todayStr: String)
+
+    @Query("DELETE FROM ride_history WHERE detectedAt < :startOfToday")
+    suspend fun deleteOlderThan(startOfToday: Long)
 
     @Query("SELECT COUNT(*) FROM ride_history WHERE status = 'ACCEPTED'")
     fun getAcceptedCount(): Flow<Int>

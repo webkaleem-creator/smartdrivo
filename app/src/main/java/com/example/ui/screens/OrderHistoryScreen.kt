@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -21,8 +22,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Cancel
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.ListAlt
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -53,7 +57,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -102,7 +105,6 @@ enum class HistoryTab(val label: String) {
 fun OrderHistoryScreen(
     prefs: PreferencesManager,
     viewModel: RideHistoryViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
-    onNavigateToDiagnostics: () -> Unit = {},
     onBack: () -> Unit
 ) {
     val historyEntities by viewModel.history.collectAsStateWithLifecycle()
@@ -205,16 +207,6 @@ fun OrderHistoryScreen(
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = onNavigateToDiagnostics,
-                        modifier = Modifier.testTag("btn_order_history_diagnostics")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.BugReport,
-                            contentDescription = "Ride Diagnostics",
-                            tint = BluePrimary
-                        )
-                    }
                     if (history.isNotEmpty()) {
                         IconButton(onClick = {
                             viewModel.clearHistory()
@@ -243,73 +235,133 @@ fun OrderHistoryScreen(
         ) {
             // 1. Four Tabs: Accepted, Ignored, Rejected, All
             val tabs = HistoryTab.entries
-            val selectedTabIndex = tabs.indexOf(selectedTab)
-            TabRow(
-                selectedTabIndex = selectedTabIndex,
-                containerColor = Color.White,
-                contentColor = BluePrimary,
-                indicator = { tabPositions ->
-                    if (selectedTabIndex in tabPositions.indices) {
-                        TabRowDefaults.SecondaryIndicator(
-                            Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
-                            color = BluePrimary,
-                            height = 2.5.dp
-                        )
-                    }
-                },
-                divider = { HorizontalDivider(color = CardBorderDefault) }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                tabs.forEachIndexed { index, tab ->
-                    val isSelected = selectedTab == tab
-                    val tabCount = when (tab) {
+                tabs.forEach { tab ->
+
+                    val selected = selectedTab == tab
+
+                    val count = when (tab) {
+                        HistoryTab.ALL -> allCount
                         HistoryTab.ACCEPTED -> acceptedCount
                         HistoryTab.IGNORED -> ignoredCount
                         HistoryTab.REJECTED -> rejectedCount
-                        HistoryTab.ALL -> allCount
-                    }
-                    val badgeColor = when (tab) {
-                        HistoryTab.ACCEPTED -> StatusActiveGreen
-                        HistoryTab.IGNORED -> StatusWarningYellow
-                        HistoryTab.REJECTED -> StatusInactiveRed
-                        HistoryTab.ALL -> BlueSecondary
                     }
 
-                    Tab(
-                        selected = isSelected,
-                        onClick = { selectedTab = tab },
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
+                    val icon = when (tab) {
+                        HistoryTab.ALL -> Icons.Outlined.ListAlt
+                        HistoryTab.ACCEPTED -> Icons.Outlined.CheckCircle
+                        HistoryTab.IGNORED -> Icons.Outlined.Schedule
+                        HistoryTab.REJECTED -> Icons.Outlined.Cancel
+                    }
+
+                    val accent = when (tab) {
+                        HistoryTab.ALL -> BluePrimary
+                        HistoryTab.ACCEPTED -> StatusActiveGreen
+                        HistoryTab.IGNORED -> Color(0xFFF59E0B)
+                        HistoryTab.REJECTED -> StatusInactiveRed
+                    }
+
+                    val softBg = when (tab) {
+                        HistoryTab.ALL -> Color(0xFFEAF5FF)
+                        HistoryTab.ACCEPTED -> Color(0xFFECFBF4)
+                        HistoryTab.IGNORED -> Color(0xFFFFF8E7)
+                        HistoryTab.REJECTED -> Color(0xFFFFF0F1)
+                    }
+
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                selectedTab = tab
+                            },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor =
+                                if (selected) softBg
+                                else Color.White
+                        ),
+                        border = BorderStroke(
+                            width = if (selected) 1.5.dp else 1.dp,
+                            color =
+                                if (selected) accent
+                                else accent.copy(alpha = 0.18f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(
+                                    horizontal = 3.dp,
+                                    vertical = 8.dp
+                                ),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .background(
+                                        accent.copy(alpha = 0.12f),
+                                        CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = tab.label,
+                                    tint = accent,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+
+                            Spacer(
+                                modifier = Modifier.height(2.dp)
+                            )
+
+                            Text(
+                                text = tab.label,
+                                fontSize = 10.sp,
+                                fontWeight =
+                                    if (selected)
+                                        FontWeight.Bold
+                                    else
+                                        FontWeight.SemiBold,
+                                color = TextDarkPrimary,
+                                maxLines = 1
+                            )
+
+                            Spacer(
+                                modifier = Modifier.height(2.dp)
+                            )
+
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        accent.copy(alpha = 0.12f),
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .padding(
+                                        horizontal = 9.dp,
+                                        vertical = 2.dp
+                                    )
                             ) {
                                 Text(
-                                    text = tab.label,
-                                    fontSize = 13.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) BluePrimary else TextDarkSecondary
+                                    text = count.toString(),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = accent
                                 )
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .background(
-                                            if (isSelected) badgeColor.copy(alpha = 0.15f) else Color(0xFFEEEEEE),
-                                            CircleShape
-                                        )
-                                        .padding(horizontal = 5.dp, vertical = 1.dp)
-                                ) {
-                                    Text(
-                                        text = tabCount.toString(),
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isSelected) badgeColor else TextDarkSecondary
-                                    )
-                                }
                             }
                         }
-                    )
+                    }
                 }
             }
-
             // Stats Summary Card
             Card(
                 modifier = Modifier
@@ -417,7 +469,7 @@ fun OrderHistoryScreen(
                     .padding(horizontal = 8.dp, vertical = 1.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                val dates = listOf("All", "Today", "Yesterday")
+                val dates = listOf("All")
                 items(dates) { d ->
                     FilterChip(
                         selected = selectedDateRange == d,
@@ -495,11 +547,33 @@ fun OrderHistoryScreen(
 // HISTORY COMPACT UI SAFE V3
 @Composable
 private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
-    val formattedTime = remember(item.timestamp) {
-        val t = if (item.timestamp > 0L) item.timestamp else System.currentTimeMillis()
-        val sdf = SimpleDateFormat("h:mm a", Locale.ENGLISH)
+    val orderTimestamp =
+        if (item.timestamp > 0L) {
+            item.timestamp
+        } else {
+            System.currentTimeMillis()
+        }
+
+    val formattedDate = remember(item.dateStr, orderTimestamp) {
+        if (item.dateStr.isNotBlank()) {
+            item.dateStr
+        } else {
+            val sdf = SimpleDateFormat(
+                "dd/MM/yyyy",
+                Locale.ENGLISH
+            )
+            sdf.timeZone = TimeZone.getTimeZone("Asia/Kolkata")
+            sdf.format(Date(orderTimestamp))
+        }
+    }
+
+    val formattedTime = remember(orderTimestamp) {
+        val sdf = SimpleDateFormat(
+            "h:mm a",
+            Locale.ENGLISH
+        )
         sdf.timeZone = TimeZone.getTimeZone("Asia/Kolkata")
-        sdf.format(Date(t))
+        sdf.format(Date(orderTimestamp))
     }
 
     Card(
@@ -597,19 +671,19 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                     )
                 }
             }
-
-            // Row 2: Formatted timestamp
+            // Row 2: Order Date + Time
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "🕒 $formattedTime",
+                    text = "$formattedDate  |  $formattedTime",
                     fontSize = 11.sp,
                     color = TextDarkSecondary,
                     fontWeight = FontWeight.Normal
                 )
             }
+
 
             // Row 3: Bold Fare (14sp) + Base/Tip breakdown
             Card(
@@ -1139,6 +1213,14 @@ private fun formatRejectedReason(
     }
 
     return raw
+        .replace(
+            Regex("""(?i)^Auto-Rejected\s*\(skipped\)\s*:\s*"""),
+            "Auto Reject: "
+        )
+        .replace(
+            Regex("""(?i)^Auto-Rejected\s*:\s*"""),
+            "Auto Reject: "
+        )
 }
 private fun formatIgnoredFilters(
     item: OrderHistoryItem,
@@ -1216,7 +1298,7 @@ private fun formatIgnoredFilters(
         "Filter 1: $filter1Text"
     )
 
-    if (separateLine.isNotBlank()) {
+    if (settings.isSecondaryBothFilterEnabled && separateLine.isNotBlank()) {
         val filter2PickupMax =
             getNumber(
                 """Pickup.*?max\s*([0-9.]+)""",

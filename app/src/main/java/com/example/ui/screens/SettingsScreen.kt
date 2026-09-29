@@ -19,7 +19,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ElectricBolt
@@ -86,7 +85,6 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     prefs: PreferencesManager,
     onNavigateToAdminWeb: () -> Unit = {},
-    onNavigateToDiagnostics: () -> Unit = {},
     onBack: () -> Unit
 ) {
     val settings by prefs.appSettings.collectAsState()
@@ -439,7 +437,7 @@ fun SettingsScreen(
             }
             // 2. SEPARATE ORDER FILTER - BOTH ONLY
             item {
-                SectionHeader("2. ORDER FILTER — BOTH")
+                SectionHeader("2. ORDER FILTER 2")
 
                 Card(
                     colors = CardDefaults.cardColors(
@@ -476,12 +474,12 @@ fun SettingsScreen(
 
                         SettingToggleRow(
                             icon = Icons.Default.Tune,
-                            title = "Order Filter — Both",
+                            title = "Order Filter 2",
                             subtitle =
                                 if (settings.isSecondaryBothFilterEnabled)
-                                    "ON — Home filter OR this filter can match"
+                                    "ON — Home Filter OR Order Filter 2 can match"
                                 else
-                                    "OFF — Separate from Home page Both",
+                                    "OFF — Order Filter 2 disabled",
                             isChecked =
                                 settings.isSecondaryBothFilterEnabled,
                             onCheckedChange = { enabled ->
@@ -528,7 +526,7 @@ fun SettingsScreen(
 
                         Text(
                             text =
-                                "Final rule: Home Filter OR this Both Filter = eligible order.",
+                                "Final rule: Home Filter OR Order Filter 2 = eligible order.",
                             fontSize = 11.sp,
                             color = TextDarkSecondary
                         )

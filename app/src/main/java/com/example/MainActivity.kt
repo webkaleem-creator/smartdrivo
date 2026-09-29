@@ -63,7 +63,6 @@ import com.example.model.PaymentSubmission
 import com.example.ui.screens.AdminPanelScreen
 import com.example.ui.screens.AreaManagerScreen
 import com.example.ui.screens.CommunityScreen
-import com.example.ui.screens.DiagnosticScreen
 import com.example.ui.screens.FinishSetupScreen
 import com.example.ui.screens.GuestScreen
 import com.example.ui.screens.HomeScreen
@@ -109,7 +108,6 @@ object Routes {
     const val PROFILE = "profile"
     const val COMMUNITY = "community"
     const val ADMIN_PANEL = "admin_panel"
-    const val DIAGNOSTICS = "diagnostics"
     const val FINISH_SETUP = "finish_setup"
 }
 
@@ -812,7 +810,6 @@ fun SmartDrivoApp(
         composable(Routes.ORDER_HISTORY) {
             OrderHistoryScreen(
                 prefs = prefs,
-                onNavigateToDiagnostics = { if (userProfile.isAdmin) navController.navigate(Routes.DIAGNOSTICS) },
                 onBack = { navController.popBackStack() }
             )
         }
@@ -822,7 +819,6 @@ fun SmartDrivoApp(
             SettingsScreen(
                 prefs = prefs,
                 onNavigateToAdminWeb = { navController.navigate(Routes.ADMIN_PANEL) },
-                onNavigateToDiagnostics = { if (userProfile.isAdmin) navController.navigate(Routes.DIAGNOSTICS) },
                 onBack = { navController.popBackStack() }
             )
         }
@@ -834,7 +830,6 @@ fun SmartDrivoApp(
                 onNavigateToPlanSelection = { navController.navigate(Routes.PLAN_SELECTION) },
                 onNavigateToPaymentHistory = { navController.navigate(Routes.PAYMENT_HISTORY) },
                 onNavigateToSettings = { navController.navigate(Routes.SETTINGS) },
-                onNavigateToDiagnostics = { if (userProfile.isAdmin) navController.navigate(Routes.DIAGNOSTICS) },
                 onNavigateToCommunity = { navController.navigate(Routes.COMMUNITY) },
                 onNavigateToAdminPanel = { navController.navigate(Routes.ADMIN_PANEL) },
                 onLogout = {
@@ -873,15 +868,6 @@ fun SmartDrivoApp(
                 )
             }
         }
-
-        // 19. Ride Engine Diagnostic Screen
-        composable(Routes.DIAGNOSTICS) {
-            DiagnosticScreen(
-                prefs = prefs,
-                onBack = { navController.popBackStack() }
-            )
-        }
-
         // 20. First-Install Permission Finish Setup Screen
         composable(Routes.FINISH_SETUP) {
             FinishSetupScreen(

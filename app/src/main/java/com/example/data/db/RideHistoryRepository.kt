@@ -5,6 +5,7 @@ import android.util.Log
 import com.example.data.db.dao.RideHistoryDao
 import com.example.data.db.entity.RideHistoryEntity
 import com.example.model.OrderStatus
+import com.example.model.OrderHistoryItem
 import com.example.model.Platform
 import com.example.model.RideCandidate
 import com.example.model.VehicleType
@@ -32,6 +33,47 @@ class RideHistoryRepository(
     val acceptedCount: Flow<Int> = dao.getAcceptedCount()
 
     private val mutex = Mutex()
+    private fun todayDateStr(): String =
+        SimpleDateFormat(
+            "dd/MM/yyyy",
+            Locale.ENGLISH
+        ).apply {
+            timeZone = TimeZone.getTimeZone("Asia/Kolkata")
+        }.format(Date())
+
+    suspend fun purgePreviousDaysSafe() =
+        withContext(ioDispatcher) {
+            dao.deleteOtherDates(todayDateStr())
+        }
+
+    suspend fun restoreHistoryItems(
+        items: List<OrderHistoryItem>
+    ) = withContext(ioDispatcher) {
+        items.forEach { item ->
+            dao.insert(
+                RideHistoryEntity.fromOrderHistoryItem(item)
+            )
+        }
+    }
+    private fun startOfTodayMillis(): Long {
+        val calendar = java.util.Calendar.getInstance(
+            TimeZone.getTimeZone("Asia/Kolkata")
+        )
+
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calendar.set(java.util.Calendar.MINUTE, 0)
+        calendar.set(java.util.Calendar.SECOND, 0)
+        calendar.set(java.util.Calendar.MILLISECOND, 0)
+
+        return calendar.timeInMillis
+    }
+
+    suspend fun purgePreviousDays() {
+        withContext(ioDispatcher) {
+            dao.deleteOtherDates(todayDateStr())
+        }
+    }
+
 
     /**
      * Step 1: THE MOMENT an order candidate is detected:
