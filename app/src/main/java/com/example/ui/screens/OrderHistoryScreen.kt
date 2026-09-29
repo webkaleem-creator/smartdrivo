@@ -150,7 +150,7 @@ fun OrderHistoryScreen(
             history.filter { item ->
                 val matchTab = when (selectedTab) {
                     HistoryTab.ALL -> true
-                    HistoryTab.ACCEPTED -> item.status == OrderStatus.ACCEPTED || item.status == OrderStatus.PROCESSING
+                    HistoryTab.ACCEPTED -> item.status == OrderStatus.ACCEPTED
                     HistoryTab.REJECTED -> (isNoGoOrder(item) || item.status == OrderStatus.REJECTED) && item.status != OrderStatus.PROCESSING
                     HistoryTab.IGNORED -> (item.status == OrderStatus.IGNORED || (!isNoGoOrder(item) && item.status != OrderStatus.ACCEPTED && item.status != OrderStatus.REJECTED)) && item.status != OrderStatus.PROCESSING
                 }
