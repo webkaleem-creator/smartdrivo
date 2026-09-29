@@ -1,4 +1,4 @@
-﻿package com.example.ui.screens
+package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -171,7 +171,7 @@ fun AreaManagerScreen(
 
             scope.launch {
                 val message =
-                    "Go-To '${saved.name}' $saveAction âœ“ • $status"
+                    "Go-To '${saved.name}' $saveAction \u2713 • $status"
                 snackbar.showSnackbar(message)
             }
         } else {
@@ -203,7 +203,7 @@ fun AreaManagerScreen(
 
             scope.launch {
                 val message =
-                    "No-Go '${saved.name}' $saveAction âœ“ • $status"
+                    "No-Go '${saved.name}' $saveAction \u2713 • $status"
                 snackbar.showSnackbar(message)
             }
         }
