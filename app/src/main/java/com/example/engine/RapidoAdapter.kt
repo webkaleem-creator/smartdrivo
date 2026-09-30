@@ -240,6 +240,14 @@ object RapidoAdapter {
         if (clean.length < 2) return true
         val lower = clean.lowercase()
 
+        // Never treat Rapido UI counters as pickup/drop addresses.
+        if (
+            lower.matches(Regex("""^\d+\s+(?:orders?|rides?|requests?)$""")) ||
+            lower.matches(Regex("""^(?:orders?|rides?|requests?)\s*:?\s*\d+$"""))
+        ) {
+            return true
+        }
+
         // Blocklist of SmartDrivo UI strings that should NEVER be saved as addresses
         if (matchesBlocklist(clean)) return true
 
@@ -403,58 +411,118 @@ object RapidoAdapter {
             it.contains("Bundled Order", ignoreCase = true)
         }
 
-        // 1. Fare extraction:
-        // - Base fare = FIRST ₹[number] found only
-        // - Tip = FIRST +₹[number] immediately after base only
-        // - Total = base + tip
-        // - STOP after first base+tip pair found
-        // - Ignore ALL other ₹ values from other order cards
-        // - If no tip, total = base only
+        // 1. Fare extraction - RAPIDO_FARE_ACCURACY_V2
+        //
+        // Rapido may expose Total Fare, Base Fare and Tip/Bonus together.
+        // Never blindly use the first ₹ amount.
+        // Final fare = highest valid visible total OR verified base+tip sum.
         var baseFare = 0f
         var tipAmount = 0f
         var totalFare = 0f
 
-        val rupeeMatcher = Pattern.compile("₹\\s*([0-9]+(?:\\.[0-9]+)?)")
-        val tipInSameStringRegex = Pattern.compile("^\\s*\\+\\s*₹?\\s*([0-9]+(?:\\.[0-9]+)?)")
-        val tipNextStringRegex = Pattern.compile("^\\+?\\s*₹?\\s*([0-9]+(?:\\.[0-9]+)?)")
+        val rupeeMatcher =
+            Pattern.compile("₹\\s*([0-9]+(?:\\.[0-9]+)?)")
+
+        val pairRegex =
+            Regex("""₹\s*([0-9]+(?:\.[0-9]+)?)\s*\+\s*₹?\s*([0-9]+(?:\.[0-9]+)?)""")
+
+        val nextTipRegex =
+            Regex("""^\s*\+\s*₹?\s*([0-9]+(?:\.[0-9]+)?)""")
+
+        val visibleAmounts = mutableListOf<Float>()
+        val verifiedPairs = mutableListOf<Triple<Float, Float, Float>>()
 
         for (i in texts.indices) {
-            val text = texts[i]
-            // Requirement 1: Ignore fare amounts that are inside "Today's Earnings" or "Earnings" context
             if (isEarningsContext(texts, i)) {
-                logI(TAG, "Skipping ₹ amount in earnings/balance context at index $i: '$text'")
                 continue
             }
+
+            val text = texts[i]
+
+            pairRegex.find(text)?.let { match ->
+                val base = match.groupValues[1].toFloatOrNull()
+                val tip = match.groupValues[2].toFloatOrNull()
+
+                if (base != null && tip != null && base > 0f && tip >= 0f) {
+                    verifiedPairs.add(
+                        Triple(base, tip, base + tip)
+                    )
+                }
+            }
+
             val matcher = rupeeMatcher.matcher(text)
-            if (matcher.find()) {
-                val parsedBase = matcher.group(1)?.toFloatOrNull()
-                if (parsedBase != null) {
-                    baseFare = parsedBase
-                    val remainder = text.substring(matcher.end())
-                    val sameStringTipMatcher = tipInSameStringRegex.matcher(remainder)
-                    if (sameStringTipMatcher.find()) {
-                        tipAmount = sameStringTipMatcher.group(1)?.toFloatOrNull() ?: 0f
-                    } else if (remainder.trim().isEmpty() && i + 1 < texts.size) {
-                        val nextText = texts[i + 1].trim()
-                        if (nextText == "+" && i + 2 < texts.size) {
-                            val nextRupeeMatcher = rupeeMatcher.matcher(texts[i + 2])
-                            if (nextRupeeMatcher.find()) {
-                                tipAmount = nextRupeeMatcher.group(1)?.toFloatOrNull() ?: 0f
-                            }
-                        } else if (nextText.startsWith("+")) {
-                            val nextTipMatcher = tipNextStringRegex.matcher(nextText)
-                            if (nextTipMatcher.find()) {
-                                tipAmount = nextTipMatcher.group(1)?.toFloatOrNull() ?: 0f
-                            }
-                        }
+
+            var firstAmount: Float? = null
+            var firstEnd = -1
+
+            while (matcher.find()) {
+                val amount =
+                    matcher.group(1)?.toFloatOrNull()
+
+                if (amount != null && amount > 0f) {
+                    visibleAmounts.add(amount)
+
+                    if (firstAmount == null) {
+                        firstAmount = amount
+                        firstEnd = matcher.end()
                     }
-                    totalFare = baseFare + tipAmount
-                    logI(TAG, "💰 Rapido fare parsed: base=₹$baseFare, tip=₹$tipAmount, total=₹$totalFare (ignoring further ₹ values)")
-                    break // STOP after first base+tip pair found! Ignore ALL other ₹ values from other order cards
+                }
+            }
+
+            if (
+                firstAmount != null &&
+                firstEnd >= 0 &&
+                text.substring(firstEnd).trim().isEmpty() &&
+                i + 1 < texts.size
+            ) {
+                val nextTip =
+                    nextTipRegex.find(texts[i + 1].trim())
+                        ?.groupValues
+                        ?.getOrNull(1)
+                        ?.toFloatOrNull()
+
+                if (nextTip != null && nextTip >= 0f) {
+                    verifiedPairs.add(
+                        Triple(
+                            firstAmount,
+                            nextTip,
+                            firstAmount + nextTip
+                        )
+                    )
                 }
             }
         }
 
+        val highestVisible =
+            visibleAmounts.maxOrNull() ?: 0f
+
+        val bestPair =
+            verifiedPairs.maxByOrNull { it.third }
+
+        totalFare =
+            maxOf(
+                highestVisible,
+                bestPair?.third ?: 0f
+            )
+
+        val pairForTotal =
+            verifiedPairs.firstOrNull {
+                kotlin.math.abs(it.third - totalFare) < 0.01f
+            }
+
+        if (pairForTotal != null) {
+            baseFare = pairForTotal.first
+            tipAmount = pairForTotal.second
+        } else {
+            // Never show misleading Base/Tip values.
+            baseFare = totalFare
+            tipAmount = 0f
+        }
+
+        logI(
+            TAG,
+            "Rapido fare verified: total=₹$totalFare base=₹$baseFare tip=₹$tipAmount"
+        )
         // Bundle cards contain a top combined fare plus per-order component fares.
         // Example: ₹104+ with Order 1 ₹52 and Order 2 ₹52+.
         // Use the highest visible ₹ amount as the bundle total; never sum all component fares.
