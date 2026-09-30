@@ -11,9 +11,9 @@ data class UserProfile(
     val city: String = "",
     val state: String = "",
     val vehicleType: VehicleType = VehicleType.AUTO,
-    val plan: String = "7DAYS",
-    val planPrice: Int = 129,
-    val planExpireMillis: Long = System.currentTimeMillis() + (7L * 24 * 60 * 60 * 1000),
+    val plan: String = "NONE",
+    val planPrice: Int = 0,
+    val planExpireMillis: Long = 0L,
     val isApproved: Boolean = false,
     val isAdmin: Boolean = false,
     val isActive: Boolean = true,
@@ -21,9 +21,29 @@ data class UserProfile(
     val createdAt: Long = System.currentTimeMillis(),
     val mobile: String = ""
 ) {
-    val isPlanValid: Boolean
-        get() = isApproved && (planExpireMillis > System.currentTimeMillis())
+    val isFreeTrial: Boolean
+        get() =
+            plan.equals(
+                "FREE_TRIAL",
+                ignoreCase = true
+            )
 
+    val isFreeTrialActive: Boolean
+        get() =
+            isActive &&
+                isFreeTrial &&
+                planExpireMillis >
+                    System.currentTimeMillis()
+
+    val isPlanValid: Boolean
+        get() =
+            isActive &&
+                planExpireMillis >
+                    System.currentTimeMillis() &&
+                (
+                    isApproved ||
+                        isFreeTrial
+                )
     val effectiveMobile: String
         get() = mobile.ifEmpty { phone }
 }

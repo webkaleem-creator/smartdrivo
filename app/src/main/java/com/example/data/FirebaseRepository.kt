@@ -212,37 +212,122 @@ class FirebaseRepository(
         adminPaymentsListener = null
     }
     // --- User Profile Sync ---
-    fun saveUserProfile(profile: UserProfile, onComplete: ((Boolean) -> Unit)? = null) {
+    fun saveUserProfile(
+        profile: UserProfile,
+        onComplete: ((Boolean) -> Unit)? = null
+    ) {
         prefs.saveUserProfile(profile)
+
         scope.launch {
             try {
-                // Client updates MUST NOT write or overwrite privileged authority fields:
-                // isAdmin, isApproved, isActive, plan, planPrice, planExpireMillis
-                val safeClientMap = mapOf(
-                    "uid" to profile.uid,
-                    "name" to profile.name,
-                    "email" to profile.email,
-                    "phone" to profile.phone,
-                    "mobile" to profile.phone,
-                    "mobileNumber" to profile.phone,
-                    "city" to profile.city,
-                    "state" to profile.state,
-                    "vehicleType" to profile.vehicleType.name,
-                    "referralCode" to profile.referralCode,
-                    "updatedAt" to System.currentTimeMillis()
-                )
-                firestore?.collection("users")?.document(profile.uid)?.set(
-                    safeClientMap,
-                    SetOptions.merge()
-                )?.await()
+                val fs = firestore
+
+                if (fs == null) {
+                    onComplete?.invoke(false)
+                    return@launch
+                }
+
+                val uid =
+                    profile.uid.ifBlank {
+                        auth?.currentUser?.uid.orEmpty()
+                    }
+
+                if (uid.isBlank()) {
+                    onComplete?.invoke(false)
+                    return@launch
+                }
+
+                val now =
+                    System.currentTimeMillis()
+
+                val docRef =
+                    fs.collection("users")
+                        .document(uid)
+
+                val existing =
+                    docRef.get().await()
+
+                val safeClientMap =
+                    mapOf(
+                        "uid" to uid,
+                        "name" to profile.name,
+                        "email" to profile.email,
+                        "phone" to profile.phone,
+                        "mobile" to profile.phone,
+                        "mobileNumber" to profile.phone,
+                        "city" to profile.city,
+                        "state" to profile.state,
+                        "vehicleType" to
+                            profile.vehicleType.name,
+                        "referralCode" to
+                            profile.referralCode,
+                        "updatedAt" to now
+                    )
+
+                if (!existing.exists()) {
+
+                    // FREE_TRIAL_FIRESTORE_V3
+                    // A brand-new registered account gets one
+                    // and only one 24-hour full-access trial.
+                    val trialEnd =
+                        now +
+                            (24L * 60L * 60L * 1000L)
+
+                    val trialProfile =
+                        profile.copy(
+                            uid = uid,
+                            plan = "FREE_TRIAL",
+                            planPrice = 0,
+                            planExpireMillis = trialEnd,
+                            isApproved = false,
+                            isAdmin = false,
+                            isActive = true,
+                            createdAt = now
+                        )
+
+                    prefs.saveUserProfile(
+                        trialProfile
+                    )
+
+                    docRef.set(
+                        safeClientMap +
+                            mapOf(
+                                "plan" to "FREE_TRIAL",
+                                "planPrice" to 0,
+                                "planExpireMillis" to
+                                    trialEnd,
+                                "isApproved" to false,
+                                "isAdmin" to false,
+                                "isActive" to true,
+                                "createdAt" to now,
+                                "freeTrialStartedAt" to now,
+                                "freeTrialUsed" to true
+                            )
+                    ).await()
+
+                } else {
+
+                    // Existing account:
+                    // personal fields may sync, but the client
+                    // can never restart/extend membership.
+                    docRef.set(
+                        safeClientMap,
+                        SetOptions.merge()
+                    ).await()
+                }
+
                 onComplete?.invoke(true)
+
             } catch (e: Exception) {
-                Log.e("FirebaseRepo", "Failed to sync user: ${e.message}")
+                Log.e(
+                    "FirebaseRepo",
+                    "Failed to sync user: ${e.message}"
+                )
+
                 onComplete?.invoke(false)
             }
         }
     }
-
     // Privileged update: used when verified admin updates users from AdminPanel
     fun adminUpdateUserProfile(profile: UserProfile, onComplete: ((Boolean) -> Unit)? = null) {
         val currentCaller = prefs.userProfile.value

@@ -86,22 +86,69 @@ class AuthViewModel : ViewModel() {
             "+91${mobileNumber.trim().filter { it.isDigit() }}"
         }
 
-        val updatedProfile = currentProfile.copy(
-            uid = uid,
-            name = name.trim().ifEmpty { currentProfile.name.ifEmpty { "Captain" } },
-            email = email,
-            phone = cleanPhone,
-            city = city.trim(),
-            state = state.trim(),
-            vehicleType = vehicleType,
-            plan = currentProfile.plan.ifEmpty { "7DAYS" },
-            planPrice = currentProfile.planPrice,
-            planExpireMillis = currentProfile.planExpireMillis,
-            isApproved = currentProfile.isApproved,
-            isAdmin = currentProfile.isAdmin,
-            isActive = currentProfile.isActive
-        )
+        // FREE_TRIAL_AUTH_V3
+        val now =
+            System.currentTimeMillis()
 
+        val shouldStartFreeTrial =
+            !currentProfile.isAdmin &&
+                !currentProfile.isApproved &&
+                !currentProfile.isPlanValid &&
+                (
+                    currentProfile.plan.isBlank() ||
+                        currentProfile.plan.equals(
+                            "NONE",
+                            ignoreCase = true
+                        ) ||
+                        currentProfile.plan.equals(
+                            "7DAYS",
+                            ignoreCase = true
+                        )
+                )
+
+        val updatedProfile =
+            currentProfile.copy(
+                uid = uid,
+                name =
+                    name.trim().ifEmpty {
+                        currentProfile.name.ifEmpty {
+                            "Captain"
+                        }
+                    },
+                email = email,
+                phone = cleanPhone,
+                city = city.trim(),
+                state = state.trim(),
+                vehicleType = vehicleType,
+                plan =
+                    if (shouldStartFreeTrial)
+                        "FREE_TRIAL"
+                    else
+                        currentProfile.plan,
+                planPrice =
+                    if (shouldStartFreeTrial)
+                        0
+                    else
+                        currentProfile.planPrice,
+                planExpireMillis =
+                    if (shouldStartFreeTrial)
+                        now +
+                            (
+                                24L *
+                                    60L *
+                                    60L *
+                                    1000L
+                            )
+                    else
+                        currentProfile.planExpireMillis,
+                isApproved =
+                    if (shouldStartFreeTrial)
+                        false
+                    else
+                        currentProfile.isApproved,
+                isAdmin = currentProfile.isAdmin,
+                isActive = true
+            )
         prefs.saveUserProfile(updatedProfile)
         repository.saveUserProfile(updatedProfile) {
             onComplete(updatedProfile)

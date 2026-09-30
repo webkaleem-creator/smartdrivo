@@ -63,6 +63,12 @@ fun PlanSelectionScreen(
         it.id == currentPlanId
     }
 
+    // FREE_TRIAL_UI_POLISH_V4
+    val isFreeTrial =
+        currentPlanId.equals(
+            "FREE_TRIAL",
+            ignoreCase = true
+        )
     var selectedPlan by remember(currentPlanId, plans) {
         mutableStateOf(
             currentPlan ?: plans.firstOrNull { it.id == "7DAYS" } ?: plans.first()
@@ -227,11 +233,17 @@ fun PlanSelectionScreen(
                                 ) {
 
                                     Text(
-                                        text = if (isAdmin)
-                                            "Admin Membership"
-                                        else
-                                            currentPlan?.label
-                                                ?: currentPlanId,
+                                        text = when {
+                                            isAdmin ->
+                                                "Admin Membership"
+
+                                            isFreeTrial ->
+                                                "1-Day Free Trial"
+
+                                            else ->
+                                                currentPlan?.label
+                                                    ?: currentPlanId
+                                        },
                                         fontSize = 17.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFF0F172A)
@@ -242,11 +254,16 @@ fun PlanSelectionScreen(
                                     )
 
                                     Text(
-                                        text = if (isAdmin)
-                                            "Full SmartDrivo access"
-                                        else
-                                            "₹${if (currentPlanPrice > 0) currentPlanPrice else currentPlan?.price ?: 0} plan",
-                                        fontSize = 12.sp,
+                                        text = when {
+                                            isAdmin ->
+                                                "Full SmartDrivo access"
+
+                                            isFreeTrial ->
+                                                "Full SmartDrivo access - Free"
+
+                                            else ->
+                                                "â‚¹${if (currentPlanPrice > 0) currentPlanPrice else currentPlan?.price ?: 0} plan"
+                                        },                                        fontSize = 12.sp,
                                         color = Color(0xFF64748B)
                                     )
                                 }
@@ -299,10 +316,16 @@ fun PlanSelectionScreen(
                                         )
 
                                         Text(
-                                            text = if (isAdmin)
-                                                "Unlimited"
-                                            else
-                                                "$remainingDays Days",
+                                            text = when {
+                                                isAdmin ->
+                                                    "Unlimited"
+
+                                                remainingDays == 1 ->
+                                                    "1 Day"
+
+                                                else ->
+                                                    "$remainingDays Days"
+                                            },
                                             fontSize = 17.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = Color(0xFF0284C7)
@@ -347,7 +370,11 @@ fun PlanSelectionScreen(
                                 )
 
                                 Text(
-                                    text = "Your current membership keeps working while a renewal payment is waiting for admin approval.",
+                                    text =
+                                        if (isFreeTrial)
+                                            "Your 1-day free trial includes full SmartDrivo access. After it ends, choose a membership plan to continue."
+                                        else
+                                            "Your current membership keeps working while a renewal payment is waiting for admin approval.",
                                     fontSize = 11.5.sp,
                                     color = Color(0xFF64748B)
                                 )
@@ -363,10 +390,16 @@ fun PlanSelectionScreen(
             // ------------------------------------------------
             item {
                 Text(
-                    text = if (hasActiveMembership)
-                        "RENEW OR CHANGE PLAN"
-                    else
-                        "MEMBERSHIP PLANS",
+                    text = when {
+                        isFreeTrial ->
+                            "CHOOSE PLAN FOR AFTER TRIAL"
+
+                        hasActiveMembership ->
+                            "RENEW OR CHANGE PLAN"
+
+                        else ->
+                            "MEMBERSHIP PLANS"
+                    },
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF2196F3),

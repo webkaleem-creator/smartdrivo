@@ -335,9 +335,26 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                 color = TextDarkPrimary
                             )
                             Text(
-                                text = if (userProfile.isPlanValid || userProfile.isAdmin) "● Membership Active" else "○ Membership Inactive",
+                                // HOME_FREE_TRIAL_LABEL_V4
+                                text = when {
+                                    userProfile.isAdmin ->
+                                        "Membership Active"
+
+                                    userProfile.isFreeTrialActive ->
+                                        "Free Trial Active"
+
+                                    userProfile.isPlanValid ->
+                                        "Membership Active"
+
+                                    else ->
+                                        "Membership Inactive"
+                                },
                                 fontSize = 14.sp,
-                                color = if (userProfile.isPlanValid || userProfile.isAdmin) StatusActiveGreen else StatusInactiveRed
+                                color =
+                                    if (userProfile.isPlanValid || userProfile.isAdmin)
+                                        StatusActiveGreen
+                                    else
+                                        StatusInactiveRed
                             )
                         }
                     }

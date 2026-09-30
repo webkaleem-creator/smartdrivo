@@ -87,6 +87,7 @@ import com.example.ui.theme.SmartDrivoTheme
 import com.example.ui.theme.TextDarkPrimary
 import com.example.ui.theme.TextDarkSecondary
 import com.example.ui.theme.TextDarkTertiary
+import kotlinx.coroutines.delay
 
 object Routes {
     const val SPLASH = "splash"
@@ -332,6 +333,65 @@ fun SmartDrivoApp(
         )
     }
 
+    // FREE_TRIAL_EXPIRY_V3
+    // Trial expires automatically even if SmartDrivo
+    // stays open continuously for the full 24 hours.
+    LaunchedEffect(
+        userProfile.plan,
+        userProfile.planExpireMillis,
+        userProfile.isAdmin
+    ) {
+        if (
+            !userProfile.isAdmin &&
+            userProfile.plan.equals(
+                "FREE_TRIAL",
+                ignoreCase = true
+            ) &&
+            userProfile.planExpireMillis > 0L
+        ) {
+            val waitMs =
+                (
+                    userProfile.planExpireMillis -
+                        System.currentTimeMillis()
+                ).coerceAtLeast(0L)
+
+            if (waitMs > 0L) {
+                delay(waitMs)
+            }
+
+            val latest =
+                prefs.userProfile.value
+
+            if (
+                !latest.isAdmin &&
+                latest.plan.equals(
+                    "FREE_TRIAL",
+                    ignoreCase = true
+                ) &&
+                !latest.isPlanValid
+            ) {
+                // Trial ended: master assistant switch OFF.
+                prefs.setAutoAcceptActive(false)
+
+                val routeNow =
+                    navController
+                        .currentDestination
+                        ?.route
+
+                if (routeNow !in paymentRoutes) {
+                    navController.navigate(
+                        Routes.PLAN_SELECTION
+                    ) {
+                        popUpTo(0) {
+                            inclusive = true
+                        }
+
+                        launchSingleTop = true
+                    }
+                }
+            }
+        }
+    }
     // Gate Check Enforcer:
     // Step 1: Authentication -> WelcomeScreen
     // Step 2: Profile Setup (mobile, city, state) -> ProfileSetupScreen
@@ -574,13 +634,61 @@ fun SmartDrivoApp(
                 initialVehicle = userProfile.vehicleType,
                 onSaveProfile = { name, mobileNumber, city, state, vehicleType ->
                     val cleanPhone = if (mobileNumber.startsWith("+")) mobileNumber else "+91$mobileNumber"
-                    val updated = userProfile.copy(
-                        name = name,
-                        phone = cleanPhone,
-                        city = city,
-                        state = state,
-                        vehicleType = vehicleType
-                    )
+                    // FREE_TRIAL_PROFILE_SETUP_V3
+                    val now =
+                        System.currentTimeMillis()
+
+                    val shouldStartFreeTrial =
+                        !userProfile.isAdmin &&
+                            !userProfile.isApproved &&
+                            !userProfile.isPlanValid &&
+                            (
+                                userProfile.plan.isBlank() ||
+                                    userProfile.plan.equals(
+                                        "NONE",
+                                        ignoreCase = true
+                                    ) ||
+                                    userProfile.plan.equals(
+                                        "7DAYS",
+                                        ignoreCase = true
+                                    )
+                            )
+
+                    val updated =
+                        userProfile.copy(
+                            name = name,
+                            phone = cleanPhone,
+                            city = city,
+                            state = state,
+                            vehicleType = vehicleType,
+                            plan =
+                                if (shouldStartFreeTrial)
+                                    "FREE_TRIAL"
+                                else
+                                    userProfile.plan,
+                            planPrice =
+                                if (shouldStartFreeTrial)
+                                    0
+                                else
+                                    userProfile.planPrice,
+                            planExpireMillis =
+                                if (shouldStartFreeTrial)
+                                    now +
+                                        (
+                                            24L *
+                                                60L *
+                                                60L *
+                                                1000L
+                                        )
+                                else
+                                    userProfile.planExpireMillis,
+                            isApproved =
+                                if (shouldStartFreeTrial)
+                                    false
+                                else
+                                    userProfile.isApproved,
+                            isActive = true
+                        )
                     prefs.saveUserProfile(updated)
                     repository.saveUserProfile(updated)
                     if (updated.isAdmin || updated.isPlanValid) {
