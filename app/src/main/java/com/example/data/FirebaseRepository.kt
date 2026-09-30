@@ -1,6 +1,7 @@
 package com.example.data
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import com.example.model.AreaGroup
 import com.example.model.AreaType
@@ -53,6 +54,36 @@ class FirebaseRepository(
             generated
         }
     }
+
+    // ADMIN_DEVICE_INFO_V4
+    // Privacy-safe metadata only.
+    // No IMEI, serial number, MAC address or Android ID.
+    private fun currentDeviceName(): String {
+        val maker = Build.MANUFACTURER.trim()
+        val model = Build.MODEL.trim()
+
+        return when {
+            maker.isBlank() && model.isBlank() -> "Unknown Android"
+            maker.isBlank() -> model
+            model.isBlank() -> maker
+            model.startsWith(maker, ignoreCase = true) -> model
+            else -> "$maker $model"
+        }
+    }
+
+    private fun currentAndroidVersion(): String =
+        "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})"
+
+    private fun currentAppVersionName(): String =
+        try {
+            context.packageManager
+                .getPackageInfo(context.packageName, 0)
+                .versionName
+                ?.takeIf { it.isNotBlank() }
+                ?: "Unknown"
+        } catch (_: Exception) {
+            "Unknown"
+        }
 
     private fun userFromDocument(doc: DocumentSnapshot): UserProfile {
         val vehicle = try {
@@ -247,6 +278,10 @@ class FirebaseRepository(
                 val existing =
                     docRef.get().await()
 
+                val currentDevice = currentDeviceName()
+                val currentAndroid = currentAndroidVersion()
+                val currentAppVersion = currentAppVersionName()
+
                 val safeClientMap =
                     mapOf(
                         "uid" to uid,
@@ -261,7 +296,11 @@ class FirebaseRepository(
                             profile.vehicleType.name,
                         "referralCode" to
                             profile.referralCode,
-                        "updatedAt" to now
+                        "updatedAt" to now,
+                        "lastDevice" to currentDevice,
+                        "lastAndroidVersion" to currentAndroid,
+                        "lastAppVersion" to currentAppVersion,
+                        "lastSeenAt" to now
                     )
 
                 if (!existing.exists()) {
@@ -301,7 +340,12 @@ class FirebaseRepository(
                                 "isActive" to true,
                                 "createdAt" to now,
                                 "freeTrialStartedAt" to now,
-                                "freeTrialUsed" to true
+                                "freeTrialUsed" to true,
+                                "registeredDevice" to currentDevice,
+                                "registeredAndroidVersion" to currentAndroid,
+                                "registeredAppVersion" to currentAppVersion,
+                                "registeredDeviceAt" to now,
+                                "registeredDeviceSource" to "REGISTRATION"
                             )
                     ).await()
 
@@ -310,8 +354,23 @@ class FirebaseRepository(
                     // Existing account:
                     // personal fields may sync, but the client
                     // can never restart/extend membership.
+                    // Older users have no historical registration-device value.
+                    // Backfill once with the first device seen after this update.
+                    val registrationDevicePatch =
+                        if (existing.getString("registeredDevice").isNullOrBlank()) {
+                            mapOf(
+                                "registeredDevice" to currentDevice,
+                                "registeredAndroidVersion" to currentAndroid,
+                                "registeredAppVersion" to currentAppVersion,
+                                "registeredDeviceAt" to now,
+                                "registeredDeviceSource" to "BACKFILLED"
+                            )
+                        } else {
+                            emptyMap<String, Any>()
+                        }
+
                     docRef.set(
-                        safeClientMap,
+                        safeClientMap + registrationDevicePatch,
                         SetOptions.merge()
                     ).await()
                 }

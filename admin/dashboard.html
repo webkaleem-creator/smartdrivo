@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SmartDrivo Admin Control Center</title>
-  
+
   <!-- Fast Session Guard (pre-render redirect) -->
   <script>
     if (sessionStorage.getItem('smartdrivo_admin_auth') !== 'true') {
@@ -28,51 +28,51 @@
       --text-dim: #94A3B8;
       --border: #272F3D;
     }
-    * { 
-      box-sizing: border-box; 
-      margin: 0; 
-      padding: 0; 
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; 
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     }
-    body { 
-      background: var(--bg); 
-      color: var(--text); 
-      padding: 24px; 
+    body {
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px;
       min-height: 100vh;
     }
-    .container { 
-      max-width: 1140px; 
-      margin: 0 auto; 
+    .container {
+      max-width: 1140px;
+      margin: 0 auto;
     }
-    header { 
-      display: flex; 
-      justify-content: space-between; 
-      align-items: center; 
-      padding-bottom: 20px; 
-      border-bottom: 1px solid var(--border); 
-      margin-bottom: 24px; 
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
       flex-wrap: wrap;
       gap: 16px;
     }
-    .brand { 
-      display: flex; 
-      align-items: center; 
-      gap: 14px; 
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
     }
-    .logo { 
-      background: linear-gradient(135deg, #FF7A00 0%, #E65100 100%); 
-      color: #FFF; 
-      width: 48px; 
-      height: 48px; 
-      border-radius: 12px; 
-      display: flex; 
-      align-items: center; 
-      justify-content: center; 
-      font-size: 24px; 
+    .logo {
+      background: linear-gradient(135deg, #FF7A00 0%, #E65100 100%);
+      color: #FFF;
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
       box-shadow: 0 4px 16px rgba(255, 102, 0, 0.35);
     }
-    h1 { 
-      font-size: 22px; 
+    h1 {
+      font-size: 22px;
       font-weight: 800;
       color: #FFF;
     }
@@ -82,29 +82,29 @@
       gap: 12px;
       flex-wrap: wrap;
     }
-    .badge { 
-      padding: 6px 12px; 
-      border-radius: 6px; 
-      font-size: 12px; 
-      font-weight: 700; 
-      text-transform: uppercase; 
+    .badge {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
       display: inline-flex;
       align-items: center;
       gap: 6px;
     }
-    .badge-approved { 
-      background: rgba(16, 185, 129, 0.15); 
-      color: var(--success); 
+    .badge-approved {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success);
       border: 1px solid rgba(16, 185, 129, 0.3);
     }
-    .badge-pending { 
-      background: rgba(245, 158, 11, 0.15); 
-      color: var(--warning); 
+    .badge-pending {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--warning);
       border: 1px solid rgba(245, 158, 11, 0.3);
     }
-    .badge-rejected { 
-      background: rgba(239, 68, 68, 0.15); 
-      color: var(--error); 
+    .badge-rejected {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--error);
       border: 1px solid rgba(239, 68, 68, 0.3);
     }
     .badge-user {
@@ -131,23 +131,23 @@
       border-color: #EF4444;
       color: #FFF;
     }
-    .nav-tabs { 
-      display: flex; 
-      gap: 10px; 
-      margin-bottom: 24px; 
+    .nav-tabs {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 24px;
       overflow-x: auto;
       padding-bottom: 4px;
     }
-    .tab-btn { 
-      background: var(--surface); 
-      border: 1px solid var(--border); 
-      color: var(--text-dim); 
-      padding: 10px 18px; 
-      border-radius: 8px; 
-      cursor: pointer; 
-      font-weight: 600; 
+    .tab-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 10px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
       font-size: 13px;
-      transition: all 0.2s; 
+      transition: all 0.2s;
       white-space: nowrap;
       display: flex;
       align-items: center;
@@ -157,22 +157,22 @@
       color: #FFF;
       border-color: #3B4659;
     }
-    .tab-btn.active { 
-      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%); 
-      color: #FFF; 
-      border-color: var(--accent); 
+    .tab-btn.active {
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+      color: #FFF;
+      border-color: var(--accent);
       box-shadow: 0 4px 14px rgba(255, 102, 0, 0.25);
     }
-    .panel { 
-      display: none; 
-      background: var(--surface); 
-      border: 1px solid var(--border); 
-      border-radius: 14px; 
-      padding: 24px; 
+    .panel {
+      display: none;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
     }
-    .panel.active { 
-      display: block; 
+    .panel.active {
+      display: block;
     }
     .panel-title {
       font-size: 18px;
@@ -188,22 +188,22 @@
       font-size: 13px;
       margin-bottom: 20px;
     }
-    .card { 
-      background: var(--card); 
-      border: 1px solid var(--border); 
-      border-radius: 10px; 
-      padding: 18px; 
-      margin-bottom: 14px; 
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+      margin-bottom: 14px;
     }
-    .btn { 
-      background: var(--accent); 
-      color: #FFF; 
-      border: none; 
-      padding: 9px 18px; 
-      border-radius: 8px; 
-      font-weight: 700; 
+    .btn {
+      background: var(--accent);
+      color: #FFF;
+      border: none;
+      padding: 9px 18px;
+      border-radius: 8px;
+      font-weight: 700;
       font-size: 13px;
-      cursor: pointer; 
+      cursor: pointer;
       display: inline-flex;
       align-items: center;
       gap: 6px;
@@ -219,9 +219,9 @@
     .btn-success:hover {
       background: #059669;
     }
-    .btn-danger { 
-      background: #EF4444; 
-      color: #fff; 
+    .btn-danger {
+      background: #EF4444;
+      color: #fff;
     }
     .btn-danger:hover {
       background: #DC2626;
@@ -232,45 +232,45 @@
       border-radius: 6px;
       font-weight: 600;
     }
-    .form-group { 
-      margin-bottom: 18px; 
+    .form-group {
+      margin-bottom: 18px;
     }
-    label { 
-      display: block; 
-      font-size: 13px; 
+    label {
+      display: block;
+      font-size: 13px;
       font-weight: 600;
-      color: #CBD5E1; 
-      margin-bottom: 8px; 
+      color: #CBD5E1;
+      margin-bottom: 8px;
     }
-    input[type="text"], input[type="number"], input[type="email"] { 
-      width: 100%; 
-      max-width: 520px; 
-      padding: 11px 14px; 
-      background: #0D0F13; 
-      border: 1px solid var(--border); 
-      border-radius: 8px; 
-      color: #FFF; 
-      font-size: 14px; 
+    input[type="text"], input[type="number"], input[type="email"] {
+      width: 100%;
+      max-width: 520px;
+      padding: 11px 14px;
+      background: #0D0F13;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: #FFF;
+      font-size: 14px;
       transition: all 0.2s;
     }
-    input:focus { 
-      outline: none; 
-      border-color: var(--accent); 
+    input:focus {
+      outline: none;
+      border-color: var(--accent);
       box-shadow: 0 0 0 3px var(--accent-light);
     }
-    table { 
-      width: 100%; 
-      border-collapse: collapse; 
-      margin-top: 14px; 
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
     }
-    th, td { 
-      text-align: left; 
-      padding: 14px 12px; 
-      border-bottom: 1px solid var(--border); 
-      font-size: 13px; 
+    th, td {
+      text-align: left;
+      padding: 14px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
     }
-    th { 
-      color: var(--text-dim); 
+    th {
+      color: var(--text-dim);
       font-weight: 600;
       text-transform: uppercase;
       font-size: 11px;
@@ -333,11 +333,11 @@
 
     <div class="nav-tabs">
       <button class="tab-btn active" onclick="showTab('payments', event)">
-        <i class="fa-solid fa-receipt"></i> Pending Payments 
+        <i class="fa-solid fa-receipt"></i> Pending Payments
         <span id="pendingBadge" class="badge badge-pending" style="display:none; margin-left: 6px; font-size: 10px; padding: 2px 7px;">0</span>
       </button>
       <button class="tab-btn" onclick="showTab('drivers', event)">
-        <i class="fa-solid fa-users"></i> Registered Drivers 
+        <i class="fa-solid fa-users"></i> Registered Drivers
         <span id="driversCountBadge" class="badge" style="background: rgba(255,255,255,0.1); color: #FFF; margin-left: 6px; font-size: 10px; padding: 2px 7px;">0</span>
       </button>
       <button class="tab-btn" onclick="showTab('pricing', event)"><i class="fa-solid fa-qrcode"></i> Plans & UPI QR</button>
@@ -355,7 +355,7 @@
         </div>
       </div>
       <p class="panel-desc">Approve or reject UTR transactions to activate driver memberships in real-time Firestore.</p>
-      
+
       <div id="paymentsList">
         <div id="paymentsLoading" style="text-align: center; padding: 36px; color: var(--text-dim);">
           <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 24px; color: var(--accent); margin-bottom: 10px; display: block;"></i>
@@ -380,18 +380,18 @@
       <!-- Search Box: Search user by name, mobile, city, or state -->
       <div style="margin-bottom: 18px; display: flex; align-items: center; gap: 10px; max-width: 480px; position: relative;">
         <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--text-dim); font-size: 13px; pointer-events: none;"></i>
-        <input 
-          type="text" 
-          id="driverSearchInput" 
-          placeholder="Search driver by name, mobile, city, state..." 
+        <input
+          type="text"
+          id="driverSearchInput"
+          placeholder="Search driver by name, mobile, city, state, device..."
           oninput="filterDrivers()"
           style="width: 100%; padding: 10px 36px 10px 38px; background: #0D0F13; border: 1px solid var(--border); border-radius: 8px; color: #FFF; font-size: 13px;"
         >
-        <button 
-          type="button" 
-          id="clearSearchBtn" 
-          onclick="clearDriverSearch()" 
-          style="display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; color: var(--text-dim); cursor: pointer; padding: 4px 6px; font-size: 13px;" 
+        <button
+          type="button"
+          id="clearSearchBtn"
+          onclick="clearDriverSearch()"
+          style="display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; color: var(--text-dim); cursor: pointer; padding: 4px 6px; font-size: 13px;"
           title="Clear search"
         >
           <i class="fa-solid fa-xmark"></i>
@@ -407,6 +407,7 @@
               <th>City</th>
               <th>State</th>
               <th>Vehicle</th>
+              <th>Registered Device</th>
               <th>Active Plan</th>
               <th>Expiry</th>
               <th>Status</th>
@@ -415,7 +416,7 @@
           </thead>
           <tbody id="driversTableBody">
             <tr id="driversLoadingRow">
-              <td colspan="9" style="text-align: center; padding: 36px; color: var(--text-dim);">
+              <td colspan="10" style="text-align: center; padding: 36px; color: var(--text-dim);">
                 <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 24px; color: var(--accent); margin-bottom: 10px; display: block;"></i>
                 Streaming live drivers from Firestore /users...
               </td>
@@ -429,7 +430,7 @@
     <div id="pricing" class="panel">
       <h2 class="panel-title"><i class="fa-solid fa-credit-card" style="color: var(--accent);"></i> UPI Payment Configuration</h2>
       <p class="panel-desc">Configure the payment receiving address and driver subscription pricing in Firestore `/settings/global`.</p>
-      
+
       <div class="form-group" style="margin-top: 16px;">
         <label>Admin UPI ID</label>
         <input type="text" id="upiIdInput" placeholder="e.g. gpay-11189725657@okaxis">
@@ -470,7 +471,7 @@
     <div id="community" class="panel">
       <h2 class="panel-title"><i class="fa-solid fa-comments" style="color: var(--accent);"></i> Social & Driver Channel & Support Links</h2>
       <p class="panel-desc">Manage the WhatsApp Channel and support links synced live with the mobile app.</p>
-      
+
       <div class="form-group" style="margin-top: 16px;">
         <label><i class="fa-brands fa-whatsapp" style="color:#25D366;"></i> WhatsApp Channel Link</label>
         <input type="text" id="whatsappInput" placeholder="https://chat.whatsapp.com/...">
@@ -708,7 +709,7 @@
         sessionStorage.setItem('smartdrivo_admin_user', adminDisplayName);
 
         logMessage(`Admin Access Confirmed. Active admin: ${adminDisplayName}`);
-        
+
         // Start live snapshot listeners
         startRealtimeListeners();
 
@@ -735,6 +736,11 @@
             city: d.city || 'N/A',
             state: d.state || 'N/A',
             vehicleType: (d.vehicleType || 'AUTO').toUpperCase(),
+            registeredDevice: d.registeredDevice || d.lastDevice || '',
+            registeredAndroidVersion: d.registeredAndroidVersion || d.lastAndroidVersion || '',
+            registeredAppVersion: d.registeredAppVersion || d.lastAppVersion || '',
+            lastDevice: d.lastDevice || d.registeredDevice || '',
+            lastSeenAt: Number(d.lastSeenAt) || 0,
             plan: d.plan || 'NONE',
             planPrice: Number(d.planPrice) || 0,
             planExpireMillis: Number(d.planExpireMillis) || 0,
@@ -815,7 +821,7 @@
           const data = doc.data();
           if (data.upiId) document.getElementById('upiIdInput').value = data.upiId;
           if (data.beneficiaryName) document.getElementById('beneficiaryNameInput').value = data.beneficiaryName;
-          
+
           if (data.planPrices) {
             if (data.planPrices.plan3Days) document.getElementById('price3Days').value = data.planPrices.plan3Days;
             if (data.planPrices.plan7Days) document.getElementById('price7Days').value = data.planPrices.plan7Days;
@@ -851,13 +857,14 @@
         const city = (d.city || '').toLowerCase();
         const state = (d.state || '').toLowerCase();
         const vehicle = (d.vehicleType || '').toLowerCase();
-        return name.includes(query) || phone.includes(query) || email.includes(query) || city.includes(query) || state.includes(query) || vehicle.includes(query);
+        const device = (d.registeredDevice || d.lastDevice || '').toLowerCase();
+        return name.includes(query) || phone.includes(query) || email.includes(query) || city.includes(query) || state.includes(query) || vehicle.includes(query) || device.includes(query);
       });
 
       if (filtered.length === 0) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="9" style="text-align: center; padding: 32px; color: var(--text-dim);">
+            <td colspan="10" style="text-align: center; padding: 32px; color: var(--text-dim);">
               <i class="fa-solid fa-user-slash" style="font-size: 24px; margin-bottom: 10px; display: block; opacity: 0.5;"></i>
               ${query ? 'No registered drivers matching your search criteria.' : 'No registered drivers found in Firestore /users collection.'}
             </td>
@@ -918,11 +925,24 @@
             <td><span style="color: #F8FAFC; font-weight: 600;">${escapeHtml(driver.city)}</span></td>
             <td><span style="color: #94A3B8;">${escapeHtml(driver.state)}</span></td>
             <td><span class="badge" style="background: ${vehicleBg}; color: ${vehicleColor};">${escapeHtml(driver.vehicleType)}</span></td>
-            <td><strong>${escapeHtml(driver.plan)}</strong> <span style="font-size: 11px; color: var(--text-dim);">${driver.planPrice ? `(₹${driver.planPrice})` : ''}</span></td>
+            <td>
+              <div style="font-weight:600; color:#F8FAFC;">
+                ${escapeHtml(driver.registeredDevice || driver.lastDevice || 'Not captured')}
+              </div>
+              <div style="font-size:10px; color:var(--text-dim);">
+                ${escapeHtml(
+                  [
+                    driver.registeredAndroidVersion,
+                    driver.registeredAppVersion ? `App ${driver.registeredAppVersion}` : ''
+                  ].filter(Boolean).join(' | ')
+                )}
+              </div>
+            </td>
+            <td><strong>${escapeHtml(driver.plan === 'FREE_TRIAL' ? '1-Day Free Trial' : driver.plan)}</strong> <span style="font-size: 11px; color: var(--text-dim);">${driver.planPrice ? `(₹${driver.planPrice})` : ''}</span></td>
             <td>${formatExpiry(driver.planExpireMillis, driver.isAdmin)}</td>
             <td>
-              ${driver.isActive ? 
-                '<span class="badge badge-approved"><i class="fa-solid fa-circle-check"></i> Active</span>' : 
+              ${driver.isActive ?
+                '<span class="badge badge-approved"><i class="fa-solid fa-circle-check"></i> Active</span>' :
                 '<span class="badge badge-rejected"><i class="fa-solid fa-circle-xmark"></i> Inactive</span>'
               }
             </td>
@@ -1143,8 +1163,8 @@
                 <span class="badge ${badgeClass}">${escapeHtml(sub.status)}</span>
               </div>
               <div style="font-size: 13px; color: var(--text-dim); line-height: 1.6;">
-                UTR: <strong style="color: #FFF; letter-spacing: 0.5px;">${escapeHtml(sub.utrNumber)}</strong> &nbsp;|&nbsp; 
-                Plan: <strong style="color: var(--accent);">${escapeHtml(sub.planSelected)} (₹${sub.amount})</strong> &nbsp;|&nbsp; 
+                UTR: <strong style="color: #FFF; letter-spacing: 0.5px;">${escapeHtml(sub.utrNumber)}</strong> &nbsp;|&nbsp;
+                Plan: <strong style="color: var(--accent);">${escapeHtml(sub.planSelected)} (₹${sub.amount})</strong> &nbsp;|&nbsp;
                 Submitted: <span>${formatTime(sub.submittedAt)}</span>
                 ${sub.note ? `<br><span style="font-style: italic; color: #94A3B8;">Note: "${escapeHtml(sub.note)}"</span>` : ''}
               </div>
