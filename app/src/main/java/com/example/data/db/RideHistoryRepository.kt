@@ -265,7 +265,7 @@ class RideHistoryRepository(
     // PROCESSING_HISTORY_TIMEOUT_V1
     // Never allow a history row to remain PROCESSING forever.
     suspend fun finalizeAllStaleProcessing(
-        timeoutMs: Long = 3_000L
+        timeoutMs: Long = 15_000L
     ): Int = withContext(ioDispatcher) {
         mutex.withLock {
             val now = System.currentTimeMillis()
@@ -297,8 +297,8 @@ class RideHistoryRepository(
                             decisionAt = finishedAt,
                             decisionLatencyMs = elapsed,
                             totalProcessingMs = elapsed,
-                            decisionReasonCode = "PROCESSING_TIMEOUT",
-                            decisionReasonText = "Order processing timed out after 3 seconds"
+                            decisionReasonCode = "PROCESSING_RECOVERY",
+                            decisionReasonText = "Order ended before SmartDrivo received a final result"
                         )
                     )
 

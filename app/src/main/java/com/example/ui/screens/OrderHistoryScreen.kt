@@ -134,13 +134,25 @@ fun OrderHistoryScreen(
     val sevenDaysAgo = remember { System.currentTimeMillis() - 7 * 86400000L }
 
     val acceptedCount = remember(history) { history.count { it.status == OrderStatus.ACCEPTED } }
+    // HISTORY_EXCLUSIVE_COUNTS_V2
+    // One row can belong to only ONE final category.
     val rejectedCount = remember(history) {
-        history.count { it.status == OrderStatus.REJECTED || isNoGoOrder(it) }
+        history.count {
+            it.status != OrderStatus.PROCESSING &&
+                it.status != OrderStatus.ACCEPTED &&
+                (
+                    it.status == OrderStatus.REJECTED ||
+                        isNoGoOrder(it)
+                )
+        }
     }
+
     val ignoredCount = remember(history) {
         history.count {
-            it.status == OrderStatus.IGNORED ||
-            (!isNoGoOrder(it) && it.status != OrderStatus.ACCEPTED && it.status != OrderStatus.REJECTED && it.status != OrderStatus.PROCESSING)
+            !isNoGoOrder(it) &&
+                it.status != OrderStatus.ACCEPTED &&
+                it.status != OrderStatus.REJECTED &&
+                it.status != OrderStatus.PROCESSING
         }
     }
     val allCount by remember(history) { derivedStateOf { history.size } }
@@ -151,8 +163,19 @@ fun OrderHistoryScreen(
                 val matchTab = when (selectedTab) {
                     HistoryTab.ALL -> true
                     HistoryTab.ACCEPTED -> item.status == OrderStatus.ACCEPTED
-                    HistoryTab.REJECTED -> (isNoGoOrder(item) || item.status == OrderStatus.REJECTED) && item.status != OrderStatus.PROCESSING
-                    HistoryTab.IGNORED -> (item.status == OrderStatus.IGNORED || (!isNoGoOrder(item) && item.status != OrderStatus.ACCEPTED && item.status != OrderStatus.REJECTED)) && item.status != OrderStatus.PROCESSING
+                    HistoryTab.REJECTED ->
+                        item.status != OrderStatus.PROCESSING &&
+                            item.status != OrderStatus.ACCEPTED &&
+                            (
+                                item.status == OrderStatus.REJECTED ||
+                                    isNoGoOrder(item)
+                            )
+
+                    HistoryTab.IGNORED ->
+                        !isNoGoOrder(item) &&
+                            item.status != OrderStatus.ACCEPTED &&
+                            item.status != OrderStatus.REJECTED &&
+                            item.status != OrderStatus.PROCESSING
                 }
                 val matchPlatform = selectedPlatformFilter == null || item.platform == selectedPlatformFilter
                 val matchDate = when (selectedDateRange) {

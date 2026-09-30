@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import java.util.TimeZone
 import java.util.Locale
 import java.util.Date
@@ -53,8 +54,19 @@ class RideHistoryViewModel(
             // Convert any previously stuck PROCESSING records
             // into MISSED/IGNORED so History never stays pending.
             repository.finalizeAllStaleProcessing(
-                timeoutMs = 3_000L
+                timeoutMs = 15_000L
             )
+
+            // PROCESSING_RECOVERY_LOOP_V2
+            // Normal orders should finish immediately.
+            // This is only a fallback for interrupted/abnormal cases.
+            while (true) {
+                delay(5_000L)
+
+                repository.finalizeAllStaleProcessing(
+                    timeoutMs = 15_000L
+                )
+            }
         }
     }
 val history: StateFlow<List<RideHistoryEntity>> = repository.allHistory

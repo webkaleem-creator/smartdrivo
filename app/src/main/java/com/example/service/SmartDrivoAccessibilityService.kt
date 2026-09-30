@@ -610,6 +610,44 @@ private val processingTimeoutRunnable = Runnable {
      * Records that a new click sequence has been initiated.
      * Starts the 3-second isClickInProgress cooldown and records the click timestamp.
      */
+    // RAPIDO_NEW_ORDER_CLICK_V2
+    // A verified NEW Rapido popup should not be blocked by the
+    // previous order's generic 3-second click-in-progress lock.
+    // Anti-spam limits are still retained.
+    @Synchronized
+    private fun canExecuteVerifiedRapidoClick(): Boolean {
+        if (!preferencesManager.isAutoAcceptEnabled) {
+            return false
+        }
+
+        val now = System.currentTimeMillis()
+
+        if (now < clickBlockedUntilTimestamp) {
+            return false
+        }
+
+        recentClickTimestamps.removeAll {
+            now - it > 2_000L
+        }
+
+        if (recentClickTimestamps.size >= 3) {
+            clickBlockedUntilTimestamp =
+                now + 5_000L
+
+            recentClickTimestamps.clear()
+
+            Log.w(
+                TAG,
+                "Rapido verified click blocked by anti-spam safety limit"
+            )
+
+            return false
+        }
+
+        // Do not use isClickInProgress here.
+        // activeRapidoPopupOrderId protects the SAME popup.
+        return true
+    }
     @Synchronized
     private fun notifyClickInitiated() {
         val now = System.currentTimeMillis()
@@ -5172,6 +5210,19 @@ private val processingTimeoutRunnable = Runnable {
     ) {
         if (candidate.fare == null || candidate.fare <= 0f || candidate.pickupDistKm == null || candidate.pickupDistKm <= 0f) {
             Log.w(TAG, "Aborting executeRapidoAutoAccept: fare (${candidate.fare}) or pickup distance (${candidate.pickupDistKm}) invalid/unavailable")
+
+            val recordId =
+                activeOrderRecordIds[candidate.platform]
+                    ?: onOrderDetectedFast(candidate)
+
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.IGNORED,
+                reasonCode = "RIDE_DATA_INCOMPLETE",
+                reasonText = "Ride data incomplete - order left for manual action"
+            )
+
             resetProcessing()
             return
         }
@@ -5179,6 +5230,19 @@ private val processingTimeoutRunnable = Runnable {
         val directReject = evaluateDirectRideFilters(candidate)
         if (directReject.status != OrderStatus.ACCEPTED) {
             Log.w(TAG, "Aborting executeRapidoAutoAccept: ${directReject.reason}")
+
+            val recordId =
+                activeOrderRecordIds[candidate.platform]
+                    ?: onOrderDetectedFast(candidate)
+
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.IGNORED,
+                reasonCode = "FILTER_RECHECK_FAILED",
+                reasonText = directReject.reason
+            )
+
             resetProcessing()
             return
         }
@@ -5189,22 +5253,42 @@ private val processingTimeoutRunnable = Runnable {
         }
 
         val now = System.currentTimeMillis()
-        // Cooldown: 200ms max between attempts
-        if (attemptNumber == 1 && (now - lastRapidoAttemptTime < 200L)) {
-            Log.w(TAG, "Rapido auto-accept skipped: 200ms cooldown active (${now - lastRapidoAttemptTime}ms since last attempt)")
-            resetProcessing()
-            return
-        }
         lastRapidoAttemptTime = now
 
-        if (!canExecuteClick()) {
-            Log.w(TAG, "Rapido auto-accept skipped: click in progress or rate limit active")
+        if (!canExecuteVerifiedRapidoClick()) {
+            Log.w(TAG, "Rapido auto-accept paused by anti-spam safety limit")
+
+            val recordId =
+                activeOrderRecordIds[candidate.platform]
+                    ?: onOrderDetectedFast(candidate)
+
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.IGNORED,
+                reasonCode = "CLICK_SAFETY_LIMIT",
+                reasonText = "Safety click limit active - order left for manual action"
+            )
+
             resetProcessing()
             return
         }
 
         if (attemptNumber > 5) {
             Log.w(TAG, "Reached max 5 attempts for Rapido auto-accept without order screen closing")
+
+            val recordId =
+                activeOrderRecordIds[candidate.platform]
+                    ?: onOrderDetectedFast(candidate)
+
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.IGNORED,
+                reasonCode = "ACCEPT_MAX_ATTEMPTS",
+                reasonText = "Auto-accept could not confirm the order - left for manual action"
+            )
+
             resetProcessing()
             return
         }
@@ -5214,6 +5298,19 @@ private val processingTimeoutRunnable = Runnable {
         val rapidoRoot = getRapidoOrderRootNode(orderRoot)
         if (rapidoRoot == null || (!hasRapidoOrderNodes(rapidoRoot) && !isRapidoOrderPopupShowing(rapidoRoot))) {
             Log.i(TAG, "Rapido order popup nodes are not visible (fare and Accept button required). No click triggered.")
+
+            val recordId =
+                activeOrderRecordIds[candidate.platform]
+                    ?: onOrderDetectedFast(candidate)
+
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.IGNORED,
+                reasonCode = "ORDER_POPUP_CLOSED",
+                reasonText = "Order popup closed before SmartDrivo completed the action"
+            )
+
             resetProcessing()
             return
         }
@@ -5400,19 +5497,12 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
                     candidate = candidate,
                     status = OrderStatus.ACCEPTED,
                     reasonCode = "FILTERS_MATCHED",
-                    reasonText = "Auto-accepted (attempt #$attemptNumber)",
+                    reasonText = buildAcceptedFilterReason(candidate),
                     actionSucceeded = true,
                     timesClicked = attemptNumber,
                     buttonFound = true,
                     buttonDetails = "Accept button matched: '${acceptNode.text}' / ID: '${acceptNode.viewIdResourceName}'",
                     clickMethod = "Strict Button Click (attempt #$attemptNumber)"
-                )
-                logOrderEvent(
-                    candidate = candidate,
-                    status = OrderStatus.ACCEPTED,
-                    reason = "Auto-accepted (attempt #$attemptNumber)",
-                    clickTimeMs = System.currentTimeMillis(),
-                    timesClicked = attemptNumber
                 )
 
                 resetProcessing()
@@ -6908,10 +6998,10 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
         matchedGoTo: String = "",
         matchedNoGo: String = ""
     ) {
-        // MASTER OFF: no history decision update.
-        if (!preferencesManager.isAutoAcceptEnabled) {
-            return
-        }
+        // HISTORY_FINAL_STATE_V2
+        // This method only finalizes an existing detected row.
+        // Always allow the final status to be written.
+
         serviceScope.launch(Dispatchers.IO) {
             try {
                 // onOrderDetectedFast inserts PROCESSING asynchronously.
@@ -6983,10 +7073,9 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
         clickMethod: String = "",
         errorMsg: String? = null
     ) {
-        // MASTER OFF: ignore action completion.
-        if (!preferencesManager.isAutoAcceptEnabled) {
-            return
-        }
+        // HISTORY_FINAL_STATE_V2
+        // Existing history rows must always receive their final result.
+
         val now = System.currentTimeMillis()
         val totalLatency = if (candidate.detectionTimeMs > 0L) (now - candidate.detectionTimeMs).coerceAtLeast(1L) else 100L
         val actionLatency = (now - candidate.timestamp).coerceAtLeast(15L)
@@ -7003,25 +7092,62 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
         )
         serviceScope.launch(Dispatchers.IO) {
             try {
-                val updated = rideHistoryRepository.onOrderActionCompleted(
-                    id = recordId,
-                    status = status,
-                    reasonCode = reasonCode,
-                    reasonText = reasonText,
-                    actionSucceeded = actionSucceeded,
-                    timesClicked = timesClicked
-                )
-                if (updated != null) {
-                    repository.recordOrderHistory(updated.toOrderHistoryItem())
+                var updated =
+                    rideHistoryRepository.onOrderActionCompleted(
+                        id = recordId,
+                        status = status,
+                        reasonCode = reasonCode,
+                        reasonText = reasonText,
+                        actionSucceeded = actionSucceeded,
+                        timesClicked = timesClicked
+                    )
+
+                // onOrderDetectedFast inserts asynchronously.
+                // Wait briefly if final action arrives first.
+                var retry = 0
+
+                while (updated == null && retry < 40) {
+                    delay(25L)
+                    retry++
+
+                    updated =
+                        rideHistoryRepository.onOrderActionCompleted(
+                            id = recordId,
+                            status = status,
+                            reasonCode = reasonCode,
+                            reasonText = reasonText,
+                            actionSucceeded = actionSucceeded,
+                            timesClicked = timesClicked
+                        )
                 }
-                if (status == OrderStatus.ACCEPTED) {
-                    val platformName = if (candidate.platform == Platform.RAPIDO) "Rapido" else candidate.platform.displayName
-                    prefs.saveAcceptedOrder(
-                        platform = platformName,
-                        timestamp = now,
-                        fareAmount = candidate.fare ?: 0f
+
+                val finalUpdated = updated
+
+                if (finalUpdated != null) {
+                    repository.recordOrderHistory(
+                        finalUpdated.toOrderHistoryItem()
+                    )
+
+                    if (status == OrderStatus.ACCEPTED) {
+                        val platformName =
+                            if (candidate.platform == Platform.RAPIDO)
+                                "Rapido"
+                            else
+                                candidate.platform.displayName
+
+                        prefs.saveAcceptedOrder(
+                            platform = platformName,
+                            timestamp = now,
+                            fareAmount = candidate.fare ?: 0f
+                        )
+                    }
+                } else {
+                    Log.e(
+                        TAG,
+                        "Final history update failed after retry: id=$recordId status=$status"
                     )
                 }
+
                 prefs.notifyOrderHistoryChanged()
             } catch (e: Exception) {
                 Log.e(TAG, "Error in onOrderActionCompletedFast", e)
