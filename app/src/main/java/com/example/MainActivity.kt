@@ -152,7 +152,7 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             try {
                 if (ContextCompat.checkSelfPermission(this,
-                    Manifest.permission.POST_NOTIFICATIONS) != 
+                    Manifest.permission.POST_NOTIFICATIONS) !=
                     PackageManager.PERMISSION_GRANTED) {
                     ActivityCompat.requestPermissions(this,
                         arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
@@ -261,6 +261,10 @@ fun SmartDrivoApp(
                             isActive = fsProfile.isActive
                         )
                         prefs.saveUserProfile(updated)
+                        // DEVICE_SYNC_STARTUP_V2
+                        // Sync this phone model / Android / app version
+                        // to Firestore for Admin Panel device info.
+                        repository.saveUserProfile(updated)
                         if (!updated.isPlanValid && !updated.isAdmin) {
                             prefs.setAutoAcceptActive(false)
                         }
@@ -595,6 +599,9 @@ fun SmartDrivoApp(
                             userProfile.copy(uid = currentUid, email = updatedEmail, phone = updatedPhone, isAdmin = false)
                         }
                         prefs.saveUserProfile(merged)
+                        // DEVICE_SYNC_LOGIN_V2
+                        // Sync current phone metadata immediately after login.
+                        repository.saveUserProfile(merged)
                         if (!merged.isPlanValid && !merged.isAdmin) {
                             prefs.setAutoAcceptActive(false)
                         }
