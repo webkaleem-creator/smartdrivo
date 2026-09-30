@@ -49,6 +49,12 @@ class RideHistoryViewModel(
 
             // Now delete ONLY records belonging to older dates.
             repository.purgePreviousDaysSafe()
+
+            // Convert any previously stuck PROCESSING records
+            // into MISSED/IGNORED so History never stays pending.
+            repository.finalizeAllStaleProcessing(
+                timeoutMs = 3_000L
+            )
         }
     }
 val history: StateFlow<List<RideHistoryEntity>> = repository.allHistory

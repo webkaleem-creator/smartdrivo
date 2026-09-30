@@ -261,6 +261,59 @@ class RideHistoryRepository(
         }
     }
 
+
+    // PROCESSING_HISTORY_TIMEOUT_V1
+    // Never allow a history row to remain PROCESSING forever.
+    suspend fun finalizeAllStaleProcessing(
+        timeoutMs: Long = 3_000L
+    ): Int = withContext(ioDispatcher) {
+        mutex.withLock {
+            val now = System.currentTimeMillis()
+
+            val staleRows = dao.getAllHistoryList().filter { row ->
+                row.status == OrderStatus.PROCESSING.name &&
+                    (now - row.detectedAt) >= timeoutMs
+            }
+
+            var fixedCount = 0
+
+            staleRows.forEach { stale ->
+
+                val latest = dao.getById(stale.id)
+
+                if (
+                    latest != null &&
+                    latest.status == OrderStatus.PROCESSING.name &&
+                    (System.currentTimeMillis() - latest.detectedAt) >= timeoutMs
+                ) {
+                    val finishedAt = System.currentTimeMillis()
+                    val elapsed =
+                        (finishedAt - latest.detectedAt)
+                            .coerceAtLeast(timeoutMs)
+
+                    dao.update(
+                        latest.copy(
+                            status = OrderStatus.IGNORED.name,
+                            decisionAt = finishedAt,
+                            decisionLatencyMs = elapsed,
+                            totalProcessingMs = elapsed,
+                            decisionReasonCode = "PROCESSING_TIMEOUT",
+                            decisionReasonText = "Order processing timed out after 3 seconds"
+                        )
+                    )
+
+                    fixedCount++
+
+                    Log.w(
+                        "RideHistoryRepo",
+                        "PROCESSING timeout fixed: ${latest.id}"
+                    )
+                }
+            }
+
+            fixedCount
+        }
+    }
     suspend fun getById(id: String): RideHistoryEntity? = withContext(ioDispatcher) {
         dao.getById(id) ?: dao.getByBookingId(id) ?: dao.getByFingerprint(id)
     }
