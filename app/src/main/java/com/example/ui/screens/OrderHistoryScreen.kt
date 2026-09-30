@@ -651,10 +651,48 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                     OrderStatus.SKIPPED -> Pair(Color(0xFFEDE7F6), Color(0xFF512DA8))
                     OrderStatus.MISSED -> Pair(Color(0xFFEEEEEE), Color.Gray)
                 }
-                val isToggleOff = effectiveStatus == OrderStatus.IGNORED && (item.reason.contains("toggle", ignoreCase = true) || item.reason.contains("OFF", ignoreCase = true))
+
+                val historyReason =
+                    "${item.decisionReasonCode} ${item.decisionReasonText} ${item.reason}"
+
+                // HISTORY_TOGGLE_LABEL_V3
+                // Generic "OFF" must never be treated as Auto-Accept OFF.
+                val isAutoAcceptOff =
+                    effectiveStatus == OrderStatus.IGNORED &&
+                        (
+                            item.decisionReasonCode.equals(
+                                "MASTER_TOGGLE_OFF",
+                                ignoreCase = true
+                            ) ||
+                            (
+                                historyReason.contains(
+                                    "Auto-Accept",
+                                    ignoreCase = true
+                                ) &&
+                                    historyReason.contains(
+                                        "OFF",
+                                        ignoreCase = true
+                                    )
+                            )
+                        )
+
+                val isAutoRejectOff =
+                    effectiveStatus == OrderStatus.IGNORED &&
+                        (
+                            item.decisionReasonCode.equals(
+                                "AUTO_REJECT_OFF",
+                                ignoreCase = true
+                            ) ||
+                            historyReason.contains(
+                                "Auto-Reject OFF",
+                                ignoreCase = true
+                            )
+                        )
+
                 val statusLabel = when {
                     effectiveStatus == OrderStatus.PROCESSING -> "PROCESSING"
-                    isToggleOff -> "IGNORED • TOGGLE OFF"
+                    isAutoAcceptOff -> "IGNORED - AUTO ACCEPT OFF"
+                    isAutoRejectOff -> "IGNORED"
                     effectiveStatus == OrderStatus.FAILED -> "ACTION FAILED"
                     else -> effectiveStatus.name
                 }
@@ -906,18 +944,117 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                 }
                 OrderStatus.IGNORED -> {
                     val ignoredReason = when {
-                        item.reason.isNotBlank() && item.reason.contains("fare unavailable", ignoreCase = true) -> "Fare unavailable - order skipped"
-                        (item.amount <= 0f && item.baseFare <= 0f) && (item.reason.isBlank() || item.reason.contains("fare", ignoreCase = true) || item.reason.equals("No criteria matched", ignoreCase = true)) -> "Fare unavailable - order skipped"
-                        item.reason.isNotBlank() && item.reason.contains("Nearby", ignoreCase = true) -> "Pickup is Nearby - order skipped"
-                        item.reason.isNotBlank() && (item.reason.contains("toggle", ignoreCase = true) || item.reason.contains("OFF", ignoreCase = true)) -> "Auto-accept toggle was OFF"
-                        item.reason.isNotBlank() && (item.reason.contains("drop distance", ignoreCase = true) || item.reason.contains("Drop ", ignoreCase = true)) -> item.reason
-                        item.reason.isNotBlank() && item.reason.contains("pickup distance", ignoreCase = true) -> item.reason
-                        item.reason.isNotBlank() && item.reason.contains("fare", ignoreCase = true) -> item.reason
-                        item.reason.isNotBlank() && item.reason.contains("exceeds max limit", ignoreCase = true) -> item.reason
-                        item.reason.isNotBlank() && item.reason.contains("below min fare", ignoreCase = true) -> item.reason
-                        item.reason.isNotBlank() && item.reason.contains("skipped", ignoreCase = true) -> item.reason
-                        item.reason.isNotBlank() && !item.reason.equals("No criteria matched", ignoreCase = true) -> item.reason
-                        else -> "Filter criteria not matched"
+                        item.reason.isNotBlank() &&
+                            item.reason.contains(
+                                "fare unavailable",
+                                ignoreCase = true
+                            ) ->
+                            "Fare unavailable - order skipped"
+
+                        (item.amount <= 0f && item.baseFare <= 0f) &&
+                            (
+                                item.reason.isBlank() ||
+                                    item.reason.contains(
+                                        "fare",
+                                        ignoreCase = true
+                                    ) ||
+                                    item.reason.equals(
+                                        "No criteria matched",
+                                        ignoreCase = true
+                                    )
+                            ) ->
+                            "Fare unavailable - order skipped"
+
+                        item.reason.isNotBlank() &&
+                            item.reason.contains(
+                                "Nearby",
+                                ignoreCase = true
+                            ) ->
+                            "Pickup is Nearby - order skipped"
+
+                        item.decisionReasonCode.equals(
+                            "MASTER_TOGGLE_OFF",
+                            ignoreCase = true
+                        ) ||
+                            (
+                                item.reason.contains(
+                                    "Auto-Accept",
+                                    ignoreCase = true
+                                ) &&
+                                    item.reason.contains(
+                                        "OFF",
+                                        ignoreCase = true
+                                    )
+                            ) ->
+                            "Auto-Accept was OFF"
+
+                        item.decisionReasonCode.equals(
+                            "AUTO_REJECT_OFF",
+                            ignoreCase = true
+                        ) ||
+                            item.reason.contains(
+                                "Auto-Reject OFF",
+                                ignoreCase = true
+                            ) ->
+                            "Filter criteria not matched"
+
+                        item.reason.isNotBlank() &&
+                            (
+                                item.reason.contains(
+                                    "drop distance",
+                                    ignoreCase = true
+                                ) ||
+                                    item.reason.contains(
+                                        "Drop ",
+                                        ignoreCase = true
+                                    )
+                            ) ->
+                            item.reason
+
+                        item.reason.isNotBlank() &&
+                            item.reason.contains(
+                                "pickup distance",
+                                ignoreCase = true
+                            ) ->
+                            item.reason
+
+                        item.reason.isNotBlank() &&
+                            item.reason.contains(
+                                "fare",
+                                ignoreCase = true
+                            ) ->
+                            item.reason
+
+                        item.reason.isNotBlank() &&
+                            item.reason.contains(
+                                "exceeds max limit",
+                                ignoreCase = true
+                            ) ->
+                            item.reason
+
+                        item.reason.isNotBlank() &&
+                            item.reason.contains(
+                                "below min fare",
+                                ignoreCase = true
+                            ) ->
+                            item.reason
+
+                        item.reason.isNotBlank() &&
+                            item.reason.contains(
+                                "skipped",
+                                ignoreCase = true
+                            ) ->
+                            item.reason
+
+                        item.reason.isNotBlank() &&
+                            !item.reason.equals(
+                                "No criteria matched",
+                                ignoreCase = true
+                            ) ->
+                            item.reason
+
+                        else ->
+                            "Filter criteria not matched"
                     }
                     Box(
                         modifier = Modifier

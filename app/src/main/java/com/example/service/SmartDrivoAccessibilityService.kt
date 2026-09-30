@@ -308,6 +308,9 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
     @Volatile
     private var activeRapidoPopupOrderId: String? = null
+
+    @Volatile
+    private var lastValidRapidoPopupAt: Long = 0L
     private val toggleReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "com.example.TOGGLE_CHANGED") {
@@ -664,13 +667,22 @@ private val processingTimeoutRunnable = Runnable {
     private fun getOrderIdentifier(candidate: RideCandidate): String {
         val bookingId = candidate.bookingId?.trim()
         if (!bookingId.isNullOrEmpty()) return bookingId
+
         val fare = candidate.fare?.toString() ?: "na"
         val pickDist = candidate.pickupDistKm?.toString() ?: "na"
         val dropDist = candidate.dropDistKm?.toString() ?: "na"
+
+        // RAPIDO_STABLE_ID_V4
+        // Rapido address text appears in stages. Never let address changes
+        // turn one visible popup into multiple History rows.
+        if (candidate.platform == Platform.RAPIDO) {
+            val bundle = if (candidate.isBundledOrder) "bundle" else "single"
+            return "RAPIDO_${fare}_${pickDist}_${dropDist}_${bundle}"
+        }
+
         val pickup = candidate.pickupAddress?.trim()?.take(25) ?: "addr"
         return "${candidate.platform}_${fare}_${pickDist}_${dropDist}_${pickup}"
     }
-
     data class DirectRideFilterSettings(
         val minFare: Float,
         val maxFare: Float,
@@ -1496,6 +1508,8 @@ private val processingTimeoutRunnable = Runnable {
             }
 
             if (validatedRoot != null && validatedPopup != null) {
+                // RAPIDO_VALID_POPUP_V4
+                lastValidRapidoPopupAt = System.currentTimeMillis()
                 Log.i(
                     TAG,
                     "🎯 [Rapido] Genuine order popup detected across windows: " +
@@ -1518,7 +1532,16 @@ private val processingTimeoutRunnable = Runnable {
                 }
 
             if (anyRapidoHome) {
+                // RAPIDO_TRANSIENT_GAP_V4
+            // Accessibility can briefly expose an empty tree while the SAME
+            // order popup is still visible. Keep its identity for 1.2 seconds.
+            if (
+                System.currentTimeMillis() - lastValidRapidoPopupAt > 1_200L
+            ) {
                 activeRapidoPopupOrderId = null
+                lastValidRapidoPopupAt = 0L
+            }
+                lastValidRapidoPopupAt = 0L
 
                 Log.d(
                     TAG,
@@ -4746,7 +4769,12 @@ private val processingTimeoutRunnable = Runnable {
         val allText = textList.joinToString(" ").lowercase(Locale.ROOT)
 
         return allText.contains("thanks for accepting") ||
-            allText.contains("checking order status")
+            allText.contains("checking order status") ||
+            allText.contains("you missed the order") ||
+            allText.contains("order missed") ||
+            allText.contains("order expired") ||
+            allText.contains("no longer available") ||
+            allText.contains("accepted by another")
     }
     private fun isRapidoOrderScreenVisible(root: AccessibilityNodeInfo?): Boolean {
         return isRapidoOrderPopupShowing(root)
@@ -4810,8 +4838,25 @@ private val processingTimeoutRunnable = Runnable {
             fare = finalFare,
             pickupDistKm = rawCandidate.pickupDistKm ?: validation.pickupDistKm
         )
+        // RAPIDO_COMPLETE_HISTORY_V4
+        // Wait for the complete card before inserting History.
+        // This prevents Trip:N/A + a second full row for the same offer.
+        if (candidate.dropDistKm == null || candidate.dropDistKm <= 0f) {
+            Log.d(
+                TAG,
+                "Rapido popup incomplete - waiting for Trip km before History insert"
+            )
+            return
+        }
         // Ignore repeated accessibility events only for the CURRENT visible Rapido popup.
         // Do not blacklist an order signature for minutes: legitimate offers can arrive quickly.
+        // RAPIDO_MASTER_OFF_V4
+        // Auto-Accept is SmartDrivo's master runtime switch.
+        // OFF = no reading, no History, no Auto-Reject, no clicks.
+        if (!preferencesManager.isAutoAcceptEnabled) {
+            resetProcessing()
+            return
+        }
         val bookingId = candidate.bookingId
         val orderId = getOrderIdentifier(candidate)
 
@@ -6100,7 +6145,18 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
     ) {
         val freshSettings = prefs.loadSettings()
 
-        if (freshSettings.isAutoRejectBadFaresEnabled) {
+        val autoAcceptEnabled =
+            preferencesManager.isAutoAcceptEnabled
+
+        val autoRejectEnabled =
+            freshSettings.isAutoRejectBadFaresEnabled
+
+        if (!autoAcceptEnabled) {
+            resetProcessing()
+            return
+        }
+
+        if (autoRejectEnabled) {
             executeRapidoAutoReject(
                 candidate = candidate,
                 orderRoot = root,
@@ -6113,13 +6169,13 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
         onOrderDecisionFast(
             recordId = recordId,
             candidate = candidate,
-            status = defaultStatus,
-            reasonCode = mapReasonToCode(defaultStatus, reason),
+            status = OrderStatus.IGNORED,
+            reasonCode = "CRITERIA_NOT_MET",
             reasonText = reason
         )
+
         resetProcessing()
     }
-
     private fun findStrictRapidoRejectNode(
         root: AccessibilityNodeInfo
     ): AccessibilityNodeInfo? {
