@@ -5377,12 +5377,16 @@ private val processingTimeoutRunnable = Runnable {
 
         // ═══ STEP 4 - Verify: order popup gone in 200ms = ACCEPTED. Cooldown: 200ms max between attempts ═══
         serviceScope.launch(Dispatchers.IO) {
-            delay(200L) // reduced from 2000ms to 200ms max
+            delay(120L) // reduced from 2000ms to 200ms max
             val currentRoot = getRapidoOrderRootNode(orderRoot)
                         val postAcceptConfirmed = isRapidoPostAcceptScreen(currentRoot)
 val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoot) || isRapidoOrderPopupShowing(currentRoot))
 
                         if (postAcceptConfirmed || !isOrderStillVisible) {
+                // RAPIDO_ACCEPTED_OVERLAY_FAST_V3
+                // Acceptance confirmed: show popup first.
+                // History/database work must not delay the overlay.
+                showAcceptedOrderOverlay(candidate)
                 // Order popup gone in 200ms = ACCEPTED
                 Log.i(TAG, "🎉 STEP 4: Rapido order popup gone in 200ms = ACCEPTED (Attempt #$attemptNumber)")
                 NotificationHelper.updateNotification(
@@ -5410,12 +5414,12 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
                     clickTimeMs = System.currentTimeMillis(),
                     timesClicked = attemptNumber
                 )
-                showAcceptedOrderOverlay(candidate)
+
                 resetProcessing()
             } else {
                 Log.i(TAG, "Rapido order popup still visible after 200ms. Retrying...")
                 if (attemptNumber < 5) {
-                    delay(200L) // reduced from 1000ms to 200ms max
+                    delay(120L) // reduced from 1000ms to 200ms max
                     executeRapidoAutoAccept(candidate, currentRoot, attemptNumber + 1)
                 } else {
                     Log.w(TAG, "Reached max attempts for Rapido auto-accept verification.")
