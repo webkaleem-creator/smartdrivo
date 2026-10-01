@@ -26,7 +26,7 @@ interface RideHistoryDao {
     @Query("SELECT * FROM ride_history WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): RideHistoryEntity?
 
-    @Query("SELECT * FROM ride_history WHERE bookingFingerprint = :fingerprint LIMIT 1")
+    @Query("SELECT * FROM ride_history WHERE bookingFingerprint = :fingerprint ORDER BY detectedAt DESC LIMIT 1")
     suspend fun getByFingerprint(fingerprint: String): RideHistoryEntity?
 
     @Query("SELECT * FROM ride_history WHERE bookingId = :bookingId AND bookingId != '' LIMIT 1")

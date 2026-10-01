@@ -935,12 +935,23 @@ private val processingTimeoutRunnable = Runnable {
         }
         // Go-To/Fastest priority is evaluated by AreaRulesEngine after No-Go safety.
         val prioritySettings = prefs.loadSettings()
-        val hasActiveGoTo = prioritySettings.isGoToEnabled &&
-            prefs.loadGoToAreas().any { group ->
-                group.isEnabled && group.keywords.any { keyword ->
-                    keyword.isNotBlank() && !keyword.equals(group.name, ignoreCase = true)
+        val hasActiveGoTo =
+            prioritySettings.isGoToEnabled &&
+                prefs.loadGoToAreas().any { group ->
+                    group.isEnabled &&
+                        (
+                            group.areas.any { area ->
+                                area.name.isNotBlank()
+                            } ||
+                            group.keywords.any { keyword ->
+                                keyword.isNotBlank() &&
+                                    !keyword.equals(
+                                        group.name,
+                                        ignoreCase = true
+                                    )
+                            }
+                        )
                 }
-            }
 
         if (hasActiveGoTo) {
             return DirectFilterResult(
@@ -1570,17 +1581,21 @@ private val processingTimeoutRunnable = Runnable {
                 }
 
             if (anyRapidoHome) {
-                // RAPIDO_TRANSIENT_GAP_V4
-            // Accessibility can briefly expose an empty tree while the SAME
-            // order popup is still visible. Keep its identity for 1.2 seconds.
-            if (
-                System.currentTimeMillis() - lastValidRapidoPopupAt > 1_200L
-            ) {
-                activeRapidoPopupOrderId = null
-                lastValidRapidoPopupAt = 0L
-            }
-                lastValidRapidoPopupAt = 0L
+                // RAPIDO_TRANSIENT_GAP_FINAL_V2
+                // Rapido can expose Home for a moment while the same
+                // offer is transitioning. Keep the popup identity during
+                // this short gap so one ride cannot become two History rows.
+                val popupGapMs =
+                    System.currentTimeMillis() -
+                        lastValidRapidoPopupAt
 
+                if (
+                    lastValidRapidoPopupAt <= 0L ||
+                    popupGapMs > 1_200L
+                ) {
+                    activeRapidoPopupOrderId = null
+                    lastValidRapidoPopupAt = 0L
+                }
                 Log.d(
                     TAG,
                     "🏠 Rapido home screen detected and NO valid order popup " +
@@ -4901,16 +4916,38 @@ private val processingTimeoutRunnable = Runnable {
         if (activeRapidoPopupOrderId == orderId) {
             Log.i(
                 TAG,
-                "⏭️ Duplicate event for current Rapido popup skipped " +
+                "Duplicate event for current Rapido popup skipped " +
                     "(bookingId: $bookingId, orderId: $orderId)"
             )
-            resetProcessing()
+
+            // HISTORY_RACE_FINAL_V2
+            // Never resetProcessing() for a duplicate event.
+            // The original event may still be clicking/verifying.
             return
         }
 
+        // HISTORY_RACE_FINAL_V2
+        // Gate BEFORE History insert. Otherwise a blocked/debounced
+        // event can leave an orphan PROCESSING row behind.
+        if (isProcessing) {
+            Log.d(
+                TAG,
+                "Rapido event deferred while previous order is finalizing"
+            )
+            return
+        }
+
+        isProcessing = true
+        handler.removeCallbacks(processingTimeoutRunnable)
+        handler.postDelayed(
+            processingTimeoutRunnable,
+            750L
+        )
+        lastHandledTimestamp =
+            System.currentTimeMillis()
+
         activeRapidoPopupOrderId = orderId
 
-        // PART B/E: Detection-First Insert: IMMEDIATELY create one History record with PROCESSING status in Room
         val recordId = onOrderDetectedFast(candidate)
         Log.i(TAG, "⚡ Rapido order detected & inserted to Room [PROCESSING]: Fare=₹${candidate.fare}, pickup=${candidate.pickupAddress}")
 
@@ -4953,7 +4990,13 @@ private val processingTimeoutRunnable = Runnable {
         }
 
         if (!settings.rapidoEnabled) {
-            logOrderEvent(candidate, OrderStatus.IGNORED, "Rapido disabled in settings")
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.IGNORED,
+                reasonCode = "PLATFORM_DISABLED",
+                reasonText = "Rapido disabled in settings"
+            )
             Log.i(TAG, "📋 Rapido order logged as IGNORED: Rapido platform disabled in settings")
             resetProcessing()
             return
@@ -4977,14 +5020,8 @@ private val processingTimeoutRunnable = Runnable {
             return
         }
 
-        // Debounce repeated events (maximum 100ms)
-        val now = System.currentTimeMillis()
-        if (now - lastHandledTimestamp < 25L || isProcessing) return
-
-        isProcessing = true
-        handler.removeCallbacks(processingTimeoutRunnable)
-        handler.postDelayed(processingTimeoutRunnable, 750L) // RAPIDO_SPEED_V3 watchdog
-        lastHandledTimestamp = System.currentTimeMillis()
+        // HISTORY_RACE_FINAL_V2:
+        // processing gate already ran before History insert.
 
         try {
             val pkg = root.packageName?.toString() ?: "com.rapido.rider"
@@ -5000,7 +5037,13 @@ private val processingTimeoutRunnable = Runnable {
 
             if (candidate.fare == null || candidate.fare <= 0f) {
                 Log.i(TAG, "⏭️ [BUG 1] Rapido order SKIPPED: fare is null or unavailable (${candidate.fare})")
-                logOrderEvent(candidate, OrderStatus.IGNORED, "Fare unavailable - order skipped")
+                onOrderDecisionFast(
+                    recordId = recordId,
+                    candidate = candidate,
+                    status = OrderStatus.IGNORED,
+                    reasonCode = "FARE_UNAVAILABLE",
+                    reasonText = "Fare unavailable - order skipped"
+                )
                 resetProcessing()
                 return
             }
@@ -5013,7 +5056,13 @@ private val processingTimeoutRunnable = Runnable {
             if (isNearbyPickup || isPickupUnknown) {
                 val skipReason = if (isNearbyPickup) "Pickup is Nearby - order skipped" else "Pickup distance unknown - order skipped"
                 Log.i(TAG, "⏭️ [BUG 1] Rapido order SKIPPED: $skipReason (pickupDistKm=${candidate.pickupDistKm})")
-                logOrderEvent(candidate, OrderStatus.IGNORED, skipReason)
+                onOrderDecisionFast(
+                    recordId = recordId,
+                    candidate = candidate,
+                    status = OrderStatus.IGNORED,
+                    reasonCode = "PICKUP_UNAVAILABLE",
+                    reasonText = skipReason
+                )
                 resetProcessing()
                 return
             }
@@ -5182,7 +5231,28 @@ private val processingTimeoutRunnable = Runnable {
             }
 
             // Execute Rapido auto-accept strictly targeting Accept button
-            executeRapidoAutoAccept(candidate, root, prevalidatedAcceptNode = validation.acceptButton?.node)
+            val acceptedHistoryReason =
+                if (
+                    decision is DecisionResult.Accept &&
+                    decision.reason.contains(
+                        "Go-To",
+                        ignoreCase = true
+                    )
+                ) {
+                    decision.reason
+                } else {
+                    buildAcceptedFilterReason(candidate)
+                }
+
+            executeRapidoAutoAccept(
+                candidate = candidate,
+                orderRoot = root,
+                prevalidatedAcceptNode =
+                    validation.acceptButton?.node,
+                historyRecordId = recordId,
+                acceptedHistoryReason =
+                    acceptedHistoryReason
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Error in handleRapidoOrder", e)
             resetProcessing()
@@ -5203,14 +5273,21 @@ private val processingTimeoutRunnable = Runnable {
         candidate: RideCandidate,
         orderRoot: AccessibilityNodeInfo? = null,
         attemptNumber: Int = 1,
-        prevalidatedAcceptNode: AccessibilityNodeInfo? = null
+        prevalidatedAcceptNode: AccessibilityNodeInfo? = null,
+        historyRecordId: String? = null,
+        acceptedHistoryReason: String? = null
     ) {
+        // HISTORY_PINNED_RECORD_V2
+        // Keep every retry/final status attached to the same real ride.
+        val pinnedRecordId =
+            historyRecordId
+                ?: activeOrderRecordIds[candidate.platform]
+                ?: onOrderDetectedFast(candidate)
         if (candidate.fare == null || candidate.fare <= 0f || candidate.pickupDistKm == null || candidate.pickupDistKm <= 0f) {
             Log.w(TAG, "Aborting executeRapidoAutoAccept: fare (${candidate.fare}) or pickup distance (${candidate.pickupDistKm}) invalid/unavailable")
 
-            val recordId =
-                activeOrderRecordIds[candidate.platform]
-                    ?: onOrderDetectedFast(candidate)
+            val recordId = pinnedRecordId
+
 
             onOrderDecisionFast(
                 recordId = recordId,
@@ -5238,9 +5315,8 @@ private val processingTimeoutRunnable = Runnable {
         if (!canExecuteVerifiedRapidoClick()) {
             Log.w(TAG, "Rapido auto-accept paused by anti-spam safety limit")
 
-            val recordId =
-                activeOrderRecordIds[candidate.platform]
-                    ?: onOrderDetectedFast(candidate)
+            val recordId = pinnedRecordId
+
 
             onOrderDecisionFast(
                 recordId = recordId,
@@ -5257,9 +5333,8 @@ private val processingTimeoutRunnable = Runnable {
         if (attemptNumber > 5) {
             Log.w(TAG, "Reached max 5 attempts for Rapido auto-accept without order screen closing")
 
-            val recordId =
-                activeOrderRecordIds[candidate.platform]
-                    ?: onOrderDetectedFast(candidate)
+            val recordId = pinnedRecordId
+
 
             onOrderDecisionFast(
                 recordId = recordId,
@@ -5273,15 +5348,31 @@ private val processingTimeoutRunnable = Runnable {
             return
         }
 
-        // Requirement 2: Only click Accept if Rapido order popup nodes are visible
-        // Requirement 4: Check if the event nodes contain fare + accept button
-        val rapidoRoot = getRapidoOrderRootNode(orderRoot)
-        if (rapidoRoot == null || (!hasRapidoOrderNodes(rapidoRoot) && !isRapidoOrderPopupShowing(rapidoRoot))) {
+        // RAPIDO_FIRST_CLICK_FAST_V2
+        // Attempt #1 already has a validated popup + Accept node.
+        // Reuse them instead of scanning the full tree again.
+        val rapidoRoot =
+            if (
+                attemptNumber == 1 &&
+                orderRoot != null &&
+                prevalidatedAcceptNode != null
+            ) {
+                orderRoot
+            } else {
+                getRapidoOrderRootNode(orderRoot)
+            }
+
+        if (
+            rapidoRoot == null ||
+            (
+                prevalidatedAcceptNode == null &&
+                !isRapidoOrderPopupShowing(rapidoRoot)
+            )
+        ) {
             Log.i(TAG, "Rapido order popup nodes are not visible (fare and Accept button required). No click triggered.")
 
-            val recordId =
-                activeOrderRecordIds[candidate.platform]
-                    ?: onOrderDetectedFast(candidate)
+            val recordId = pinnedRecordId
+
 
             onOrderDecisionFast(
                 recordId = recordId,
@@ -5304,7 +5395,7 @@ private val processingTimeoutRunnable = Runnable {
                 "❌ [Rapido] Accept button with text 'Accept' or 'ACCEPT' NOT found on screen (attempt #$attemptNumber)! " +
                     "Doing nothing - will NOT click randomly."
             )
-            val recordId = activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+            val recordId = pinnedRecordId
             onOrderActionCompletedFast(
                 recordId = recordId,
                 candidate = candidate,
@@ -5326,7 +5417,7 @@ private val processingTimeoutRunnable = Runnable {
         // Do NOT click on the order card, ride details, or any other area.
         if (isOrderCardOrDetailsNode(acceptNode)) {
             Log.w(TAG, "❌ [Rapido] Detected node is an order card or ride details container! Refusing to click.")
-            val recordId = activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+            val recordId = pinnedRecordId
             onOrderActionCompletedFast(
                 recordId = recordId,
                 candidate = candidate,
@@ -5433,7 +5524,7 @@ private val processingTimeoutRunnable = Runnable {
                 simulateTapGesture(cx, cy, isInternalFallback = true)
             } else {
                 Log.w(TAG, "❌ [Rapido] Accept button bounds invalid ($bounds) - doing nothing, no random click")
-                val recordId = activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+                val recordId = pinnedRecordId
                 onOrderActionCompletedFast(
                     recordId = recordId,
                     candidate = candidate,
@@ -5457,7 +5548,9 @@ private val processingTimeoutRunnable = Runnable {
             delay(40L) // RAPIDO_SPEED_V3
             val currentRoot = getRapidoOrderRootNode(orderRoot)
                         val postAcceptConfirmed = isRapidoPostAcceptScreen(currentRoot)
-val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoot) || isRapidoOrderPopupShowing(currentRoot))
+val isOrderStillVisible =
+    currentRoot != null &&
+        isRapidoOrderPopupShowing(currentRoot)
 
                         if (postAcceptConfirmed || !isOrderStillVisible) {
                 // RAPIDO_ACCEPTED_OVERLAY_FAST_V3
@@ -5471,13 +5564,16 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
                     title = "SmartDrivo Active",
                     text = "🎉 Order Accepted! Monitoring next..."
                 )
-                val recordId = activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+                val recordId = pinnedRecordId
                 onOrderActionCompletedFast(
                     recordId = recordId,
                     candidate = candidate,
                     status = OrderStatus.ACCEPTED,
                     reasonCode = "FILTERS_MATCHED",
-                    reasonText = buildAcceptedFilterReason(candidate),
+                    reasonText =
+                        acceptedHistoryReason
+                            ?.takeIf { it.isNotBlank() }
+                            ?: buildAcceptedFilterReason(candidate),
                     actionSucceeded = true,
                     timesClicked = attemptNumber,
                     buttonFound = true,
@@ -5490,10 +5586,17 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
                 Log.i(TAG, "Rapido order popup still visible. Fast retry...")
                 if (attemptNumber < 5) {
                     delay(50L) // RAPIDO_SPEED_V3
-                    executeRapidoAutoAccept(candidate, currentRoot, attemptNumber + 1)
+                    executeRapidoAutoAccept(
+                        candidate = candidate,
+                        orderRoot = currentRoot,
+                        attemptNumber = attemptNumber + 1,
+                        historyRecordId = pinnedRecordId,
+                        acceptedHistoryReason =
+                            acceptedHistoryReason
+                    )
                 } else {
                     Log.w(TAG, "Reached max attempts for Rapido auto-accept verification.")
-                    val recordId = activeOrderRecordIds[candidate.platform] ?: onOrderDetectedFast(candidate)
+                    val recordId = pinnedRecordId
                     onOrderActionCompletedFast(
                         recordId = recordId,
                         candidate = candidate,
@@ -5513,19 +5616,47 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
         }
     }
 
-    private fun getRapidoOrderRootNode(fallbackNode: AccessibilityNodeInfo? = null): AccessibilityNodeInfo? {
+    private fun getRapidoOrderRootNode(
+        fallbackNode: AccessibilityNodeInfo? = null
+    ): AccessibilityNodeInfo? {
         val active = rootInActiveWindow
-        if (active != null && hasRapidoOrderNodes(active)) {
+
+        if (
+            active != null &&
+            RapidoAdapter
+                .validateRapidoOrderPopup(active)
+                .isValid
+        ) {
             return active
         }
-        val topFallback = getTopRootNode(fallbackNode)
-        if (topFallback != null && hasRapidoOrderNodes(topFallback)) {
+
+        val topFallback =
+            getTopRootNode(fallbackNode)
+
+        if (
+            topFallback != null &&
+            topFallback !== active &&
+            RapidoAdapter
+                .validateRapidoOrderPopup(topFallback)
+                .isValid
+        ) {
             return topFallback
         }
-        if (active != null && (isRapidoPackage(active.packageName?.toString().orEmpty()) || isRapidoOrderScreenVisible(active))) {
+
+        if (
+            active != null &&
+            isRapidoPackage(
+                active.packageName
+                    ?.toString()
+                    .orEmpty()
+            )
+        ) {
             return active
         }
-        return topFallback ?: active ?: fallbackNode
+
+        return topFallback
+            ?: active
+            ?: fallbackNode
     }
 
     private fun getRapidoRootNode(fallbackNode: AccessibilityNodeInfo? = null): AccessibilityNodeInfo? {
@@ -6950,7 +7081,23 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
             return candidate.bookingId?.ifBlank { null } ?: "PAUSED"
         }
 
-        val tempId = candidate.bookingId?.ifBlank { null } ?: rideHistoryRepository.generateFingerprint(candidate)
+        val tempId =
+            candidate.bookingId
+                ?.ifBlank { null }
+                ?: run {
+                    val fingerprint =
+                        rideHistoryRepository
+                            .generateFingerprint(candidate)
+
+                    val detectedTime =
+                        if (candidate.detectionTimeMs > 0L) {
+                            candidate.detectionTimeMs
+                        } else {
+                            candidate.timestamp
+                        }
+
+                    "ride_${fingerprint}_${detectedTime}"
+                }
         activeOrderRecordIds[candidate.platform] = tempId
 
         serviceScope.launch(Dispatchers.IO) {
@@ -6960,7 +7107,17 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
                     initialReasonCode = "PROCESSING",
                     initialReasonText = "Evaluating ride filters..."
                 )
-                activeOrderRecordIds[candidate.platform] = entity.id
+                // HISTORY_ACTIVE_ID_RACE_V2
+                // A slower previous coroutine must not steal the active ID
+                // from a newer detection.
+                if (
+                    activeOrderRecordIds[candidate.platform] ==
+                        tempId
+                ) {
+                    activeOrderRecordIds[candidate.platform] =
+                        entity.id
+                }
+
                 prefs.notifyOrderHistoryChanged()
             } catch (e: Exception) {
                 Log.e(TAG, "Error in onOrderDetectedFast", e)

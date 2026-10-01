@@ -1,4 +1,4 @@
-﻿package com.example.engine
+package com.example.engine
 
 import androidx.compose.runtime.Immutable
 import com.example.model.AreaGroup
@@ -302,8 +302,8 @@ object AreaRulesEngine {
         candidate: RideCandidate,
         areas: List<AreaGroup> = emptyList(),
         settings: AppSettings,
-        goToAreas: List<String> = emptyList(),
-        noGoAreas: List<String> = emptyList(),
+        goToAreas: List<String>,
+        noGoAreas: List<String>,
         pickupLocationTextOverride: String? = null,
         isGoToEnabled: Boolean = settings.isGoToEnabled,
         isNoGoEnabled: Boolean = settings.isNoGoEnabled

@@ -342,4 +342,105 @@ class RideHistoryCoreTest {
         val flowItems = repository.allHistory.first()
         assertTrue(flowItems.isEmpty())
     }
+
+    @Test
+    fun test8_sameFingerprintAfterFinalCreatesNewHistoryRow() = runBlocking {
+        val baseTime =
+            System.currentTimeMillis()
+
+        val firstCandidate = RideCandidate(
+            platform = Platform.RAPIDO,
+            vehicleType = VehicleType.AUTO,
+            fare = 75f,
+            pickupDistKm = 0.5f,
+            dropDistKm = 3.0f,
+            pickupAddress = "Same Pickup",
+            dropAddress = "Same Drop",
+            dropArea = "Same Area",
+            bookingId = null,
+            detectionTimeMs = baseTime
+        )
+
+        val first =
+            repository.onOrderDetected(
+                firstCandidate,
+                "PROCESSING",
+                "Evaluating..."
+            )
+
+        repository.onOrderDecision(
+            first.id,
+            OrderStatus.ACCEPTED,
+            "FILTERS_MATCHED",
+            "First accepted"
+        )
+
+        val second =
+            repository.onOrderDetected(
+                firstCandidate.copy(
+                    detectionTimeMs =
+                        baseTime + 1_000L
+                ),
+                "PROCESSING",
+                "Evaluating..."
+            )
+
+        assertTrue(first.id != second.id)
+        assertEquals(
+            2,
+            repository.getAllHistoryDirect().size
+        )
+    }
+
+    @Test
+    fun test9_sameBookingIdAfterFinalKeepsFinalRow() = runBlocking {
+        val candidate = RideCandidate(
+            platform = Platform.RAPIDO,
+            vehicleType = VehicleType.AUTO,
+            fare = 95f,
+            pickupDistKm = 0.4f,
+            dropDistKm = 2.5f,
+            pickupAddress = "Pickup",
+            dropAddress = "Drop",
+            dropArea = "Area",
+            bookingId = "RAP-FINAL-KEEP-001",
+            detectionTimeMs =
+                System.currentTimeMillis()
+        )
+
+        val first =
+            repository.onOrderDetected(
+                candidate,
+                "PROCESSING",
+                "Evaluating..."
+            )
+
+        repository.onOrderDecision(
+            first.id,
+            OrderStatus.ACCEPTED,
+            "FILTERS_MATCHED",
+            "Accepted"
+        )
+
+        val duplicate =
+            repository.onOrderDetected(
+                candidate.copy(
+                    detectionTimeMs =
+                        candidate.detectionTimeMs +
+                            500L
+                ),
+                "PROCESSING",
+                "Duplicate event"
+            )
+
+        assertEquals(first.id, duplicate.id)
+        assertEquals(
+            OrderStatus.ACCEPTED.name,
+            duplicate.status
+        )
+        assertEquals(
+            1,
+            repository.getAllHistoryDirect().size
+        )
+    }
 }

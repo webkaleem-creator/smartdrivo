@@ -104,9 +104,23 @@ class RideHistoryRepository(
             val existing = byBookingId ?: byFingerprint
 
             if (existing != null) {
-                // If existing record was detected within 20 seconds, treat as duplicate event
-                val isRecent = (now - existing.detectedAt) < 8_000L
-                if (isRecent) {
+                // HISTORY_DEDUP_FINAL_V2
+                val isRecent =
+                    (now - existing.detectedAt) <
+                        8_000L
+
+                val sameBookingId =
+                    !candidate.bookingId.isNullOrBlank() &&
+                        existing.bookingId ==
+                            candidate.bookingId
+
+                // Merge repeated accessibility events only while
+                // the original real ride is still PROCESSING.
+                if (
+                    isRecent &&
+                    existing.status ==
+                        OrderStatus.PROCESSING.name
+                ) {
                     val merged = existing.copy(
                         fare = if ((candidate.fare ?: 0f) > 0f) (candidate.fare ?: 0f) else existing.fare,
                         baseFare = if ((candidate.fare ?: 0f) > 0f) {
@@ -123,17 +137,33 @@ class RideHistoryRepository(
                         duplicateEventsIgnored = existing.duplicateEventsIgnored + 1
                     )
                     dao.update(merged)
-                    Log.d("RideHistoryRepo", "Merged duplicate event into active record: ${merged.id} (duplicates: ${merged.duplicateEventsIgnored})")
+
+                    Log.d(
+                        "RideHistoryRepo",
+                        "Merged duplicate event into active record: " +
+                            "${merged.id} " +
+                            "(duplicates: ${merged.duplicateEventsIgnored})"
+                    )
+
                     return@withContext merged
+                }
+
+                // A booking ID uniquely identifies one real ride.
+                // Repeated events after finalization keep that final row.
+                if (isRecent && sameBookingId) {
+                    return@withContext existing
                 }
             }
 
             // Create new record
-            val recordId = if (!candidate.bookingId.isNullOrBlank()) {
-                candidate.bookingId
-            } else {
-                "ride_${fingerprint}"
-            }
+            val recordId =
+                if (!candidate.bookingId.isNullOrBlank()) {
+                    candidate.bookingId
+                } else {
+                    // Fingerprint handles duplicate accessibility events.
+                    // detectedTime makes a later identical real offer unique.
+                    "ride_${fingerprint}_${detectedTime}"
+                }
 
             val (dateStr, timeStr) = formatDateTime(detectedTime)
             val insertLatency = now - detectedTime
@@ -265,7 +295,7 @@ class RideHistoryRepository(
     // PROCESSING_HISTORY_TIMEOUT_V1
     // Never allow a history row to remain PROCESSING forever.
     suspend fun finalizeAllStaleProcessing(
-        timeoutMs: Long = 15_000L
+        timeoutMs: Long = 8_000L
     ): Int = withContext(ioDispatcher) {
         mutex.withLock {
             val now = System.currentTimeMillis()

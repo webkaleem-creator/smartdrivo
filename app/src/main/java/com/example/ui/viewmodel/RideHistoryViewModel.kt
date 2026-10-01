@@ -24,47 +24,34 @@ class RideHistoryViewModel(
     // RECOVER_TODAY_HISTORY_V1
     init {
         viewModelScope.launch {
-            val today =
-                SimpleDateFormat(
-                    "dd/MM/yyyy",
-                    Locale.ENGLISH
-                ).apply {
-                    timeZone =
-                        TimeZone.getTimeZone("Asia/Kolkata")
-                }.format(Date())
-
-            // Recover today's legacy saved history if Room was
-            // accidentally purged by the previous implementation.
-            val legacyToday =
+            // HISTORY_PERSIST_ALL_DAYS_V2
+            // History supports Today / Yesterday / Last 7 Days.
+            // Opening History must never delete previous-day rows.
+            val legacyHistory =
                 PreferencesManager(
                     getApplication<Application>()
-                ).orderHistory.value.filter { item ->
-                    item.dateStr == today
-                }
+                ).orderHistory.value
 
-            if (legacyToday.isNotEmpty()) {
+            if (legacyHistory.isNotEmpty()) {
                 repository.restoreHistoryItems(
-                    legacyToday
+                    legacyHistory
                 )
             }
-
-            // Now delete ONLY records belonging to older dates.
-            repository.purgePreviousDaysSafe()
 
             // Convert any previously stuck PROCESSING records
             // into MISSED/IGNORED so History never stays pending.
             repository.finalizeAllStaleProcessing(
-                timeoutMs = 15_000L
+                timeoutMs = 8_000L
             )
 
             // PROCESSING_RECOVERY_LOOP_V2
             // Normal orders should finish immediately.
             // This is only a fallback for interrupted/abnormal cases.
             while (true) {
-                delay(5_000L)
+                delay(2_000L)
 
                 repository.finalizeAllStaleProcessing(
-                    timeoutMs = 15_000L
+                    timeoutMs = 8_000L
                 )
             }
         }

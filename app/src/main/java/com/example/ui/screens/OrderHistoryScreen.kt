@@ -118,7 +118,7 @@ fun OrderHistoryScreen(
 
     var selectedTab by remember { mutableStateOf(HistoryTab.ALL) }
     var selectedPlatformFilter by remember { mutableStateOf<Platform?>(null) }
-    var selectedDateRange by remember { mutableStateOf("All") } // "Today", "Yesterday", "Last 7 Days", "All"
+    var selectedDateRange by remember { mutableStateOf("Today") } // Today by default; user can switch to Yesterday/All
     val historyListState = rememberLazyListState()
 
     val todayStr = remember {
@@ -133,36 +133,91 @@ fun OrderHistoryScreen(
     }
     val sevenDaysAgo = remember { System.currentTimeMillis() - 7 * 86400000L }
 
-    val acceptedCount = remember(history) { history.count { it.status == OrderStatus.ACCEPTED } }
-    // HISTORY_EXCLUSIVE_COUNTS_V2
-    // One row can belong to only ONE final category.
-    val rejectedCount = remember(history) {
-        history.count {
-            it.status != OrderStatus.PROCESSING &&
-                it.status != OrderStatus.ACCEPTED &&
-                (
-                    it.status == OrderStatus.REJECTED ||
-                        isNoGoOrder(it)
-                )
-        }
-    }
-
-    val ignoredCount = remember(history) {
-        history.count {
-            !isNoGoOrder(it) &&
-                it.status != OrderStatus.ACCEPTED &&
-                it.status != OrderStatus.REJECTED &&
-                it.status != OrderStatus.PROCESSING
-        }
-    }
-    val allCount by remember(history) { derivedStateOf { history.size } }
-
-    val filteredList by remember(history, selectedTab, selectedPlatformFilter, selectedDateRange, todayStr, yesterdayStr, sevenDaysAgo) {
+    // HISTORY_DATE_FILTER_FINAL_V1
+    // First filter by date + platform. Tab counts/stats are based on this
+    // same base list, so the numbers always match what the user selected.
+    val datePlatformHistory by remember(
+        history,
+        selectedPlatformFilter,
+        selectedDateRange,
+        todayStr,
+        yesterdayStr,
+        sevenDaysAgo
+    ) {
         derivedStateOf {
             history.filter { item ->
-                val matchTab = when (selectedTab) {
-                    HistoryTab.ALL -> true
-                    HistoryTab.ACCEPTED -> item.status == OrderStatus.ACCEPTED
+                val matchPlatform =
+                    selectedPlatformFilter == null ||
+                        item.platform == selectedPlatformFilter
+
+                val matchDate =
+                    when (selectedDateRange) {
+                        "Today" ->
+                            item.dateStr == todayStr
+
+                        "Yesterday" ->
+                            item.dateStr == yesterdayStr
+
+                        "Last 7 Days" ->
+                            item.timestamp >= sevenDaysAgo
+
+                        else ->
+                            true
+                    }
+
+                matchPlatform && matchDate
+            }
+        }
+    }
+
+    val acceptedCount =
+        remember(datePlatformHistory) {
+            datePlatformHistory.count {
+                it.status == OrderStatus.ACCEPTED
+            }
+        }
+
+    val rejectedCount =
+        remember(datePlatformHistory) {
+            datePlatformHistory.count {
+                it.status != OrderStatus.PROCESSING &&
+                    it.status != OrderStatus.ACCEPTED &&
+                    (
+                        it.status == OrderStatus.REJECTED ||
+                            isNoGoOrder(it)
+                    )
+            }
+        }
+
+    val ignoredCount =
+        remember(datePlatformHistory) {
+            datePlatformHistory.count {
+                !isNoGoOrder(it) &&
+                    it.status != OrderStatus.ACCEPTED &&
+                    it.status != OrderStatus.REJECTED &&
+                    it.status != OrderStatus.PROCESSING
+            }
+        }
+
+    val allCount by remember(datePlatformHistory) {
+        derivedStateOf {
+            datePlatformHistory.size
+        }
+    }
+
+    val filteredList by remember(
+        datePlatformHistory,
+        selectedTab
+    ) {
+        derivedStateOf {
+            datePlatformHistory.filter { item ->
+                when (selectedTab) {
+                    HistoryTab.ALL ->
+                        true
+
+                    HistoryTab.ACCEPTED ->
+                        item.status == OrderStatus.ACCEPTED
+
                     HistoryTab.REJECTED ->
                         item.status != OrderStatus.PROCESSING &&
                             item.status != OrderStatus.ACCEPTED &&
@@ -177,18 +232,9 @@ fun OrderHistoryScreen(
                             item.status != OrderStatus.REJECTED &&
                             item.status != OrderStatus.PROCESSING
                 }
-                val matchPlatform = selectedPlatformFilter == null || item.platform == selectedPlatformFilter
-                val matchDate = when (selectedDateRange) {
-                    "Today" -> item.dateStr == todayStr
-                    "Yesterday" -> item.dateStr == yesterdayStr
-                    "Last 7 Days" -> item.timestamp >= sevenDaysAgo
-                    else -> true
-                }
-                matchTab && matchPlatform && matchDate
             }
         }
     }
-
     // AUTO-SCROLL TO NEWEST ORDER
     val newestVisibleOrderId = filteredList.firstOrNull()?.id
 
@@ -197,14 +243,18 @@ fun OrderHistoryScreen(
             historyListState.scrollToItem(0)
         }
     }
-    val totalAcceptedCount by remember(totalAccepted, acceptedCount) {
-        derivedStateOf { totalAccepted.coerceAtLeast(acceptedCount) }
+    val totalAcceptedCount by remember(acceptedCount) {
+        derivedStateOf { acceptedCount }
     }
-    val totalEarnings by remember(filteredList) {
+    val totalEarnings by remember(datePlatformHistory) {
         derivedStateOf {
-            filteredList
-                .filter { it.status == OrderStatus.ACCEPTED }
-                .sumOf { it.amount.toDouble() }
+            datePlatformHistory
+                .filter {
+                    it.status == OrderStatus.ACCEPTED
+                }
+                .sumOf {
+                    it.amount.toDouble()
+                }
                 .toInt()
         }
     }
@@ -214,7 +264,7 @@ fun OrderHistoryScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "Order History (${history.size})",
+                        text = "Order History ($allCount)",
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp,
                         color = TextDarkPrimary
@@ -476,7 +526,7 @@ fun OrderHistoryScreen(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = history.size.toString(),
+                            text = allCount.toString(),
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = BlueSecondary
@@ -492,7 +542,7 @@ fun OrderHistoryScreen(
                     .padding(horizontal = 8.dp, vertical = 1.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                val dates = listOf("All")
+                val dates = listOf("All", "Today", "Yesterday")
                 items(dates) { d ->
                     FilterChip(
                         selected = selectedDateRange == d,
@@ -1398,6 +1448,52 @@ private fun formatIgnoredFilters(
         lines.firstOrNull {
             it.startsWith("Separate Both:", ignoreCase = true)
         }.orEmpty()
+
+    // HISTORY_REASON_ACCURACY_V2
+    // Prefer the exact stored failures, including fare failures.
+    val whyLine =
+        lines.firstOrNull {
+            it.startsWith(
+                "Why ignored:",
+                ignoreCase = true
+            )
+        }.orEmpty()
+
+    if (whyLine.isNotBlank()) {
+        val result =
+            mutableListOf<String>()
+
+        val filter1Reason =
+            whyLine
+                .substringAfter(":")
+                .trim()
+
+        result +=
+            "Filter 1: ${
+                filter1Reason.ifBlank {
+                    "Filter not matched"
+                }
+            }"
+
+        if (
+            settings.isSecondaryBothFilterEnabled &&
+            separateLine.isNotBlank()
+        ) {
+            val filter2Reason =
+                separateLine
+                    .substringAfter(":")
+                    .trim()
+
+            result +=
+                "Filter 2: ${
+                    filter2Reason.ifBlank {
+                        "Filter not matched"
+                    }
+                }"
+        }
+
+        return result.joinToString("\n")
+    }
 
     if (limitsLine.isBlank() && separateLine.isBlank()) {
         return rawReason
