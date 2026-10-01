@@ -341,7 +341,7 @@ private val processingTimeoutRunnable = Runnable {
 
     companion object {
         private const val TAG = "SmartDrivoService"
-        const val ACCEPT_CLICK_SPEED_MS = 50L
+        const val ACCEPT_CLICK_SPEED_MS = 20L
 
         val ALLOWED_PACKAGES = setOf(
             "com.rapido.passenger",
@@ -4979,18 +4979,18 @@ private val processingTimeoutRunnable = Runnable {
 
         // Debounce repeated events (maximum 100ms)
         val now = System.currentTimeMillis()
-        if (now - lastHandledTimestamp < 100L || isProcessing) return
+        if (now - lastHandledTimestamp < 25L || isProcessing) return
 
         isProcessing = true
         handler.removeCallbacks(processingTimeoutRunnable)
-        handler.postDelayed(processingTimeoutRunnable, 2000L) // 2000ms max timeout watchdog
+        handler.postDelayed(processingTimeoutRunnable, 750L) // RAPIDO_SPEED_V3 watchdog
         lastHandledTimestamp = System.currentTimeMillis()
 
         try {
             val pkg = root.packageName?.toString() ?: "com.rapido.rider"
             Log.d("SmartDrivo", "Found Rapido order screen! Scanning...")
 
-            handleRapidoDebug(root)
+            // RAPIDO_SPEED_V3: heavy debug dump skipped in live processing.
 
             // BUG 1 - Filters not working for Rapido:
             // - Rapido sends orders with fare=null and pickup="Nearby" - app is accepting these without checking filters
@@ -5005,12 +5005,9 @@ private val processingTimeoutRunnable = Runnable {
                 return
             }
 
-            val textList = mutableListOf<String>()
-            collectAllNodeTexts(root, textList)
-            val fullText = textList.joinToString(" \n ")
-
-            val isNearbyPickup = fullText.contains("nearby", ignoreCase = true) ||
-                textList.any { it.trim().equals("nearby", ignoreCase = true) }
+            // RAPIDO_SPEED_V3
+            // validateRapidoOrderPopup already scanned this popup.
+            val isNearbyPickup = validation.hasNearby
             val isPickupUnknown = candidate.pickupDistKm == null || candidate.pickupDistKm <= 0f
 
             if (isNearbyPickup || isPickupUnknown) {
@@ -5227,25 +5224,8 @@ private val processingTimeoutRunnable = Runnable {
             return
         }
 
-        val directReject = evaluateDirectRideFilters(candidate)
-        if (directReject.status != OrderStatus.ACCEPTED) {
-            Log.w(TAG, "Aborting executeRapidoAutoAccept: ${directReject.reason}")
+        // RAPIDO_SPEED_V3: filter already passed in handleRapidoOrder().
 
-            val recordId =
-                activeOrderRecordIds[candidate.platform]
-                    ?: onOrderDetectedFast(candidate)
-
-            onOrderDecisionFast(
-                recordId = recordId,
-                candidate = candidate,
-                status = OrderStatus.IGNORED,
-                reasonCode = "FILTER_RECHECK_FAILED",
-                reasonText = directReject.reason
-            )
-
-            resetProcessing()
-            return
-        }
 
         if (!preferencesManager.isAutoAcceptEnabled) {
             resetProcessing()
@@ -5474,7 +5454,7 @@ private val processingTimeoutRunnable = Runnable {
 
         // ═══ STEP 4 - Verify: order popup gone in 200ms = ACCEPTED. Cooldown: 200ms max between attempts ═══
         serviceScope.launch(Dispatchers.IO) {
-            delay(120L) // reduced from 2000ms to 200ms max
+            delay(40L) // RAPIDO_SPEED_V3
             val currentRoot = getRapidoOrderRootNode(orderRoot)
                         val postAcceptConfirmed = isRapidoPostAcceptScreen(currentRoot)
 val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoot) || isRapidoOrderPopupShowing(currentRoot))
@@ -5507,9 +5487,9 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
 
                 resetProcessing()
             } else {
-                Log.i(TAG, "Rapido order popup still visible after 200ms. Retrying...")
+                Log.i(TAG, "Rapido order popup still visible. Fast retry...")
                 if (attemptNumber < 5) {
-                    delay(120L) // reduced from 1000ms to 200ms max
+                    delay(50L) // RAPIDO_SPEED_V3
                     executeRapidoAutoAccept(candidate, currentRoot, attemptNumber + 1)
                 } else {
                     Log.w(TAG, "Reached max attempts for Rapido auto-accept verification.")
@@ -7017,8 +6997,8 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
                 )
 
                 var retry = 0
-                while (updated == null && retry < 40) {
-                    delay(25L)
+                while (updated == null && retry < 80) {
+                    delay(5L)
                     retry++
                     updated = rideHistoryRepository.onOrderDecision(
                         id = recordId,
@@ -7106,8 +7086,8 @@ val isOrderStillVisible = currentRoot != null && (hasRapidoOrderNodes(currentRoo
                 // Wait briefly if final action arrives first.
                 var retry = 0
 
-                while (updated == null && retry < 40) {
-                    delay(25L)
+                while (updated == null && retry < 80) {
+                    delay(5L)
                     retry++
 
                     updated =

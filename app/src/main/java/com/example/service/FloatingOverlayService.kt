@@ -39,6 +39,12 @@ class FloatingOverlayService : Service() {
 
     companion object {
         private const val TAG = "FloatingOverlayService"
+
+        // INSTANT_OVERLAY_LIVE_INSTANCE_V1
+        // When this service is already alive, render the next accepted
+        // overlay directly on its main thread instead of starting it again.
+        @Volatile
+        private var liveInstance: FloatingOverlayService? = null
         const val ACTION_SHOW_OVERLAY = "com.example.smartdrivo.ACTION_SHOW_OVERLAY"
         const val EXTRA_AMOUNT = "extra_amount"
         const val EXTRA_PICKUP = "extra_pickup"
@@ -60,6 +66,25 @@ class FloatingOverlayService : Service() {
             time: String,
             platform: String
         ) {
+            // INSTANT_OVERLAY_FAST_PATH_V1
+            // If service is already alive, bypass startService/startForegroundService.
+            val live = liveInstance
+            if (live != null) {
+                live.handler.post {
+                    live.showPopup(
+                        amount = amount,
+                        pickup = pickup,
+                        pickupDist = pickupDist,
+                        drop = drop,
+                        dropDist = dropDist,
+                        dropArea = dropArea,
+                        time = time,
+                        platform = platform
+                    )
+                }
+                return
+            }
+
             val intent = Intent(context, FloatingOverlayService::class.java).apply {
                 action = ACTION_SHOW_OVERLAY
                 putExtra(EXTRA_AMOUNT, amount)
@@ -87,6 +112,10 @@ class FloatingOverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // INSTANT_OVERLAY_LIVE_INSTANCE_V1
+        liveInstance = this
+
         startForegroundNotification()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
     }
@@ -236,7 +265,7 @@ class FloatingOverlayService : Service() {
                         gravity = Gravity.TOP or Gravity.START
             x = ((displayWidth - cardWidth) / 2).coerceAtLeast(0)
             y = dpToPx(78)
-            windowAnimations = android.R.style.Animation_Translucent
+            windowAnimations = 0 // INSTANT_OVERLAY_ANIMATION_V1
         }        // Compact white floating card
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -689,8 +718,25 @@ class FloatingOverlayService : Service() {
         minimizedBubble.setOnTouchListener(dragListener)
         overlayView = container
 
+        // INSTANT_OVERLAY_PREP_V1
+        // Window is attached immediately; only the card performs a tiny
+        // 60ms hardware-accelerated fade/slide for a smooth appearance.
+        container.alpha = 0f
+        container.translationY = -dpToPxf(5f)
+        container.scaleX = 0.99f
+        container.scaleY = 0.99f
+
         try {
             windowManager?.addView(container, params)
+
+            container.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(60L)
+                .withLayer()
+                .start()
             Log.i(TAG, "Floating overlay displayed for $platform ($pickupDist km -> $dropDist km)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to add overlay view to WindowManager: ${e.message}", e)
@@ -726,7 +772,7 @@ class FloatingOverlayService : Service() {
 
         if (overlayView != null) {
             try {
-                windowManager?.removeView(overlayView)
+                windowManager?.removeViewImmediate(overlayView)
             } catch (e: Exception) {
                 Log.w(TAG, "Error removing overlay view: ${e.message}")
             }
@@ -747,6 +793,10 @@ class FloatingOverlayService : Service() {
     }
 
     override fun onDestroy() {
+        if (liveInstance === this) {
+            liveInstance = null
+        }
+
         removeCurrentOverlay()
         super.onDestroy()
     }
