@@ -669,39 +669,10 @@ private val processingTimeoutRunnable = Runnable {
     private var lastVibratedTimestamp = 0L
 
     private fun triggerOrderDetectedVibration(orderId: String?) {
-        val resolvedId = orderId?.trim()?.takeIf { it.isNotEmpty() } ?: return
-
-        val now = System.currentTimeMillis()
-        // If same order already vibrated within last 60 seconds, skip
-        if (resolvedId == lastVibratedOrderId && (now - lastVibratedTimestamp < 60_000L)) {
-            Log.d(TAG, "📳 [Fix 2] Vibration skipped: Order '$resolvedId' already vibrated")
-            return
-        }
-
-        lastVibratedOrderId = resolvedId
-        lastVibratedTimestamp = now
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-                val vibrator = vibratorManager?.defaultVibrator
-                vibrator?.vibrate(VibrationEffect.createOneShot(200L, VibrationEffect.DEFAULT_AMPLITUDE))
-            } else {
-                @Suppress("DEPRECATION")
-                val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator?.vibrate(VibrationEffect.createOneShot(200L, VibrationEffect.DEFAULT_AMPLITUDE))
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator?.vibrate(200L)
-                }
-            }
-            Log.i(TAG, "📳 [Fix 2] Order detected single vibration (200ms) fired for: $resolvedId")
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not trigger vibration: ${e.message}")
-        }
+        // RAPIDO_TURBO_DROP_ONLY_V4
+        // Vibration intentionally disabled.
+        return
     }
-
     private fun getOrderIdentifier(candidate: RideCandidate): String {
         val bookingId = candidate.bookingId?.trim()
         if (!bookingId.isNullOrEmpty()) return bookingId
@@ -1000,7 +971,7 @@ private val processingTimeoutRunnable = Runnable {
             }
         }
 
-        // Separate Both filter.
+        // Filter 2 filter.
         // It is independent from Home settings.
         val secondaryFailureReasons =
             mutableListOf<String>()
@@ -1045,19 +1016,19 @@ private val processingTimeoutRunnable = Runnable {
             direct.secondaryBothEnabled &&
                 secondaryFailureReasons.isEmpty()
 
-        // Home failed but Separate Both passed -> ACCEPT.
+        // Home failed but Filter 2 passed -> ACCEPT.
         if (
             failureReasons.isNotEmpty() &&
             secondaryMatched
         ) {
             Log.i(
                 TAG,
-                "✅ [Filter OR MATCH] Home failed, Separate Both matched"
+                "✅ [Filter OR MATCH] Home failed, Filter 2 matched"
             )
 
             return DirectFilterResult(
                 OrderStatus.ACCEPTED,
-                "Separate Both filter matched"
+                "Filter 2 matched"
             )
         }
         if (failureReasons.isNotEmpty()) {
@@ -1093,7 +1064,7 @@ private val processingTimeoutRunnable = Runnable {
 
                 if (direct.secondaryBothEnabled) {
                     append(
-                        "\nSeparate Both: ${
+                        "\nFilter 2: ${
                             if (secondaryFailureReasons.isEmpty())
                                 "matched"
                             else
@@ -1101,7 +1072,7 @@ private val processingTimeoutRunnable = Runnable {
                         }"
                     )
                 } else {
-                    append("\nSeparate Both: OFF")
+                    append("\nFilter 2: OFF")
                 }
             }
 
@@ -4875,22 +4846,65 @@ private val processingTimeoutRunnable = Runnable {
             }
             return
         }
-        // Fast direct candidate extraction (under 50ms)
-        val rawCandidate = extractRapidoCandidate(
-            root = root,
-            defaultVehicle = prefs.userProfile.value.vehicleType
-        )
+        // RAPIDO_TURBO_DROP_ONLY_V4
+        // Validation already parsed this popup once. Do not walk the tree again.
+        val turboStartNs =
+            System.nanoTime()
 
-        val finalFare = validation.fare ?: rawCandidate.fare
+        val profileSnapshot =
+            prefs.userProfile.value
+
+        val orderData =
+            validation.orderData
+                ?: RapidoAdapter.extractOrderData(
+                    root = root,
+                    skipHomeCheck = true,
+                    skipPickupAddress = true
+                )
+
+        val finalFare =
+            validation.fare
+                ?: orderData.totalFare
+                    .takeIf { it > 0f }
+
         if (finalFare == null || finalFare <= 0f) {
-            Log.d(TAG, "❌ Rapido candidate has no valid fare outside earnings. Do NOT log to history, do NOT process.")
+            Log.d(
+                TAG,
+                "Rapido candidate has no valid fare. Skipping."
+            )
             return
         }
 
-        val candidate = rawCandidate.copy(
-            fare = finalFare,
-            pickupDistKm = rawCandidate.pickupDistKm ?: validation.pickupDistKm
-        )
+        val candidate =
+            RideCandidate(
+                fare = finalFare,
+                pickupDistKm =
+                    orderData.pickupKm
+                        ?: validation.pickupDistKm,
+                dropDistKm =
+                    orderData.dropKm,
+                pickupAddress =
+                    "Address unavailable",
+                dropAddress =
+                    orderData.dropAddress,
+                dropArea =
+                    orderData.dropAddress,
+                platform = Platform.RAPIDO,
+                vehicleType =
+                    profileSnapshot.vehicleType,
+                bookingId =
+                    orderData.bookingId,
+                isBundledOrder =
+                    orderData.isBundledOrder,
+                detectionTimeMs =
+                    System.currentTimeMillis(),
+                baseFare =
+                    orderData.baseFare
+                        .takeIf { it > 0f }
+                        ?: finalFare,
+                tipAmount =
+                    orderData.tipAmount
+            )
         // RAPIDO_COMPLETE_HISTORY_V4
         // Wait for the complete card before inserting History.
         // This prevents Trip:N/A + a second full row for the same offer.
@@ -4955,7 +4969,7 @@ private val processingTimeoutRunnable = Runnable {
         // BOTH OFF -> manual mode.
         // Auto-Reject ON + Auto-Accept OFF -> bad offers may be skipped,
         // matching offers remain visible for manual acceptance.
-        val settings = prefs.loadSettings()
+        val settings = prefs.appSettings.value
         val autoAcceptEnabled =
             preferencesManager.isAutoAcceptEnabled
         val autoRejectEnabled =
@@ -4968,7 +4982,7 @@ private val processingTimeoutRunnable = Runnable {
                 status = OrderStatus.IGNORED,
                 reasonCode = "MANUAL_MODE",
                 reasonText =
-                    "Auto-Accept OFF • Auto-Reject OFF • Manual mode"
+                    "Auto-Accept OFF  |  Auto-Reject OFF  |  Manual mode"
             )
             resetProcessing()
             return
@@ -5067,127 +5081,53 @@ private val processingTimeoutRunnable = Runnable {
                 return
             }
 
-            // Direct SharedPreferences Filter Evaluation before evaluating ANY ride
-            val directResult =
-                evaluateDirectRideFilters(candidate)
+            // RAPIDO_TURBO_DROP_ONLY_V4
+            // One decision pass using RAM snapshots only.
+            val goToAreas =
+                prefs.goToAreas.value
 
-            when (directResult.status) {
-                OrderStatus.REJECTED,
-                OrderStatus.IGNORED -> {
-                    Log.i(
-                        TAG,
-                        "Rapido ride failed direct filter: " +
-                            "${directResult.reason} " +
-                            "(autoReject=$autoRejectEnabled)"
-                    )
+            val noGoAreas =
+                prefs.noGoAreas.value
 
-                    handleRapidoFilterFailure(
-                        root = root,
-                        candidate = candidate,
-                        recordId = recordId,
-                        reason = directResult.reason,
-                        defaultStatus = directResult.status
-                    )
-                    return
-                }
+            val decision =
+                AreaRulesEngine.evaluateRide(
+                    candidate = candidate,
+                    areas =
+                        goToAreas + noGoAreas,
+                    settings = settings,
+                    goToAreas = goToAreas,
+                    noGoAreas = noGoAreas,
+                    pickupLocationTextOverride = "",
+                    isGoToEnabled =
+                        settings.isGoToEnabled,
+                    isNoGoEnabled =
+                        settings.isNoGoEnabled
+                )
 
-                OrderStatus.ACCEPTED -> {
-                    // Direct filters passed.
-                }
-
-                else -> {
-                    // no-op
-                }
-            }
-
-            // Fix 2: Vibrate only once per order using lastVibratedOrderId
-            triggerOrderDetectedVibration(getOrderIdentifier(candidate))
-
-            val profileVehicle = prefs.userProfile.value.vehicleType
-            val isVehicleAllowed = candidate.vehicleType == profileVehicle
-
-            if (!isVehicleAllowed) {
+            if (decision !is DecisionResult.Accept) {
                 val reason =
-                    "Vehicle ${candidate.vehicleType} does not match profile vehicle $profileVehicle"
+                    when (decision) {
+                        is DecisionResult.Reject ->
+                            decision.reason
 
-                Log.d(TAG, reason)
+                        is DecisionResult.Ignore ->
+                            decision.reason
+
+                        else ->
+                            "Filter not matched"
+                    }
+
+                val isNoGo =
+                    reason.contains(
+                        "No-Go",
+                        ignoreCase = true
+                    )
 
                 handleRapidoFilterFailure(
                     root = root,
                     candidate = candidate,
                     recordId = recordId,
                     reason = reason,
-                    defaultStatus = OrderStatus.REJECTED
-                )
-                return
-            }
-
-            // Check pickup location text against Go-To and No-Go area lists
-            val pickupText = extractPickupLocationText(candidate, root)
-            val goToAreas = prefs.loadGoToAreas()
-            val noGoAreas = prefs.loadNoGoAreas()
-
-            val pickupAreaDecision =
-                checkPickupAreaRules(
-                    pickupText,
-                    goToAreas,
-                    noGoAreas
-                )
-
-            if (pickupAreaDecision is DecisionResult.Reject) {
-                Log.i(
-                    TAG,
-                    "Rapido ride failed pickup area rule: " +
-                        pickupAreaDecision.reason
-                )
-
-                handleRapidoFilterFailure(
-                    root = root,
-                    candidate = candidate,
-                    recordId = recordId,
-                    reason = pickupAreaDecision.reason,
-                    defaultStatus = OrderStatus.REJECTED
-                )
-                return
-            }
-
-            val directSettings = readDirectSettingsFresh()
-            val effectiveSettings = settings.copy(
-                minFare = directSettings.minFare,
-                maxFare = directSettings.maxFare,
-                maxPickupDistanceKm = directSettings.maxPickupKm,
-                maxDropDistanceKm = directSettings.maxDropKm,
-                maxDropKm = directSettings.maxDropKm
-            )
-
-            val decision = AreaRulesEngine.evaluateRide(
-                candidate = candidate,
-                areas = goToAreas + noGoAreas,
-                settings = effectiveSettings,
-                goToAreas = goToAreas,
-                noGoAreas = noGoAreas,
-                pickupLocationTextOverride = pickupText
-            )
-
-            if (decision is DecisionResult.Reject) {
-                val isNoGo =
-                    decision.reason.contains(
-                        "No-Go",
-                        ignoreCase = true
-                    )
-
-                Log.i(
-                    TAG,
-                    "Rapido ride failed Area Rules filter: " +
-                        "${decision.reason} " +
-                        "(autoReject=$autoRejectEnabled)"
-                )
-
-                handleRapidoFilterFailure(
-                    root = root,
-                    candidate = candidate,
-                    recordId = recordId,
-                    reason = decision.reason,
                     defaultStatus =
                         if (isNoGo)
                             OrderStatus.REJECTED
@@ -5197,24 +5137,7 @@ private val processingTimeoutRunnable = Runnable {
                 return
             }
 
-            if (decision is DecisionResult.Ignore) {
-                Log.i(
-                    TAG,
-                    "Rapido ride ignored by Area Rules: " +
-                        "${decision.reason} " +
-                        "(autoReject=$autoRejectEnabled)"
-                )
-
-                handleRapidoFilterFailure(
-                    root = root,
-                    candidate = candidate,
-                    recordId = recordId,
-                    reason = decision.reason,
-                    defaultStatus = OrderStatus.IGNORED
-                )
-                return
-            }
-
+            // No vibration. Go directly to Accept.
             // Matching offer must never be removed by Auto-Reject.
             // If Auto-Accept is OFF, leave it on screen for manual acceptance.
             if (!autoAcceptEnabled) {
@@ -5224,7 +5147,7 @@ private val processingTimeoutRunnable = Runnable {
                     status = OrderStatus.IGNORED,
                     reasonCode = "MANUAL_MATCH",
                     reasonText =
-                        "Conditions matched • Auto-Accept OFF • Manual accept"
+                        "Conditions matched  |  Auto-Accept OFF  |  Manual accept"
                 )
                 resetProcessing()
                 return
@@ -5241,9 +5164,22 @@ private val processingTimeoutRunnable = Runnable {
                 ) {
                     decision.reason
                 } else {
-                    buildAcceptedFilterReason(candidate)
+                    buildAcceptedFilterReason(candidate, settings)
                 }
 
+            val turboDecisionMs =
+                (System.nanoTime() - turboStartNs) /
+                    1_000_000.0
+
+            Log.i(
+                TAG,
+                "RAPIDO TURBO DROP-ONLY V4: read + filters ready in " +
+                    String.format(
+                        Locale.ENGLISH,
+                        "%.2f ms",
+                        turboDecisionMs
+                    )
+            )
             executeRapidoAutoAccept(
                 candidate = candidate,
                 orderRoot = root,
@@ -6348,25 +6284,30 @@ val isOrderStillVisible =
         reason: String,
         defaultStatus: OrderStatus
     ) {
-        val freshSettings = prefs.loadSettings()
+        // INSTANT_HISTORY_V7
+        val settings = prefs.appSettings.value
 
-        val autoAcceptEnabled =
-            preferencesManager.isAutoAcceptEnabled
-
-        val autoRejectEnabled =
-            freshSettings.isAutoRejectBadFaresEnabled
-
-        if (!autoAcceptEnabled) {
+        if (!preferencesManager.isAutoAcceptEnabled) {
             resetProcessing()
             return
         }
 
-        if (autoRejectEnabled) {
+        if (settings.isAutoRejectBadFaresEnabled) {
+            // Final History status FIRST. Reject-button work happens after.
+            onOrderDecisionFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.REJECTED,
+                reasonCode = "AUTO_REJECT_NO_MATCH",
+                reasonText = "Auto Reject: $reason"
+            )
+
             executeRapidoAutoReject(
                 candidate = candidate,
                 orderRoot = root,
                 recordId = recordId,
-                reason = reason
+                reason = reason,
+                historyPreFinalized = true
             )
             return
         }
@@ -6374,7 +6315,7 @@ val isOrderStillVisible =
         onOrderDecisionFast(
             recordId = recordId,
             candidate = candidate,
-            status = OrderStatus.IGNORED,
+            status = defaultStatus,
             reasonCode = "CRITERIA_NOT_MET",
             reasonText = reason
         )
@@ -6556,11 +6497,14 @@ val isOrderStillVisible =
         candidate: RideCandidate,
         orderRoot: AccessibilityNodeInfo,
         recordId: String,
-        reason: String
+        reason: String,
+        historyPreFinalized: Boolean = false
     ) {
-        val freshSettings = prefs.loadSettings()
+        // INSTANT_HISTORY_V7
+        // Reuse RAM settings and the already validated popup root.
+        val settings = prefs.appSettings.value
 
-        if (!freshSettings.isAutoRejectBadFaresEnabled) {
+        if (!settings.isAutoRejectBadFaresEnabled) {
             onOrderDecisionFast(
                 recordId = recordId,
                 candidate = candidate,
@@ -6572,39 +6516,35 @@ val isOrderStillVisible =
             return
         }
 
-        val rapidoRoot =
-            getRapidoOrderRootNode(orderRoot)
+        val rapidoRoot = orderRoot
 
-        if (
-            rapidoRoot == null ||
-            (
-                !hasRapidoOrderNodes(rapidoRoot) &&
-                    !isRapidoOrderPopupShowing(rapidoRoot)
-            )
-        ) {
+        val rootPkg =
+            rapidoRoot.packageName
+                ?.toString()
+                .orEmpty()
+
+        if (!isRapidoPackage(rootPkg)) {
             onOrderDecisionFast(
                 recordId = recordId,
                 candidate = candidate,
                 status = OrderStatus.IGNORED,
-                reasonCode = "AUTO_REJECT_POPUP_GONE",
-                reasonText =
-                    "$reason • Order popup already gone"
+                reasonCode = "AUTO_REJECT_UNVERIFIED_ROOT",
+                reasonText = "$reason | Rapido root verification failed"
             )
             resetProcessing()
             return
         }
 
-        val rejectNode =
-            findStrictRapidoRejectNode(rapidoRoot)
+        val rejectNode = findStrictRapidoRejectNode(rapidoRoot)
 
         if (rejectNode == null) {
+            // Correct the provisional REJECTED state if no safe control exists.
             onOrderDecisionFast(
                 recordId = recordId,
                 candidate = candidate,
                 status = OrderStatus.IGNORED,
                 reasonCode = "AUTO_REJECT_BUTTON_NOT_FOUND",
-                reasonText =
-                    "$reason • Auto-Reject ON, safe skip control not found"
+                reasonText = "$reason | Auto-Reject ON, safe skip control not found"
             )
             resetProcessing()
             return
@@ -6626,25 +6566,11 @@ val isOrderStillVisible =
                 candidate = candidate,
                 status = OrderStatus.IGNORED,
                 reasonCode = "AUTO_REJECT_UNVERIFIED_TARGET",
-                reasonText =
-                    "$reason • Skip target did not belong to Rapido"
+                reasonText = "$reason | Skip target did not belong to Rapido"
             )
             resetProcessing()
             return
         }
-        // AUTO-REJECT RAPID-ORDER FIX:
-        // The generic 3-second click cooldown is intentionally NOT used here.
-        // It was blocking a second genuine Rapido offer arriving within 3 seconds
-        // of the previous verified action. This path is already protected by:
-        // 1) genuine Rapido popup validation,
-        // 2) verified Rapido-owned skip/reject control,
-        // 3) activeRapidoPopupOrderId duplicate suppression for the SAME popup.
-        //
-        // Auto-Accept and all other click paths keep their original cooldown/rate limits.
-        Log.d(
-            TAG,
-            "⛔ [Rapido Auto-Reject] verified unique popup: bypassing generic 3s cross-order cooldown"
-        )
 
         val clicked =
             rejectNode.isClickable &&
@@ -6653,18 +6579,19 @@ val isOrderStillVisible =
                 )
 
         if (clicked) {
-            onOrderDecisionFast(
-                recordId = recordId,
-                candidate = candidate,
-                status = OrderStatus.REJECTED,
-                reasonCode = "AUTO_REJECT_NO_MATCH",
-                reasonText =
-                    "Auto Reject: $reason"
-            )
+            if (!historyPreFinalized) {
+                onOrderDecisionFast(
+                    recordId = recordId,
+                    candidate = candidate,
+                    status = OrderStatus.REJECTED,
+                    reasonCode = "AUTO_REJECT_NO_MATCH",
+                    reasonText = "Auto Reject: $reason"
+                )
+            }
 
             Log.i(
                 TAG,
-                "⛔ [Rapido Auto-Reject] ACTION_CLICK succeeded: $reason"
+                "Rapido Auto-Reject click succeeded"
             )
         } else {
             onOrderDecisionFast(
@@ -6672,13 +6599,12 @@ val isOrderStillVisible =
                 candidate = candidate,
                 status = OrderStatus.IGNORED,
                 reasonCode = "AUTO_REJECT_CLICK_FAILED",
-                reasonText =
-                    "$reason • Skip control found but ACTION_CLICK failed"
+                reasonText = "$reason | Skip control found but ACTION_CLICK failed"
             )
 
             Log.w(
                 TAG,
-                "⛔ [Rapido Auto-Reject] skip target found, click failed"
+                "Rapido Auto-Reject click failed"
             )
         }
 
@@ -6874,8 +6800,13 @@ val isOrderStillVisible =
         )
     }
 
-    private fun buildAcceptedFilterReason(candidate: RideCandidate): String {
-        val settings = prefs.getFreshSettings()
+    private fun buildAcceptedFilterReason(
+        candidate: RideCandidate,
+        settingsOverride: com.example.model.AppSettings? = null
+    ): String {
+        val settings =
+            settingsOverride
+                ?: prefs.getFreshSettings()
 
         val fare = candidate.fare ?: candidate.baseFare ?: 0f
         val pickup = candidate.pickupDistKm ?: 0f
@@ -6989,7 +6920,7 @@ val isOrderStillVisible =
 
         if (!homeMatched && secondaryMatched) {
             return buildString {
-                append("Mode: Separate Both")
+                append("Mode: Filter 2")
 
                 append(
                     "\nFare ₹${fare.toInt()} ≥ ₹${settings.secondaryBothMinFare.toInt()}"
@@ -7009,7 +6940,7 @@ val isOrderStillVisible =
                 buildString {
                     append("Mode: Fare Only")
                     append("\nFare ₹${fare.toInt()} matched")
-                    append(" • Saved range ${fareRange()}")
+                    append("  |  Saved range ${fareRange()}")
                 }
             }
 

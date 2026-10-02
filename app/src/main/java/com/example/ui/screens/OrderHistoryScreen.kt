@@ -110,8 +110,22 @@ fun OrderHistoryScreen(
     val historyEntities by viewModel.history.collectAsStateWithLifecycle()
     val userProfile by prefs.userProfile.collectAsStateWithLifecycle()
     val appSettings by prefs.appSettings.collectAsStateWithLifecycle()
+    // INSTANT_HISTORY_V7
+    // PROCESSING is an internal transient state only.
+    // Do not show a yellow card while the final decision is being written.
     val history = remember(historyEntities) {
-        historyEntities.sortedByDescending { it.detectedAt }.map { it.toOrderHistoryItem() }
+        historyEntities
+            .asSequence()
+            .filter {
+                it.status != OrderStatus.PROCESSING.name
+            }
+            .sortedByDescending {
+                it.detectedAt
+            }
+            .map {
+                it.toOrderHistoryItem()
+            }
+            .toList()
     }
     val totalAccepted by viewModel.acceptedCount.collectAsStateWithLifecycle()
 
@@ -913,70 +927,41 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
 
             HorizontalDivider(color = CardBorderDefault)
 
-            // Row 5: Full pickup and drop addresses (labels 10sp, address 11sp)
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                // Full Pickup address
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .padding(top = 2.dp)
-                            .size(8.dp)
-                            .background(StatusActiveGreen, CircleShape)
+            // RAPIDO_TURBO_DROP_ONLY_V4
+            // Pickup ADDRESS intentionally removed.
+            // Pickup KM chip remains above.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .size(8.dp)
+                        .background(StatusInactiveRed, CircleShape)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "DROP ADDRESS",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextDarkSecondary
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "PICKUP ADDRESS",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextDarkSecondary
-                        )
-                        val cleanPickup = item.pickupAddress.takeIf {
-                            it.isNotBlank() && !it.equals("Detected Pickup Location", ignoreCase = true)
-                        } ?: "Pickup Location"
-                        Text(
-                            text = cleanPickup,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Normal,
-                            color = TextDarkPrimary,
-                            lineHeight = 14.sp
-                        )
-                    }
-                }
-
-                // Full Drop address
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .padding(top = 2.dp)
-                            .size(8.dp)
-                            .background(StatusInactiveRed, CircleShape)
+                    val cleanDrop = item.dropAddress.takeIf {
+                        it.isNotBlank() &&
+                            !it.equals(
+                                "Detected Drop Location",
+                                ignoreCase = true
+                            )
+                    } ?: "Drop Location"
+                    Text(
+                        text = cleanDrop,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Normal,
+                        color = TextDarkPrimary,
+                        lineHeight = 14.sp
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "DROP ADDRESS",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextDarkSecondary
-                        )
-                        val cleanDrop = item.dropAddress.takeIf {
-                            it.isNotBlank() && !it.equals("Detected Drop Location", ignoreCase = true)
-                        } ?: "Drop Location"
-                        Text(
-                            text = cleanDrop,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Normal,
-                            color = TextDarkPrimary,
-                            lineHeight = 14.sp
-                        )
-                    }
                 }
             }
 
@@ -1008,6 +993,7 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                                 Text(
                                     text = reasonText,
                                     fontSize = 11.sp,
+                                    lineHeight = 15.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = TextDarkPrimary
                                 )
@@ -1153,6 +1139,7 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                                 Text(
                                     text = formatIgnoredFilters(item, ignoredReason, appSettings),
                                     fontSize = 11.sp,
+                                    lineHeight = 15.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = TextDarkPrimary
                                 )
@@ -1204,6 +1191,7 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                                 Text(
                                     text = formatRejectedReason(item, rejectedReason, appSettings),
                                     fontSize = 11.sp,
+                                    lineHeight = 15.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = TextDarkPrimary
                                 )
@@ -1236,6 +1224,7 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                                 Text(
                                     text = item.decisionReasonText.ifBlank { item.reason.ifBlank { "Evaluating ride filters..." } },
                                     fontSize = 11.sp,
+                                    lineHeight = 15.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = TextDarkPrimary
                                 )
@@ -1268,6 +1257,7 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                                 Text(
                                     text = item.reason.ifBlank { "Accept action could not complete" },
                                     fontSize = 11.sp,
+                                    lineHeight = 15.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = TextDarkPrimary
                                 )
@@ -1300,6 +1290,7 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                                 Text(
                                     text = item.reason.ifBlank { "Skipped duplicate or invalid order" },
                                     fontSize = 11.sp,
+                                    lineHeight = 15.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = TextDarkPrimary
                                 )
@@ -1349,10 +1340,31 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
  * Format which filter matched for ACCEPTED orders:
  * e.g. "Fare ₹113 matched, Pickup 0.6km matched"
  */
-private fun formatAcceptedFilterReason(item: OrderHistoryItem): String {
-    val storedReason = item.decisionReasonText
-        .ifBlank { item.reason }
+private fun normalizeHistoryReasonText(raw: String): String {
+    return raw
+        // Old rows saved the UTF-8 bullet as mojibake.
+        .replace("Ã¢â‚¬Â¢", " | ")
+        .replace("Ã¢â€°Â¥", ">=")
+        .replace("Ã¢â€°Â¤", "<=")
+        .replace(
+            Regex(
+                """(?i)Separate\s+Both"""
+            ),
+            "Filter 2"
+        )
+        .replace(
+            Regex(
+                """\s*\|\s*"""
+            ),
+            " | "
+        )
         .trim()
+}
+private fun formatAcceptedFilterReason(item: OrderHistoryItem): String {
+    val storedReason = normalizeHistoryReasonText(
+        item.decisionReasonText
+            .ifBlank { item.reason }
+    )
 
     // New records store the exact mode-aware reason in the service.
     // Always display that exact reason instead of rebuilding every field.
@@ -1389,13 +1401,108 @@ private fun formatAcceptedFilterReason(item: OrderHistoryItem): String {
  * Extract matched No-Go area name for REJECTED orders:
  * e.g. "No-Go area matched: Koramangala"
  */
+private fun cleanHistoryReasonV7(raw: String): String {
+    return raw
+        .replace("\u00E2\u20AC\u00A2", " | ")
+        .replace("\u2022", " | ")
+        .replace("\u00E2\u2030\u00A5", ">=")
+        .replace("\u00E2\u2030\u00A4", "<=")
+        .replace(
+            Regex("""(?i)Separate\s+Both"""),
+            "Filter 2"
+        )
+        .replace(
+            Regex("""\s*\|\s*"""),
+            " | "
+        )
+        .trim()
+}
+
+private fun formatGenericFilterFailureV7(
+    raw: String
+): String? {
+    val clean =
+        cleanHistoryReasonV7(raw)
+
+    if (
+        !clean.contains(
+            "No condition matched",
+            ignoreCase = true
+        )
+    ) {
+        return null
+    }
+
+    val filter1 =
+        when {
+            clean.contains(
+                "Fare Only failed",
+                ignoreCase = true
+            ) ->
+                "Fare Only failed"
+
+            clean.contains(
+                "Distance Only failed",
+                ignoreCase = true
+            ) ->
+                "Distance Only failed"
+
+            clean.contains(
+                "Both failed",
+                ignoreCase = true
+            ) ->
+                "Both failed"
+
+            else ->
+                "Not matched"
+        }
+
+    val filter2 =
+        when {
+            clean.contains(
+                "Filter 2 OFF",
+                ignoreCase = true
+            ) ->
+                "OFF"
+
+            clean.contains(
+                "Filter 2 failed",
+                ignoreCase = true
+            ) ->
+                "Failed"
+
+            clean.contains(
+                "Filter 2 matched",
+                ignoreCase = true
+            ) ->
+                "Matched"
+
+            else ->
+                null
+        }
+
+    return buildString {
+        append("Filter 1: $filter1")
+
+        if (filter2 != null) {
+            append("\nFilter 2: $filter2")
+        }
+    }
+}
 private fun formatRejectedReason(
     item: OrderHistoryItem,
     rawReason: String,
     settings: AppSettings
 ): String {
-    val raw = rawReason.trim()
+    val raw =
+        cleanHistoryReasonV7(
+            rawReason
+        )
 
+    formatGenericFilterFailureV7(raw)
+        ?.let {
+            return it
+        }
     // Keep No-Go history in its clean 2-line format.
     if (
         isNoGoOrder(item) ||
@@ -1415,7 +1522,8 @@ private fun formatRejectedReason(
     // Auto-Rejected filter orders use the same short Filter 1 / Filter 2 reason.
     if (
         raw.contains("Limits:", ignoreCase = true) ||
-        raw.contains("Separate Both:", ignoreCase = true) ||
+        raw.contains("Filter 2:", ignoreCase = true) ||
+        raw.contains("Filter 2:", ignoreCase = true) ||
         raw.contains("Distance Only", ignoreCase = true) ||
         raw.contains("Why ignored:", ignoreCase = true)
     ) {
@@ -1437,16 +1545,38 @@ private fun formatIgnoredFilters(
     rawReason: String,
     settings: AppSettings
 ): String {
-    val lines = rawReason.lines().map { it.trim() }
+    val normalizedReason =
+        cleanHistoryReasonV7(
+            rawReason
+        )
 
+    formatGenericFilterFailureV7(
+        normalizedReason
+    )?.let {
+        return it
+    }
+
+    val lines =
+        normalizedReason
+            .lines()
+            .map {
+                it.trim()
+            }
     val limitsLine =
         lines.firstOrNull {
             it.startsWith("Limits:", ignoreCase = true)
         }.orEmpty()
 
-    val separateLine =
+    val filter2Line =
         lines.firstOrNull {
-            it.startsWith("Separate Both:", ignoreCase = true)
+            it.startsWith(
+                "Filter 2:",
+                ignoreCase = true
+            ) ||
+                it.startsWith(
+                    "Filter 2:",
+                    ignoreCase = true
+                )
         }.orEmpty()
 
     // HISTORY_REASON_ACCURACY_V2
@@ -1477,10 +1607,10 @@ private fun formatIgnoredFilters(
 
         if (
             settings.isSecondaryBothFilterEnabled &&
-            separateLine.isNotBlank()
+            filter2Line.isNotBlank()
         ) {
             val filter2Reason =
-                separateLine
+                filter2Line
                     .substringAfter(":")
                     .trim()
 
@@ -1495,8 +1625,8 @@ private fun formatIgnoredFilters(
         return result.joinToString("\n")
     }
 
-    if (limitsLine.isBlank() && separateLine.isBlank()) {
-        return rawReason
+    if (limitsLine.isBlank() && filter2Line.isBlank()) {
+        return normalizedReason
             .lines()
             .map { it.trim() }
             .filterNot {
@@ -1554,30 +1684,30 @@ private fun formatIgnoredFilters(
         "Filter 1: $filter1Text"
     )
 
-    if (settings.isSecondaryBothFilterEnabled && separateLine.isNotBlank()) {
+    if (settings.isSecondaryBothFilterEnabled && filter2Line.isNotBlank()) {
         val filter2PickupMax =
             getNumber(
                 """Pickup.*?max\s*([0-9.]+)""",
-                separateLine
+                filter2Line
             ) ?: settings.secondaryBothMaxPickupDistanceKm
 
         val filter2TripMax =
             getNumber(
                 """Trip.*?max\s*([0-9.]+)""",
-                separateLine
+                filter2Line
             ) ?: settings.secondaryBothMaxDropDistanceKm
 
         val filter2PickupFailed =
             Regex(
                 """Pickup.*?>\s*max""",
                 RegexOption.IGNORE_CASE
-            ).containsMatchIn(separateLine)
+            ).containsMatchIn(filter2Line)
 
         val filter2TripFailed =
             Regex(
                 """Trip.*?>\s*max""",
                 RegexOption.IGNORE_CASE
-            ).containsMatchIn(separateLine)
+            ).containsMatchIn(filter2Line)
 
         val filter2Text = when {
             filter2PickupFailed && filter2TripFailed ->

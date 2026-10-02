@@ -20,7 +20,11 @@ data class RapidoOrderData(
     val dropKm: Float? = null,
     val pickupAddress: String? = null,
     val dropAddress: String? = null,
-    val bookingId: String? = null
+    val bookingId: String? = null,
+
+    // RAPIDO_TURBO_DROP_ONLY_V4
+    val hasNearby: Boolean = false,
+    val isBundledOrder: Boolean = false
 )
 
 data class RapidoPopupValidation(
@@ -29,7 +33,11 @@ data class RapidoPopupValidation(
     val pickupDistKm: Float? = null,
     val hasNearby: Boolean = false,
     val acceptButton: DetectedButton? = null,
-    val failureReason: String? = null
+    val failureReason: String? = null,
+
+    // RAPIDO_TURBO_DROP_ONLY_V4
+    // Reuse this exact parsed order in SmartDrivoAccessibilityService.
+    val orderData: RapidoOrderData? = null
 )
 
 object RapidoAdapter {
@@ -332,9 +340,9 @@ object RapidoAdapter {
      * - Extract drop address (text under second km node)
      * - Do NOT use "Auto", "Services", "Nearby" as addresses
      */
-    fun extractOrderData(root: AccessibilityNodeInfo): RapidoOrderData {
+    fun extractOrderData(root: AccessibilityNodeInfo, skipHomeCheck: Boolean = false, skipPickupAddress: Boolean = false): RapidoOrderData {
         val rootPkg = root.packageName?.toString().orEmpty()
-        if (isSmartDrivoPackage(rootPkg) || isRapidoHomeScreen(root)) {
+        if (isSmartDrivoPackage(rootPkg) || (!skipHomeCheck && isRapidoHomeScreen(root))) {
             return RapidoOrderData(
                 pickupAddress = "Address unavailable",
                 dropAddress = "Address unavailable"
@@ -351,7 +359,7 @@ object RapidoAdapter {
         }
 
         val textList = validEntries.map { it.text }
-        val data = extractOrderDataFromTexts(textList)
+        val data = extractOrderDataFromTexts(textList, skipPickupAddress = skipPickupAddress)
 
         // View ID based address extraction from node tree (only from valid Rapido nodes)
         var pickupFromId: String? = null
@@ -405,7 +413,7 @@ object RapidoAdapter {
     /**
      * Pure text-based extraction for unit testing and reliable order parsing.
      */
-    fun extractOrderDataFromTexts(texts: List<String>): RapidoOrderData {
+    fun extractOrderDataFromTexts(texts: List<String>, skipPickupAddress: Boolean = false): RapidoOrderData {
         val isBundleOrder = texts.any {
             it.contains("Bundle Order", ignoreCase = true) ||
             it.contains("Bundled Order", ignoreCase = true)
@@ -629,10 +637,10 @@ object RapidoAdapter {
         for (i in texts.indices) {
             val raw = texts[i].trim()
             val lower = raw.lowercase()
-            if (pickupAddress == null && (lower.startsWith("pickup:") || lower.startsWith("from:") || lower.startsWith("pick up:"))) {
+            if (!skipPickupAddress && pickupAddress == null && (lower.startsWith("pickup:") || lower.startsWith("from:") || lower.startsWith("pick up:"))) {
                 val clean = cleanRapidoAddress(raw.substringAfter(":"))
                 if (clean.length >= 3 && !isInvalidAddress(clean)) pickupAddress = clean
-            } else if (pickupAddress == null && (lower == "pickup" || lower == "from" || lower == "pick up")) {
+            } else if (!skipPickupAddress && pickupAddress == null && (lower == "pickup" || lower == "from" || lower == "pick up")) {
                 if (i + 1 < texts.size) {
                     val clean = cleanRapidoAddress(texts[i + 1])
                     if (clean.length >= 3 && !isInvalidAddress(clean)) pickupAddress = clean
@@ -654,7 +662,7 @@ object RapidoAdapter {
         val firstKmIdx = kmMatches.getOrNull(0)?.first
         val secondKmIdx = kmMatches.getOrNull(1)?.first
 
-        if (pickupAddress == null && firstKmIdx != null && !hasNearby) {
+        if (!skipPickupAddress && pickupAddress == null && firstKmIdx != null && !hasNearby) {
             val endSearch = secondKmIdx ?: texts.size
             for (i in (firstKmIdx + 1) until endSearch) {
                 val clean = cleanRapidoAddress(texts[i])
@@ -684,7 +692,7 @@ object RapidoAdapter {
             }
         }
 
-        if (pickupAddress == null && candidateLines.isNotEmpty()) {
+        if (!skipPickupAddress && pickupAddress == null && candidateLines.isNotEmpty()) {
             pickupAddress = candidateLines[0]
         }
         if (dropAddress == null && candidateLines.size >= 2) {
@@ -692,7 +700,7 @@ object RapidoAdapter {
         }
 
         // Step 3d: Fallback candidate filtering strictly excluding invalid and blocklisted texts
-        if (pickupAddress == null) {
+        if (!skipPickupAddress && pickupAddress == null) {
             pickupAddress = texts.map { cleanRapidoAddress(it) }.firstOrNull {
                 it.isNotBlank() && !it.contains("₹") && !it.matches(Regex("^[0-9.]+$")) && !isInvalidAddress(it) && !matchesBlocklist(it)
             }
@@ -704,11 +712,18 @@ object RapidoAdapter {
         }
 
         // Requirement 2: If extracted address matches any blocklist word → save as "Address unavailable" instead
-        val safePickup = if (pickupAddress.isNullOrBlank() || matchesBlocklist(pickupAddress) || isInvalidAddress(pickupAddress)) {
-            "Address unavailable"
-        } else {
-            pickupAddress
-        }
+        val safePickup =
+            if (skipPickupAddress) {
+                "Address unavailable"
+            } else if (
+                pickupAddress.isNullOrBlank() ||
+                matchesBlocklist(pickupAddress) ||
+                isInvalidAddress(pickupAddress)
+            ) {
+                "Address unavailable"
+            } else {
+                pickupAddress
+            }
 
         val safeDrop = if (dropAddress.isNullOrBlank() || matchesBlocklist(dropAddress) || isInvalidAddress(dropAddress)) {
             "Address unavailable"
@@ -723,7 +738,9 @@ object RapidoAdapter {
             pickupKm = pickupKm,
             dropKm = dropKm,
             pickupAddress = safePickup,
-            dropAddress = safeDrop
+            dropAddress = safeDrop,
+            hasNearby = hasNearby,
+            isBundledOrder = isBundleOrder
         )
     }
 
@@ -1329,27 +1346,39 @@ object RapidoAdapter {
             )
         }
 
-        val orderData = extractOrderData(root)
+        // RAPIDO_TURBO_DROP_ONLY_V4
+        // Parse only once. Pickup street/address is intentionally skipped.
+        val orderData =
+            extractOrderData(
+                root = root,
+                skipHomeCheck = true,
+                skipPickupAddress = true
+            )
 
         // Requirement 1a: Fare amount outside earnings container
         if (orderData.totalFare <= 0f) {
             return RapidoPopupValidation(
                 isValid = false,
-                failureReason = "Missing valid fare amount outside earnings container"
+                failureReason = "Missing valid fare amount outside earnings container",
+                orderData = orderData
             )
         }
 
         // Requirement 1b: A pickup distance in km OR "Nearby"
-        val allTexts = mutableListOf<String>()
-        collectAllNodeTextsForHomeCheck(root, allTexts)
-        val hasNearby = allTexts.any { it.trim().equals("nearby", ignoreCase = true) || it.contains("nearby", ignoreCase = true) }
-        val hasPickupKm = orderData.pickupKm != null && orderData.pickupKm > 0f
+        // Reuse the parsed snapshot instead of scanning the tree again.
+        val hasNearby =
+            orderData.hasNearby
+
+        val hasPickupKm =
+            orderData.pickupKm != null &&
+                orderData.pickupKm > 0f
 
         if (!hasPickupKm && !hasNearby) {
             return RapidoPopupValidation(
                 isValid = false,
                 fare = orderData.totalFare,
-                failureReason = "Missing pickup distance in km or 'Nearby'"
+                failureReason = "Missing pickup distance in km or 'Nearby'",
+                orderData = orderData
             )
         }
 
@@ -1361,7 +1390,8 @@ object RapidoAdapter {
                 fare = orderData.totalFare,
                 pickupDistKm = orderData.pickupKm,
                 hasNearby = hasNearby,
-                failureReason = "Missing 'Accept' or 'ACCEPT' button"
+                failureReason = "Missing 'Accept' or 'ACCEPT' button",
+                orderData = orderData
             )
         }
 
@@ -1373,7 +1403,8 @@ object RapidoAdapter {
                 fare = orderData.totalFare,
                 pickupDistKm = orderData.pickupKm,
                 hasNearby = hasNearby,
-                failureReason = "Accept button is not visible on screen (zero dimensions)"
+                failureReason = "Accept button is not visible on screen (zero dimensions)",
+                orderData = orderData
             )
         }
 
@@ -1382,7 +1413,8 @@ object RapidoAdapter {
             fare = orderData.totalFare,
             pickupDistKm = orderData.pickupKm,
             hasNearby = hasNearby,
-            acceptButton = acceptBtn
+            acceptButton = acceptBtn,
+            orderData = orderData
         )
     }
 
@@ -1408,7 +1440,8 @@ object RapidoAdapter {
         if (orderData.totalFare <= 0f) {
             return RapidoPopupValidation(
                 isValid = false,
-                failureReason = "Missing valid fare amount outside earnings container"
+                failureReason = "Missing valid fare amount outside earnings container",
+                orderData = orderData
             )
         }
 
@@ -1420,7 +1453,8 @@ object RapidoAdapter {
             return RapidoPopupValidation(
                 isValid = false,
                 fare = orderData.totalFare,
-                failureReason = "Missing pickup distance in km or 'Nearby'"
+                failureReason = "Missing pickup distance in km or 'Nearby'",
+                orderData = orderData
             )
         }
 
@@ -1431,7 +1465,8 @@ object RapidoAdapter {
                 fare = orderData.totalFare,
                 pickupDistKm = orderData.pickupKm,
                 hasNearby = hasNearby,
-                failureReason = "Missing 'Accept' or 'ACCEPT' button"
+                failureReason = "Missing 'Accept' or 'ACCEPT' button",
+                orderData = orderData
             )
         }
 

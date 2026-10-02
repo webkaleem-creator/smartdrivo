@@ -41,7 +41,7 @@ object AreaRulesEngine {
 
         if (candidate.isBundledOrder && !settings.isBundleOrderEnabled) {
             return DecisionResult.Ignore(
-                "Bundle Order OFF â€¢ Manual action"
+                "Bundle Order OFF  |  Manual action"
             )
         }
 
@@ -197,9 +197,36 @@ object AreaRulesEngine {
             }
         }
 
-        // Normal Home filter + independent Separate Both filter.
+        // RAPIDO_TURBO_FASTEST_V3
+        // Fastest / Speed Only mode checks ONLY Maximum Pickup Distance.
+        // No-Go and Go-To priority above remain unchanged.
+        if (settings.isFastestModeEnabled) {
+            val pickup =
+                candidate.pickupDistKm
+
+            if (
+                pickup != null &&
+                (
+                    settings.maxPickupDistanceKm <= 0f ||
+                    pickup <= settings.maxPickupDistanceKm
+                )
+            ) {
+                return DecisionResult.Accept(
+                    "Fastest Mode: pickup ${pickup}km matched"
+                )
+            }
+
+            return DecisionResult.Reject(
+                "Fastest Mode: pickup ${
+                    pickup?.let { "${it}km" } ?: "unavailable"
+                } exceeds/does not match saved maximum ${
+                    settings.maxPickupDistanceKm
+                }km"
+            )
+        }
+        // Normal Home filter + independent Filter 2 filter.
         //
-        // Home MATCH OR Separate Both MATCH = ACCEPT.
+        // Home MATCH OR Filter 2 MATCH = ACCEPT.
         // Both FAIL = No condition matched.
         //
         // No-Go / Go-To / Fastest rules above keep their existing priority.
@@ -276,10 +303,10 @@ object AreaRulesEngine {
             return DecisionResult.Accept(
                 when {
                     homeMatched && secondaryMatched ->
-                        "Home ${settings.filterMode.displayName} and Separate Both filters matched"
+                        "Filter 1 ${settings.filterMode.displayName} + Filter 2 matched"
 
                     secondaryMatched ->
-                        "Separate Both filter matched"
+                        "Filter 2 matched"
 
                     else ->
                         "Home ${settings.filterMode.displayName} filter matched"
@@ -288,11 +315,11 @@ object AreaRulesEngine {
         }
 
         return DecisionResult.Reject(
-            "No condition matched â€¢ Home ${settings.filterMode.displayName} failed" +
+            "No condition matched  |  Home ${settings.filterMode.displayName} failed" +
                 if (settings.isSecondaryBothFilterEnabled) {
-                    " â€¢ Separate Both failed"
+                    "  |  Filter 2 failed"
                 } else {
-                    " â€¢ Separate Both OFF"
+                    "  |  Filter 2 OFF"
                 }
         )
     }
