@@ -1439,53 +1439,45 @@ private fun formatGenericFilterFailureV7(
                 "Fare Only failed",
                 ignoreCase = true
             ) ->
-                "Fare Only failed"
+                "Fare Only"
 
             clean.contains(
                 "Distance Only failed",
                 ignoreCase = true
             ) ->
-                "Distance Only failed"
+                "Distance Only"
 
             clean.contains(
                 "Both failed",
                 ignoreCase = true
             ) ->
-                "Both failed"
-
-            else ->
-                "Not matched"
-        }
-
-    val filter2 =
-        when {
-            clean.contains(
-                "Filter 2 OFF",
-                ignoreCase = true
-            ) ->
-                "OFF"
-
-            clean.contains(
-                "Filter 2 failed",
-                ignoreCase = true
-            ) ->
-                "Failed"
-
-            clean.contains(
-                "Filter 2 matched",
-                ignoreCase = true
-            ) ->
-                "Matched"
+                "Both"
 
             else ->
                 null
         }
 
-    return buildString {
-        append("Filter 1: $filter1")
+    val filter2Failed =
+        clean.contains(
+            "Filter 2 failed",
+            ignoreCase = true
+        )
 
-        if (filter2 != null) {
-            append("\nFilter 2: $filter2")
+    return buildString {
+        if (filter1 != null) {
+            append(
+                "Filter 1: $filter1 Not Match ❌"
+            )
+        } else {
+            append(
+                "Filter 1: Not Match ❌"
+            )
+        }
+
+        if (filter2Failed) {
+            append(
+                "\nFilter 2: Not Match ❌"
+            )
         }
     }
 }
@@ -1503,20 +1495,45 @@ private fun formatRejectedReason(
         ?.let {
             return it
         }
-    // Keep No-Go history in its clean 2-line format.
+    // COMPACT_HISTORY_REASON_V1
     if (
         isNoGoOrder(item) ||
-        raw.contains("Drop matched:", ignoreCase = true)
+        raw.contains(
+            "No-Go",
+            ignoreCase = true
+        ) ||
+        raw.contains(
+            "Drop matched:",
+            ignoreCase = true
+        )
     ) {
-        val lines = raw.lines().map { it.trim() }
+        val areaName =
+            extractAreaName(item)
+                .ifBlank {
+                    Regex(
+                        """(?i)No-Go\s+Area:\s*(?:destination\s+)?matches\s+'([^']+)'"""
+                    )
+                        .find(raw)
+                        ?.groupValues
+                        ?.getOrNull(1)
+                        .orEmpty()
+                }
+                .ifBlank {
+                    Regex(
+                        """(?i)Drop\s+matched:\s*([^|\n]+)"""
+                    )
+                        .find(raw)
+                        ?.groupValues
+                        ?.getOrNull(1)
+                        ?.trim()
+                        .orEmpty()
+                }
 
-        return lines
-            .filter {
-                it.startsWith("Group:", ignoreCase = true) ||
-                it.startsWith("Drop matched:", ignoreCase = true)
-            }
-            .joinToString("\n")
-            .ifBlank { raw }
+        return if (areaName.isNotBlank()) {
+            "No-Go Area: $areaName ❌"
+        } else {
+            "No-Go Area Match ❌"
+        }
     }
 
     // Auto-Rejected filter orders use the same short Filter 1 / Filter 2 reason.
@@ -1598,12 +1615,30 @@ private fun formatIgnoredFilters(
                 .substringAfter(":")
                 .trim()
 
+        val compactFilter1Reason =
+            when {
+                filter1Reason.contains(
+                    "fare",
+                    ignoreCase = true
+                ) ->
+                    "Fare Only Not Match ❌"
+
+                filter1Reason.contains(
+                    "pickup",
+                    ignoreCase = true
+                ) ||
+                    filter1Reason.contains(
+                        "trip",
+                        ignoreCase = true
+                    ) ->
+                    "Distance Only Not Match ❌"
+
+                else ->
+                    "Not Match ❌"
+            }
+
         result +=
-            "Filter 1: ${
-                filter1Reason.ifBlank {
-                    "Filter not matched"
-                }
-            }"
+            "Filter 1: $compactFilter1Reason"
 
         if (
             settings.isSecondaryBothFilterEnabled &&
@@ -1615,11 +1650,7 @@ private fun formatIgnoredFilters(
                     .trim()
 
             result +=
-                "Filter 2: ${
-                    filter2Reason.ifBlank {
-                        "Filter not matched"
-                    }
-                }"
+                "Filter 2: Not Match ❌"
         }
 
         return result.joinToString("\n")

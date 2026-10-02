@@ -60,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -67,6 +68,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.data.FirebaseRepository
 import com.example.data.PreferencesManager
 import com.example.model.AreaGroup
@@ -171,7 +173,7 @@ fun AreaManagerScreen(
 
             scope.launch {
                 val message =
-                    "Go-To '${saved.name}' $saveAction \u2713 • $status"
+                    "Go-To '${saved.name}' $saveAction \u2713 \u2022 $status"
                 snackbar.showSnackbar(message)
             }
         } else {
@@ -203,7 +205,7 @@ fun AreaManagerScreen(
 
             scope.launch {
                 val message =
-                    "No-Go '${saved.name}' $saveAction \u2713 • $status"
+                    "No-Go '${saved.name}' $saveAction \u2713 \u2022 $status"
                 snackbar.showSnackbar(message)
             }
         }
@@ -559,7 +561,7 @@ private fun CompactAreaGroupCard(
                         )
 
                         Text(
-                            "•",
+                            "\u2022",
                             fontSize = 11.sp,
                             color = Color(0xFF94A3B8)
                         )
@@ -627,7 +629,7 @@ private fun CompactAreaGroupCard(
             if (group.keywords.isNotEmpty()) {
                 Spacer(Modifier.height(7.dp))
                 Text(
-                    group.keywords.take(5).joinToString("   •   "),
+                    group.keywords.take(5).joinToString("   \u2022   "),
                     fontSize = 11.sp,
                     color = Color(0xFF475569),
                     maxLines = 2,
@@ -646,10 +648,10 @@ private fun CompactAreaGroupCard(
                 ) {
                     Text(
                         text = "Minimum Fare: ${
-                            if (goToMinFare > 0f) "₹${goToMinFare.toInt()}" else "No minimum"
-                        }   •   Pickup: ${
+                            if (goToMinFare > 0f) "â‚¹${goToMinFare.toInt()}" else "No minimum"
+                        }   \u2022   Pickup: ${
                             if (group.maxPickupKm > 0f) "${group.maxPickupKm} km" else "No limit"
-                        }   •   Drop: ${
+                        }   \u2022   Drop: ${
                             if (group.maxDropKm > 0f) "${group.maxDropKm} km" else "No limit"
                         }",
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
@@ -674,13 +676,14 @@ private fun GroupEditorDialog(
     val isGoTo = type == AreaType.GO_TO
     val accent = if (isGoTo) GoToGreen else NoGoRed
     val bg = if (isGoTo) GoToGreenBg else NoGoRedBg
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
 
     val initialAreas = remember(group?.id, type) {
         if (isGoTo) {
-            val savedAreas = group?.areas.orEmpty()
+            val saved = group?.areas.orEmpty()
 
-            if (savedAreas.isNotEmpty()) {
-                savedAreas
+            if (saved.isNotEmpty()) {
+                saved
             } else {
                 group?.keywords.orEmpty()
                     .flatMap { raw ->
@@ -709,11 +712,7 @@ private fun GroupEditorDialog(
         } else {
             group?.keywords.orEmpty()
                 .flatMap { raw ->
-                    if (isGoTo) {
-                        raw.split(",")
-                    } else {
-                        listOf(raw)
-                    }
+                    if (isGoTo) raw.split(",") else listOf(raw)
                 }
                 .map { it.trim() }
                 .filter { it.isNotBlank() }
@@ -737,8 +736,27 @@ private fun GroupEditorDialog(
         mutableStateOf("")
     }
 
-    var editingIndex by remember(group?.id, type) {
+    var expandedIndex by remember(group?.id, type) {
         mutableStateOf<Int?>(null)
+    }
+
+    fun ensureEntriesSize() {
+        if (!isGoTo) return
+
+        val list = areaEntries.toMutableList()
+
+        while (list.size < keywords.size) {
+            val idx = list.size
+            list.add(
+                com.example.model.AreaEntry(
+                    name = keywords
+                        .getOrNull(idx)
+                        .orEmpty()
+                )
+            )
+        }
+
+        areaEntries = list
     }
 
     fun submitArea() {
@@ -746,58 +764,39 @@ private fun GroupEditorDialog(
             .split(",")
             .map { it.trim() }
             .filter { it.isNotBlank() }
-            .filterNot { it.equals(name.trim(), ignoreCase = true) }
+            .filterNot {
+                it.equals(
+                    name.trim(),
+                    ignoreCase = true
+                )
+            }
             .distinctBy { it.lowercase() }
 
         if (names.isEmpty()) return
 
-        val updatedKeywords = keywords.toMutableList()
-        val updatedEntries = areaEntries.toMutableList()
-        val editAt = editingIndex
+        val updatedKeywords =
+            keywords.toMutableList()
 
-        if (
-            editAt != null &&
-            editAt in updatedKeywords.indices &&
-            names.size == 1
-        ) {
-            val newName = names.first()
+        val updatedEntries =
+            areaEntries.toMutableList()
 
-            val duplicate = updatedKeywords.withIndex().any {
-                it.index != editAt &&
-                    it.value.equals(newName, ignoreCase = true)
-            }
-
-            if (!duplicate) {
-                updatedKeywords[editAt] = newName
-
-                while (updatedEntries.size <= editAt) {
-                    val idx = updatedEntries.size
-                    updatedEntries.add(
-                        com.example.model.AreaEntry(
-                            name = updatedKeywords.getOrNull(idx).orEmpty()
-                        )
+        names.forEach { newName ->
+            if (
+                updatedKeywords.none {
+                    it.equals(
+                        newName,
+                        ignoreCase = true
                     )
                 }
+            ) {
+                updatedKeywords.add(newName)
 
-                updatedEntries[editAt] =
-                    updatedEntries[editAt].copy(name = newName)
-            }
-        } else {
-            names.forEach { newName ->
-                if (
-                    updatedKeywords.none {
-                        it.equals(newName, ignoreCase = true)
-                    }
-                ) {
-                    updatedKeywords.add(newName)
-
-                    if (isGoTo) {
-                        updatedEntries.add(
-                            com.example.model.AreaEntry(
-                                name = newName
-                            )
+                if (isGoTo) {
+                    updatedEntries.add(
+                        com.example.model.AreaEntry(
+                            name = newName
                         )
-                    }
+                    )
                 }
             }
         }
@@ -809,54 +808,74 @@ private fun GroupEditorDialog(
         }
 
         areaInput = ""
-        editingIndex = null
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties =
+            DialogProperties(
+                usePlatformDefaultWidth = false
+            )
+    ) {
         Surface(
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(22.dp),
             color = Color.White,
-            tonalElevation = 6.dp,
-            modifier = Modifier.fillMaxWidth()
+            tonalElevation = 7.dp,
+            modifier =
+                Modifier
+                    .fillMaxWidth(0.88f)
+                    .heightIn(
+                        max = screenHeight * 0.92f
+                    )
         ) {
             Column(
-                modifier = Modifier.padding(12.dp)
+                modifier =
+                    Modifier.padding(
+                        horizontal = 14.dp,
+                        vertical = 12.dp
+                    )
             ) {
                 Text(
                     text =
                         if (group == null) {
                             if (isGoTo) {
-                                "New GO TO Group"
+                                "New GO TO Areas"
                             } else {
-                                "New NO GO Group"
+                                "New NO GO Areas"
                             }
                         } else {
                             if (isGoTo) {
-                                "Edit GO TO Group"
+                                "Edit GO TO Areas"
                             } else {
-                                "Edit NO GO Group"
+                                "Edit NO GO Areas"
                             }
                         },
                     fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp
+                    fontSize = 18.sp,
+                    color = Color(0xFF111827)
                 )
 
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
 
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it },
+                    onValueChange = {
+                        name = it
+                    },
                     label = {
                         Text(
                             "Group Name",
-                            fontSize = 13.sp
+                            fontSize = 11.sp
                         )
                     },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .height(54.dp),
                     textStyle =
                         androidx.compose.ui.text.TextStyle(
-                            fontSize = 16.sp
+                            fontSize = 14.sp
                         ),
                     colors =
                         OutlinedTextFieldDefaults.colors(
@@ -865,23 +884,37 @@ private fun GroupEditorDialog(
                         )
                 )
 
-                Spacer(Modifier.height(12.dp))
-
-                Text(
-                    text =
-                        if (isGoTo) {
-                            "Destination Areas (${keywords.size})"
-                        } else {
-                            "Blocked Areas (${keywords.size})"
-                        },
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
-                )
-
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
 
                 Row(
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    verticalAlignment =
+                        Alignment.CenterVertically
+                ) {
+                    Text(
+                        text =
+                            if (isGoTo) {
+                                "Destination Areas (${keywords.size})"
+                            } else {
+                                "Blocked Areas (${keywords.size})"
+                            },
+                        modifier =
+                            Modifier.weight(1f),
+                        fontWeight =
+                            FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = Color(0xFF111827)
+                    )
+                }
+
+                Spacer(Modifier.height(5.dp))
+
+                Row(
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    verticalAlignment =
+                        Alignment.CenterVertically
                 ) {
                     OutlinedTextField(
                         value = areaInput,
@@ -890,12 +923,12 @@ private fun GroupEditorDialog(
                         },
                         placeholder = {
                             Text(
-                                if (editingIndex == null) {
-                                    "Add area name"
+                                if (isGoTo) {
+                                    "Hyderabad, Airport, etc"
                                 } else {
-                                    "Edit area name"
+                                    "Add blocked area"
                                 },
-                                fontSize = 14.sp
+                                fontSize = 12.sp
                             )
                         },
                         singleLine = true,
@@ -909,10 +942,13 @@ private fun GroupEditorDialog(
                                     submitArea()
                                 }
                             ),
-                        modifier = Modifier.weight(1f),
+                        modifier =
+                            Modifier
+                                .weight(1f)
+                                .height(50.dp),
                         textStyle =
                             androidx.compose.ui.text.TextStyle(
-                                fontSize = 16.sp
+                                fontSize = 14.sp
                             ),
                         colors =
                             OutlinedTextFieldDefaults.colors(
@@ -921,7 +957,7 @@ private fun GroupEditorDialog(
                             )
                     )
 
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(7.dp))
 
                     Button(
                         onClick = {
@@ -931,73 +967,90 @@ private fun GroupEditorDialog(
                             ButtonDefaults.buttonColors(
                                 containerColor = accent
                             ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.height(54.dp)
+                        shape =
+                            RoundedCornerShape(14.dp),
+                        modifier =
+                            Modifier
+                                .width(76.dp)
+                                .height(46.dp)
                     ) {
                         Text(
-                            if (editingIndex == null) {
-                                "Add"
-                            } else {
-                                "Save"
-                            },
-                            fontSize = 15.sp
+                            "Add",
+                            fontSize = 13.sp,
+                            fontWeight =
+                                FontWeight.SemiBold
                         )
                     }
                 }
 
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
 
                 if (keywords.isEmpty()) {
                     Surface(
-                        color = bg.copy(alpha = 0.65f),
-                        shape = RoundedCornerShape(10.dp)
+                        color = bg.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier =
+                            Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
                     ) {
-                        Text(
-                            "No areas added yet",
-                            modifier =
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                            fontSize = 14.sp,
-                            color = Color(0xFF64748B)
-                        )
+                        Box(
+                            contentAlignment =
+                                Alignment.Center
+                        ) {
+                            Text(
+                                "No areas added yet",
+                                fontSize = 12.sp,
+                                color = Color(0xFF64748B)
+                            )
+                        }
                     }
                 } else {
                     LazyColumn(
                         modifier =
-                            Modifier.heightIn(
-                                max = 320.dp
-                            ),
+                            Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
                         verticalArrangement =
-                            Arrangement.spacedBy(8.dp)
+                            Arrangement.spacedBy(5.dp)
                     ) {
                         itemsIndexed(
                             items = keywords,
-                            key = { index, word ->
-                                "$index-$word"
+                            key = { _, word ->
+                                word.lowercase()
                             }
                         ) { index, word ->
 
                             if (isGoTo) {
+                                ensureEntriesSize()
+
                                 val currentEntry =
-                                    areaEntries.getOrNull(index)
+                                    areaEntries
+                                        .getOrNull(index)
                                         ?: com.example.model.AreaEntry(
                                             name = word
                                         )
 
                                 var fareText by remember(
                                     group?.id,
-                                    type,
                                     word
                                 ) {
                                     mutableStateOf(
                                         currentEntry.minFare
-                                            .takeIf { it > 0f }
+                                            .takeIf {
+                                                it > 0f
+                                            }
                                             ?.let {
-                                                if (it % 1f == 0f) {
-                                                    it.toInt().toString()
+                                                if (
+                                                    it % 1f ==
+                                                    0f
+                                                ) {
+                                                    it
+                                                        .toInt()
+                                                        .toString()
                                                 } else {
-                                                    it.toString()
+                                                    it
+                                                        .toString()
                                                 }
                                             }
                                             .orEmpty()
@@ -1006,17 +1059,24 @@ private fun GroupEditorDialog(
 
                                 var pickupText by remember(
                                     group?.id,
-                                    type,
                                     word
                                 ) {
                                     mutableStateOf(
                                         currentEntry.maxPickupKm
-                                            .takeIf { it > 0f }
+                                            .takeIf {
+                                                it > 0f
+                                            }
                                             ?.let {
-                                                if (it % 1f == 0f) {
-                                                    it.toInt().toString()
+                                                if (
+                                                    it % 1f ==
+                                                    0f
+                                                ) {
+                                                    it
+                                                        .toInt()
+                                                        .toString()
                                                 } else {
-                                                    it.toString()
+                                                    it
+                                                        .toString()
                                                 }
                                             }
                                             .orEmpty()
@@ -1025,47 +1085,60 @@ private fun GroupEditorDialog(
 
                                 var dropText by remember(
                                     group?.id,
-                                    type,
                                     word
                                 ) {
                                     mutableStateOf(
                                         currentEntry.maxDropKm
-                                            .takeIf { it > 0f }
+                                            .takeIf {
+                                                it > 0f
+                                            }
                                             ?.let {
-                                                if (it % 1f == 0f) {
-                                                    it.toInt().toString()
+                                                if (
+                                                    it % 1f ==
+                                                    0f
+                                                ) {
+                                                    it
+                                                        .toInt()
+                                                        .toString()
                                                 } else {
-                                                    it.toString()
+                                                    it
+                                                        .toString()
                                                 }
                                             }
                                             .orEmpty()
                                     )
                                 }
 
-                                fun ensureEntry(
-                                    change:
+                                fun updateEntry(
+                                    transform:
                                         (
                                             com.example.model.AreaEntry
                                         ) ->
                                             com.example.model.AreaEntry
                                 ) {
                                     val list =
-                                        areaEntries.toMutableList()
+                                        areaEntries
+                                            .toMutableList()
 
-                                    while (list.size <= index) {
+                                    while (
+                                        list.size <= index
+                                    ) {
                                         val idx = list.size
+
                                         list.add(
                                             com.example.model.AreaEntry(
                                                 name =
                                                     keywords
-                                                        .getOrNull(idx)
+                                                        .getOrNull(
+                                                            idx
+                                                        )
                                                         .orEmpty()
                                             )
                                         )
                                     }
 
                                     list[index] =
-                                        change(
+                                        transform(
                                             list[index].copy(
                                                 name = word
                                             )
@@ -1074,33 +1147,401 @@ private fun GroupEditorDialog(
                                     areaEntries = list
                                 }
 
-                                Column(
+                                Surface(
+                                    color =
+                                        bg.copy(
+                                            alpha = 0.48f
+                                        ),
+                                    shape =
+                                        RoundedCornerShape(
+                                            11.dp
+                                        ),
                                     modifier =
                                         Modifier
                                             .fillMaxWidth()
-                                            .background(
-                                                bg.copy(
-                                                    alpha = 0.65f
-                                                ),
-                                                RoundedCornerShape(
-                                                    10.dp
+                                ) {
+                                    Column(
+                                        modifier =
+                                            Modifier.padding(
+                                                horizontal =
+                                                    10.dp,
+                                                vertical =
+                                                    5.dp
+                                            )
+                                    ) {
+                                        Row(
+                                            modifier =
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .height(34.dp),
+                                            verticalAlignment =
+                                                Alignment
+                                                    .CenterVertically
+                                        ) {
+                                            Text(
+                                                text = word,
+                                                modifier =
+                                                    Modifier
+                                                        .weight(1f),
+                                                fontSize =
+                                                    13.sp,
+                                                fontWeight =
+                                                    FontWeight
+                                                        .SemiBold,
+                                                maxLines = 1,
+                                                overflow =
+                                                    TextOverflow
+                                                        .Ellipsis
+                                            )
+
+                                            IconButton(
+                                                onClick = {
+                                                    expandedIndex =
+                                                        if (
+                                                            expandedIndex ==
+                                                            index
+                                                        ) {
+                                                            null
+                                                        } else {
+                                                            index
+                                                        }
+                                                },
+                                                modifier =
+                                                    Modifier
+                                                        .size(30.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Edit,
+                                                    contentDescription =
+                                                        "Edit filters",
+                                                    tint = accent,
+                                                    modifier =
+                                                        Modifier
+                                                            .size(
+                                                                17.dp
+                                                            )
+                                                )
+                                            }
+
+                                            Spacer(
+                                                Modifier.width(
+                                                    2.dp
                                                 )
                                             )
-                                            .padding(10.dp)
+
+                                            IconButton(
+                                                onClick = {
+                                                    keywords =
+                                                        keywords
+                                                            .toMutableList()
+                                                            .also {
+                                                                if (
+                                                                    index in
+                                                                    it.indices
+                                                                ) {
+                                                                    it
+                                                                        .removeAt(
+                                                                            index
+                                                                        )
+                                                                }
+                                                            }
+
+                                                    areaEntries =
+                                                        areaEntries
+                                                            .toMutableList()
+                                                            .also {
+                                                                if (
+                                                                    index in
+                                                                    it.indices
+                                                                ) {
+                                                                    it
+                                                                        .removeAt(
+                                                                            index
+                                                                        )
+                                                                }
+                                                            }
+
+                                                    expandedIndex =
+                                                        null
+                                                },
+                                                modifier =
+                                                    Modifier
+                                                        .size(30.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription =
+                                                        "Delete area",
+                                                    tint = NoGoRed,
+                                                    modifier =
+                                                        Modifier
+                                                            .size(
+                                                                17.dp
+                                                            )
+                                                )
+                                            }
+                                        }
+
+                                        if (
+                                            expandedIndex ==
+                                            index
+                                        ) {
+                                            Spacer(
+                                                Modifier.height(
+                                                    5.dp
+                                                )
+                                            )
+
+                                            Row(
+                                                modifier =
+                                                    Modifier
+                                                        .fillMaxWidth(),
+                                                horizontalArrangement =
+                                                    Arrangement
+                                                        .spacedBy(
+                                                            6.dp
+                                                        )
+                                            ) {
+                                                OutlinedTextField(
+                                                    value =
+                                                        fareText,
+                                                    onValueChange = {
+                                                        raw ->
+                                                        val input =
+                                                            raw.replace(
+                                                                ',',
+                                                                '.'
+                                                            )
+
+                                                        if (
+                                                            input
+                                                                .isEmpty() ||
+                                                            input
+                                                                .matches(
+                                                                    Regex(
+                                                                        """^\d*\.?\d*$"""
+                                                                    )
+                                                                )
+                                                        ) {
+                                                            fareText =
+                                                                input
+
+                                                            updateEntry {
+                                                                it.copy(
+                                                                    minFare =
+                                                                        input
+                                                                            .toFloatOrNull()
+                                                                            ?: 0f
+                                                                )
+                                                            }
+                                                        }
+                                                    },
+                                                    label = {
+                                                        Text(
+                                                            "Min Fare",
+                                                            fontSize =
+                                                                9.sp
+                                                        )
+                                                    },
+                                                    singleLine =
+                                                        true,
+                                                    keyboardOptions =
+                                                        KeyboardOptions(
+                                                            keyboardType =
+                                                                KeyboardType
+                                                                    .Decimal
+                                                        ),
+                                                    modifier =
+                                                        Modifier
+                                                            .weight(
+                                                                1f
+                                                            )
+                                                            .height(
+                                                                54.dp
+                                                            ),
+                                                    textStyle =
+                                                        androidx.compose.ui.text.TextStyle(
+                                                            fontSize =
+                                                                13.sp
+                                                        )
+                                                )
+
+                                                OutlinedTextField(
+                                                    value =
+                                                        pickupText,
+                                                    onValueChange = {
+                                                        raw ->
+                                                        val input =
+                                                            raw.replace(
+                                                                ',',
+                                                                '.'
+                                                            )
+
+                                                        if (
+                                                            input
+                                                                .isEmpty() ||
+                                                            input
+                                                                .matches(
+                                                                    Regex(
+                                                                        """^\d*\.?\d*$"""
+                                                                    )
+                                                                )
+                                                        ) {
+                                                            pickupText =
+                                                                input
+
+                                                            updateEntry {
+                                                                it.copy(
+                                                                    maxPickupKm =
+                                                                        input
+                                                                            .toFloatOrNull()
+                                                                            ?: 0f
+                                                                )
+                                                            }
+                                                        }
+                                                    },
+                                                    label = {
+                                                        Text(
+                                                            "Max Pickup",
+                                                            fontSize =
+                                                                8.5.sp,
+                                                            maxLines =
+                                                                1
+                                                        )
+                                                    },
+                                                    singleLine =
+                                                        true,
+                                                    keyboardOptions =
+                                                        KeyboardOptions(
+                                                            keyboardType =
+                                                                KeyboardType
+                                                                    .Decimal
+                                                        ),
+                                                    modifier =
+                                                        Modifier
+                                                            .weight(
+                                                                1f
+                                                            )
+                                                            .height(
+                                                                54.dp
+                                                            ),
+                                                    textStyle =
+                                                        androidx.compose.ui.text.TextStyle(
+                                                            fontSize =
+                                                                13.sp
+                                                        )
+                                                )
+
+                                                OutlinedTextField(
+                                                    value =
+                                                        dropText,
+                                                    onValueChange = {
+                                                        raw ->
+                                                        val input =
+                                                            raw.replace(
+                                                                ',',
+                                                                '.'
+                                                            )
+
+                                                        if (
+                                                            input
+                                                                .isEmpty() ||
+                                                            input
+                                                                .matches(
+                                                                    Regex(
+                                                                        """^\d*\.?\d*$"""
+                                                                    )
+                                                                )
+                                                        ) {
+                                                            dropText =
+                                                                input
+
+                                                            updateEntry {
+                                                                it.copy(
+                                                                    maxDropKm =
+                                                                        input
+                                                                            .toFloatOrNull()
+                                                                            ?: 0f
+                                                                )
+                                                            }
+                                                        }
+                                                    },
+                                                    label = {
+                                                        Text(
+                                                            "Max Drop",
+                                                            fontSize =
+                                                                9.sp,
+                                                            maxLines =
+                                                                1
+                                                        )
+                                                    },
+                                                    singleLine =
+                                                        true,
+                                                    keyboardOptions =
+                                                        KeyboardOptions(
+                                                            keyboardType =
+                                                                KeyboardType
+                                                                    .Decimal
+                                                        ),
+                                                    modifier =
+                                                        Modifier
+                                                            .weight(
+                                                                1f
+                                                            )
+                                                            .height(
+                                                                54.dp
+                                                            ),
+                                                    textStyle =
+                                                        androidx.compose.ui.text.TextStyle(
+                                                            fontSize =
+                                                                13.sp
+                                                        )
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                Surface(
+                                    color =
+                                        bg.copy(
+                                            alpha = 0.50f
+                                        ),
+                                    shape =
+                                        RoundedCornerShape(
+                                            11.dp
+                                        ),
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
                                 ) {
                                     Row(
                                         modifier =
-                                            Modifier.fillMaxWidth(),
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .height(44.dp)
+                                                .padding(
+                                                    horizontal =
+                                                        10.dp
+                                                ),
                                         verticalAlignment =
-                                            Alignment.CenterVertically
+                                            Alignment
+                                                .CenterVertically
                                     ) {
                                         Text(
-                                            text = word,
+                                            word,
                                             modifier =
-                                                Modifier.weight(1f),
-                                            fontSize = 15.sp,
+                                                Modifier
+                                                    .weight(1f),
+                                            fontSize =
+                                                13.sp,
                                             fontWeight =
-                                                FontWeight.Bold
+                                                FontWeight
+                                                    .Medium,
+                                            maxLines = 1,
+                                            overflow =
+                                                TextOverflow
+                                                    .Ellipsis
                                         )
 
                                         IconButton(
@@ -1111,30 +1552,20 @@ private fun GroupEditorDialog(
                                                         .also {
                                                             if (
                                                                 index in
-                                                                    it.indices
+                                                                it.indices
                                                             ) {
-                                                                it.removeAt(
-                                                                    index
-                                                                )
-                                                            }
-                                                        }
-
-                                                areaEntries =
-                                                    areaEntries
-                                                        .toMutableList()
-                                                        .also {
-                                                            if (
-                                                                index in
-                                                                    it.indices
-                                                            ) {
-                                                                it.removeAt(
-                                                                    index
-                                                                )
+                                                                it
+                                                                    .removeAt(
+                                                                        index
+                                                                    )
                                                             }
                                                         }
                                             },
                                             modifier =
-                                                Modifier.size(36.dp)
+                                                Modifier
+                                                    .size(
+                                                        30.dp
+                                                    )
                                         ) {
                                             Icon(
                                                 Icons.Default.Close,
@@ -1142,226 +1573,12 @@ private fun GroupEditorDialog(
                                                     "Delete area",
                                                 tint = NoGoRed,
                                                 modifier =
-                                                    Modifier.size(20.dp)
+                                                    Modifier
+                                                        .size(
+                                                            17.dp
+                                                        )
                                             )
                                         }
-                                    }
-
-                                    Spacer(
-                                        Modifier.height(6.dp)
-                                    )
-
-                                    Row(
-                                        modifier =
-                                            Modifier.fillMaxWidth(),
-                                        horizontalArrangement =
-                                            Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        OutlinedTextField(
-                                            value = fareText,
-                                            onValueChange = { raw ->
-                                                val input =
-                                                    raw.replace(
-                                                        ',',
-                                                        '.'
-                                                    )
-
-                                                if (
-                                                    input.isEmpty() ||
-                                                    input.matches(
-                                                        Regex(
-                                                            """^\d*\.?\d*$"""
-                                                        )
-                                                    )
-                                                ) {
-                                                    fareText = input
-
-                                                    ensureEntry {
-                                                        it.copy(
-                                                            minFare =
-                                                                input
-                                                                    .toFloatOrNull()
-                                                                    ?: 0f
-                                                        )
-                                                    }
-                                                }
-                                            },
-                                            label = {
-                                                Text(
-                                                    "Min Fare",
-                                                    fontSize = 11.sp,
-                                                    maxLines = 1
-                                                )
-                                            },
-                                            singleLine = true,
-                                            keyboardOptions =
-                                                KeyboardOptions(
-                                                    keyboardType =
-                                                        KeyboardType.Decimal
-                                                ),
-                                            modifier =
-                                                Modifier.weight(1f),
-                                            textStyle =
-                                                androidx.compose.ui.text.TextStyle(
-                                                    fontSize = 16.sp
-                                                )
-                                        )
-
-                                        OutlinedTextField(
-                                            value = pickupText,
-                                            onValueChange = { raw ->
-                                                val input =
-                                                    raw.replace(
-                                                        ',',
-                                                        '.'
-                                                    )
-
-                                                if (
-                                                    input.isEmpty() ||
-                                                    input.matches(
-                                                        Regex(
-                                                            """^\d*\.?\d*$"""
-                                                        )
-                                                    )
-                                                ) {
-                                                    pickupText = input
-
-                                                    ensureEntry {
-                                                        it.copy(
-                                                            maxPickupKm =
-                                                                input
-                                                                    .toFloatOrNull()
-                                                                    ?: 0f
-                                                        )
-                                                    }
-                                                }
-                                            },
-                                            label = {
-                                                Text(
-                                                    "Max Pickup",
-                                                    fontSize = 11.sp,
-                                                    maxLines = 1
-                                                )
-                                            },
-                                            singleLine = true,
-                                            keyboardOptions =
-                                                KeyboardOptions(
-                                                    keyboardType =
-                                                        KeyboardType.Decimal
-                                                ),
-                                            modifier =
-                                                Modifier.weight(1f),
-                                            textStyle =
-                                                androidx.compose.ui.text.TextStyle(
-                                                    fontSize = 16.sp
-                                                )
-                                        )
-
-                                        OutlinedTextField(
-                                            value = dropText,
-                                            onValueChange = { raw ->
-                                                val input =
-                                                    raw.replace(
-                                                        ',',
-                                                        '.'
-                                                    )
-
-                                                if (
-                                                    input.isEmpty() ||
-                                                    input.matches(
-                                                        Regex(
-                                                            """^\d*\.?\d*$"""
-                                                        )
-                                                    )
-                                                ) {
-                                                    dropText = input
-
-                                                    ensureEntry {
-                                                        it.copy(
-                                                            maxDropKm =
-                                                                input
-                                                                    .toFloatOrNull()
-                                                                    ?: 0f
-                                                        )
-                                                    }
-                                                }
-                                            },
-                                            label = {
-                                                Text(
-                                                    "Max Drop",
-                                                    fontSize = 11.sp,
-                                                    maxLines = 1
-                                                )
-                                            },
-                                            singleLine = true,
-                                            keyboardOptions =
-                                                KeyboardOptions(
-                                                    keyboardType =
-                                                        KeyboardType.Decimal
-                                                ),
-                                            modifier =
-                                                Modifier.weight(1f),
-                                            textStyle =
-                                                androidx.compose.ui.text.TextStyle(
-                                                    fontSize = 16.sp
-                                                )
-                                        )
-                                    }
-                                }
-                            } else {
-                                Row(
-                                    modifier =
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .background(
-                                                bg.copy(
-                                                    alpha = 0.65f
-                                                ),
-                                                RoundedCornerShape(
-                                                    9.dp
-                                                )
-                                            )
-                                            .padding(
-                                                horizontal = 10.dp,
-                                                vertical = 7.dp
-                                            ),
-                                    verticalAlignment =
-                                        Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        word,
-                                        modifier =
-                                            Modifier.weight(1f),
-                                        fontSize = 14.sp
-                                    )
-
-                                    IconButton(
-                                        onClick = {
-                                            keywords =
-                                                keywords
-                                                    .toMutableList()
-                                                    .also {
-                                                        if (
-                                                            index in
-                                                                it.indices
-                                                        ) {
-                                                            it.removeAt(
-                                                                index
-                                                            )
-                                                        }
-                                                    }
-                                        },
-                                        modifier =
-                                            Modifier.size(34.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Close,
-                                            contentDescription =
-                                                "Delete area",
-                                            tint = NoGoRed,
-                                            modifier =
-                                                Modifier.size(19.dp)
-                                        )
                                     }
                                 }
                             }
@@ -1369,26 +1586,32 @@ private fun GroupEditorDialog(
                     }
                 }
 
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(8.dp))
 
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier =
+                        Modifier.fillMaxWidth(),
                     horizontalArrangement =
-                        Arrangement.End,
+                        Arrangement.spacedBy(8.dp),
                     verticalAlignment =
                         Alignment.CenterVertically
                 ) {
                     TextButton(
-                        onClick = onDismiss
+                        onClick = onDismiss,
+                        modifier =
+                            Modifier
+                                .weight(0.42f)
+                                .height(44.dp)
                     ) {
                         Text(
                             "Cancel",
-                            color = Color(0xFF64748B),
-                            fontSize = 15.sp
+                            color =
+                                Color(0xFF64748B),
+                            fontSize = 13.sp,
+                            fontWeight =
+                                FontWeight.Medium
                         )
                     }
-
-                    Spacer(Modifier.width(8.dp))
 
                     Button(
                         enabled =
@@ -1397,8 +1620,12 @@ private fun GroupEditorDialog(
                         onClick = {
                             val cleanKeywords =
                                 keywords
-                                    .map { it.trim() }
-                                    .filter { it.isNotBlank() }
+                                    .map {
+                                        it.trim()
+                                    }
+                                    .filter {
+                                        it.isNotBlank()
+                                    }
                                     .distinctBy {
                                         it.lowercase()
                                     }
@@ -1406,24 +1633,28 @@ private fun GroupEditorDialog(
                             val cleanAreas =
                                 if (isGoTo) {
                                     cleanKeywords.mapIndexed {
-                                            index,
-                                            areaName ->
+                                        index,
+                                        areaName ->
 
                                         areaEntries
                                             .getOrNull(index)
                                             ?.copy(
-                                                name = areaName
+                                                name =
+                                                    areaName
                                             )
                                             ?: com.example.model.AreaEntry(
-                                                name = areaName
+                                                name =
+                                                    areaName
                                             )
                                     }
                                 } else {
-                                    group?.areas.orEmpty()
+                                    group?.areas
+                                        .orEmpty()
                                 }
 
                             val firstArea =
-                                cleanAreas.firstOrNull()
+                                cleanAreas
+                                    .firstOrNull()
 
                             onSave(
                                 AreaGroup(
@@ -1432,54 +1663,58 @@ private fun GroupEditorDialog(
                                             ?: UUID
                                                 .randomUUID()
                                                 .toString(),
-                                    name = name.trim(),
+                                    name =
+                                        name.trim(),
                                     isEnabled =
                                         group?.isEnabled
                                             ?: true,
                                     type = type,
-                                    keywords = cleanKeywords,
-                                    areas = cleanAreas,
-                                    filtersEnabled = false,
-
-                                    // Legacy summary values kept
-                                    // compatible with the existing
-                                    // GO TO card display.
+                                    keywords =
+                                        cleanKeywords,
+                                    areas =
+                                        cleanAreas,
+                                    filtersEnabled =
+                                        false,
                                     minFare =
                                         if (isGoTo) {
-                                            firstArea?.minFare
+                                            firstArea
+                                                ?.minFare
                                                 ?: 0f
                                         } else {
-                                            group?.minFare
+                                            group
+                                                ?.minFare
                                                 ?: 0f
                                         },
-
                                     maxFare =
                                         if (isGoTo) {
                                             0f
                                         } else {
-                                            group?.maxFare
+                                            group
+                                                ?.maxFare
                                                 ?: 0f
                                         },
-
                                     minPickupKm =
-                                        group?.minPickupKm
+                                        group
+                                            ?.minPickupKm
                                             ?: 0f,
-
                                     maxPickupKm =
                                         if (isGoTo) {
-                                            firstArea?.maxPickupKm
+                                            firstArea
+                                                ?.maxPickupKm
                                                 ?: 0f
                                         } else {
-                                            group?.maxPickupKm
+                                            group
+                                                ?.maxPickupKm
                                                 ?: 0f
                                         },
-
                                     maxDropKm =
                                         if (isGoTo) {
-                                            firstArea?.maxDropKm
+                                            firstArea
+                                                ?.maxDropKm
                                                 ?: 0f
                                         } else {
-                                            group?.maxDropKm
+                                            group
+                                                ?.maxDropKm
                                                 ?: 0f
                                         }
                                 )
@@ -1487,14 +1722,23 @@ private fun GroupEditorDialog(
                         },
                         colors =
                             ButtonDefaults.buttonColors(
-                                containerColor = accent
+                                containerColor =
+                                    accent
                             ),
                         shape =
-                            RoundedCornerShape(12.dp)
+                            RoundedCornerShape(
+                                18.dp
+                            ),
+                        modifier =
+                            Modifier
+                                .weight(0.58f)
+                                .height(44.dp)
                     ) {
                         Text(
                             "Save Group",
-                            fontSize = 16.sp
+                            fontSize = 13.sp,
+                            fontWeight =
+                                FontWeight.Bold
                         )
                     }
                 }
@@ -1502,8 +1746,3 @@ private fun GroupEditorDialog(
         }
     }
 }
-
-
-
-
-
