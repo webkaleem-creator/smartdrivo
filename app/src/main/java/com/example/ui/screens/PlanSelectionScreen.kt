@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -62,6 +63,8 @@ fun PlanSelectionScreen(
     val currentPlan = plans.firstOrNull {
         it.id == currentPlanId
     }
+
+    val uriHandler = LocalUriHandler.current
 
     // FREE_TRIAL_UI_POLISH_V4
     val isFreeTrial =
@@ -615,9 +618,185 @@ fun PlanSelectionScreen(
                 )
 
                 Spacer(
+                    modifier = Modifier.height(10.dp)
+                )
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            uriHandler.openUri(
+                                "https://t.me/SmartDrivoSupport"
+                            )
+                        },
+                    shape = RoundedCornerShape(13.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color(0xFFEFF8FF)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                horizontal = 14.dp,
+                                vertical = 11.dp
+                            ),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Need Help? Telegram Support",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+
+                            Spacer(
+                                modifier = Modifier.height(2.dp)
+                            )
+
+                            Text(
+                                text = "@SmartDrivoSupport",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF2196F3)
+                            )
+                        }
+
+                        Text(
+                            text = "Open",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF2196F3)
+                        )
+                    }
+                }
+
+                MembershipBenefitsSection()
+
+                Spacer(
                     modifier = Modifier.height(18.dp)
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun MembershipBenefitsSection() {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = "WHAT YOU GET AFTER ACTIVATION",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF2196F3)
+        )
+
+        Spacer(
+            modifier = Modifier.height(4.dp)
+        )
+
+        Text(
+            text = "Activate any membership plan to unlock full SmartDrivo access.",
+            fontSize = 11.5.sp,
+            color = Color(0xFF64748B)
+        )
+
+        Spacer(
+            modifier = Modifier.height(10.dp)
+        )
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(15.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = Color.White
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(
+                    horizontal = 14.dp,
+                    vertical = 12.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                MembershipBenefitRow(
+                    title = "Fast Auto Accept",
+                    description = "Quickly accepts matching ride offers using your saved settings."
+                )
+
+                MembershipBenefitRow(
+                    title = "Fare & Distance Filters",
+                    description = "Use minimum fare, maximum pickup, maximum drop and Filter 2 rules."
+                )
+
+                MembershipBenefitRow(
+                    title = "GO TO & NO GO Areas",
+                    description = "Choose preferred destination areas and block unwanted destination areas."
+                )
+
+                MembershipBenefitRow(
+                    title = "Auto Reject No Match",
+                    description = "When enabled, offers that do not match active conditions can be skipped automatically."
+                )
+
+                MembershipBenefitRow(
+                    title = "Bundle Order Support",
+                    description = "Control supported bundle offers together with your normal filters."
+                )
+
+                MembershipBenefitRow(
+                    title = "Ride History & Accept Speed",
+                    description = "See accepted, ignored and rejected ride records with useful order details."
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MembershipBenefitRow(
+    title: String,
+    description: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top
+    ) {
+        Icon(
+            imageVector = Icons.Default.CheckCircle,
+            contentDescription = null,
+            tint = Color(0xFF2196F3),
+            modifier = Modifier.size(19.dp)
+        )
+
+        Spacer(
+            modifier = Modifier.width(9.dp)
+        )
+
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF0F172A)
+            )
+
+            Spacer(
+                modifier = Modifier.height(1.dp)
+            )
+
+            Text(
+                text = description,
+                fontSize = 10.5.sp,
+                color = Color(0xFF64748B)
+            )
         }
     }
 }
