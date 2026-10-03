@@ -7006,6 +7006,42 @@ val isOrderStillVisible =
         }
     }
 
+    private fun showOrderReasonPopupIfEnabled(
+        recordKey: String,
+        candidate: RideCandidate,
+        status: OrderStatus,
+        reasonText: String
+    ) {
+        if (
+            !prefs.appSettings.value
+                .showOrderReasonPopups
+        ) {
+            return
+        }
+
+        OrderDecisionPopup.show(
+            context = applicationContext,
+            recordKey =
+                recordKey.ifBlank {
+                    getOrderIdentifier(candidate)
+                },
+            status = status,
+            platform =
+                if (
+                    candidate.platform ==
+                        Platform.RAPIDO
+                ) {
+                    "Rapido"
+                } else {
+                    candidate.platform
+                        .displayName
+                },
+            fare =
+                candidate.fare ?: 0f,
+            reason =
+                reasonText
+        )
+    }
     private fun onOrderDetectedFast(candidate: RideCandidate): String {
         // MASTER OFF: do not create new history records.
         if (!preferencesManager.isAutoAcceptEnabled) {
@@ -7065,7 +7101,14 @@ val isOrderStillVisible =
         reasonText: String,
         matchedGoTo: String = "",
         matchedNoGo: String = ""
-    ) {
+    ) {        // ORDER_REASON_POPUP_DECISION_V1
+        showOrderReasonPopupIfEnabled(
+            recordKey = recordId,
+            candidate = candidate,
+            status = status,
+            reasonText = reasonText
+        )
+
         // HISTORY_FINAL_STATE_V2
         // This method only finalizes an existing detected row.
         // Always allow the final status to be written.
@@ -7140,7 +7183,16 @@ val isOrderStillVisible =
         buttonDetails: String = "",
         clickMethod: String = "",
         errorMsg: String? = null
-    ) {
+    ) {        // ORDER_REASON_POPUP_ACTION_V1
+        // De-dupe inside OrderDecisionPopup prevents the same
+        // rejected/ignored result from appearing twice.
+        showOrderReasonPopupIfEnabled(
+            recordKey = recordId,
+            candidate = candidate,
+            status = status,
+            reasonText = reasonText
+        )
+
         // HISTORY_FINAL_STATE_V2
         // Existing history rows must always receive their final result.
 
@@ -7260,6 +7312,16 @@ val isOrderStillVisible =
 
         val reasonCode = mapReasonToCode(status, effectiveReason)
         val activeId = activeOrderRecordIds[candidate.platform]
+
+        // ORDER_REASON_POPUP_LEGACY_V1
+        showOrderReasonPopupIfEnabled(
+            recordKey =
+                activeId
+                    ?: getOrderIdentifier(candidate),
+            candidate = candidate,
+            status = status,
+            reasonText = effectiveReason
+        )
 
         serviceScope.launch(Dispatchers.IO) {
             try {

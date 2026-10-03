@@ -1,4 +1,4 @@
-﻿package com.example.data
+package com.example.data
 
 import com.example.model.AreaEntry
 
@@ -383,6 +383,10 @@ class PreferencesManager(private val context: Context) {
             putBoolean(KEY_AUTO_ACCEPT, settings.isAutoAcceptActive)
             putBoolean(KEY_AUTO_REJECT_BAD_FARES, settings.isAutoRejectBadFaresEnabled)
             putBoolean(KEY_FASTEST_MODE, settings.isFastestModeEnabled)
+            putBoolean(
+                "setting_order_reason_popups",
+                settings.showOrderReasonPopups
+            )
 
             putBoolean(
                 KEY_SECONDARY_BOTH_ENABLED,
@@ -464,6 +468,11 @@ class PreferencesManager(private val context: Context) {
             isAutoAcceptActive = prefs.getBoolean(KEY_AUTO_ACCEPT, true),
             isAutoRejectBadFaresEnabled = prefs.getBoolean(KEY_AUTO_REJECT_BAD_FARES, false),
             isFastestModeEnabled = prefs.getBoolean(KEY_FASTEST_MODE, false),
+            showOrderReasonPopups =
+                prefs.getBoolean(
+                    "setting_order_reason_popups",
+                    true
+                ),
 
             isSecondaryBothFilterEnabled =
                 prefs.getBoolean(

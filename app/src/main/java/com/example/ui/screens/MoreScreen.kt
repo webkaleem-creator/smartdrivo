@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.HeadsetMic
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.School
@@ -44,6 +45,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -90,6 +92,7 @@ fun MoreScreen(
     onBack: () -> Unit = {}
 ) {
     val userProfile by prefs.userProfile.collectAsState()
+    val settings by prefs.appSettings.collectAsState()
     var showTutorialDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -324,7 +327,105 @@ fun MoreScreen(
                 }
             }
 
-            // 3. SUPPORT & HELP (Unique options: Tutorial, Telegram Community)
+            // 3. NOTIFICATIONS
+            item {
+                SectionHeader("NOTIFICATIONS")
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = CardBackground
+                    ),
+                    border = BorderStroke(
+                        1.dp,
+                        CardBorderDefault
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                prefs.saveAppSettings(
+                                    settings.copy(
+                                        showOrderReasonPopups =
+                                            !settings.showOrderReasonPopups
+                                    )
+                                )
+                            }
+                            .padding(
+                                horizontal = 12.dp,
+                                vertical = 10.dp
+                            ),
+                        verticalAlignment =
+                            Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .background(
+                                    Color(0xFFEDE9FE),
+                                    RoundedCornerShape(10.dp)
+                                ),
+                            contentAlignment =
+                                Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector =
+                                    Icons.Default.NotificationsActive,
+                                contentDescription = null,
+                                tint = Color(0xFF7C3AED),
+                                modifier =
+                                    Modifier.size(18.dp)
+                            )
+                        }
+
+                        Spacer(
+                            modifier =
+                                Modifier.width(10.dp)
+                        )
+
+                        Column(
+                            modifier =
+                                Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text =
+                                    "Order Reason Popups",
+                                fontWeight =
+                                    FontWeight.Bold,
+                                fontSize = 14.5.sp,
+                                color =
+                                    TextDarkPrimary
+                            )
+
+                            Text(
+                                text =
+                                    "Show short accepted, ignored and rejected reasons over ride apps",
+                                fontSize = 12.sp,
+                                color =
+                                    TextDarkSecondary
+                            )
+                        }
+
+                        Switch(
+                            checked =
+                                settings
+                                    .showOrderReasonPopups,
+                            onCheckedChange = {
+                                enabled ->
+                                prefs.saveAppSettings(
+                                    settings.copy(
+                                        showOrderReasonPopups =
+                                            enabled
+                                    )
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+
+            // 4. SUPPORT & HELP (Unique options: Tutorial, Telegram Community)
             item {
                 SectionHeader("SUPPORT & HELP")
                 Card(
@@ -356,7 +457,7 @@ fun MoreScreen(
             }
 
 
-            // 4. ADMINISTRATIVE (Only if user has Admin privileges)
+            // 5. ADMINISTRATIVE (Only if user has Admin privileges)
             if (userProfile.isAdmin) {
                 item {
                     SectionHeader("ADMINISTRATIVE")
@@ -376,7 +477,7 @@ fun MoreScreen(
                 }
             }
 
-            // 5. Log Out Button
+            // 6. Log Out Button
             item {
                 Spacer(modifier = Modifier.height(4.dp))
                 Button(
@@ -405,7 +506,7 @@ fun MoreScreen(
                 }
             }
 
-            // 6. Footer
+            // 7. Footer
             item {
                 Box(
                     modifier = Modifier

@@ -872,7 +872,7 @@ private fun GroupEditorDialog(
                     modifier =
                         Modifier
                             .fillMaxWidth()
-                            .height(54.dp),
+                            .height(60.dp),
                     textStyle =
                         androidx.compose.ui.text.TextStyle(
                             fontSize = 14.sp
@@ -926,12 +926,16 @@ private fun GroupEditorDialog(
                                 if (isGoTo) {
                                     "Hyderabad, Airport, etc"
                                 } else {
-                                    "Add blocked area"
+                                    "e.g. Shaheen Nagar, Yetru Hills, Rizwan Colony"
                                 },
                                 fontSize = 12.sp
                             )
                         },
-                        singleLine = true,
+                        singleLine = isGoTo,
+                        minLines =
+                            if (isGoTo) 1 else 2,
+                        maxLines =
+                            if (isGoTo) 1 else 2,
                         keyboardOptions =
                             KeyboardOptions(
                                 imeAction = ImeAction.Done
@@ -945,7 +949,10 @@ private fun GroupEditorDialog(
                         modifier =
                             Modifier
                                 .weight(1f)
-                                .height(50.dp),
+                                .height(
+                                    if (isGoTo) 50.dp
+                                    else 68.dp
+                                ),
                         textStyle =
                             androidx.compose.ui.text.TextStyle(
                                 fontSize = 14.sp

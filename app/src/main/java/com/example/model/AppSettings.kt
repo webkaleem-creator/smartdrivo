@@ -87,6 +87,8 @@ data class AppSettings(
     val maxFare: Float = 999f,
     // Backwards compatibility
     val maxDropKm: Float = 7.5f,
+    // Short on-screen reason popup for every finalized ride decision.
+    val showOrderReasonPopups: Boolean = true,
     // Feedback & Auto start
     val soundAlertOnAccept: Boolean = true,
     val vibrateOnAccept: Boolean = true,
