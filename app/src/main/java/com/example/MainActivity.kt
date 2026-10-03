@@ -565,12 +565,40 @@ fun SmartDrivoApp(
                     navController.navigate(Routes.PAYMENT)
                 },
                 onSubmitDirectPayment = { submission ->
-                    activePaymentSubmission = submission
-                    repository.submitPayment(submission) {
-                        navController.navigate(Routes.PAYMENT_PROCESSING)
+                    repository.submitPayment(submission) { success, existingPayment ->
+                        if (success) {
+                            activePaymentSubmission = existingPayment
+                                ?: submission.copy(
+                                    paymentId = "UTR-${submission.utrNumber.trim()}"
+                                )
+                            navController.navigate(Routes.PAYMENT_PROCESSING)
+                        } else if (existingPayment != null) {
+                            activePaymentSubmission = existingPayment
+                            when (existingPayment.status) {
+                                com.example.model.PaymentStatus.PENDING ->
+                                    navController.navigate(Routes.PAYMENT_PENDING) {
+                                        launchSingleTop = true
+                                    }
+
+                                com.example.model.PaymentStatus.APPROVED ->
+                                    navController.navigate(Routes.PAYMENT_SUCCESS) {
+                                        launchSingleTop = true
+                                    }
+
+                                com.example.model.PaymentStatus.REJECTED ->
+                                    navController.navigate(Routes.PAYMENT_FAILED) {
+                                        launchSingleTop = true
+                                    }
+                            }
+                        } else {
+                            android.widget.Toast.makeText(
+                                appContext,
+                                "Payment request could not be submitted. Please check internet or use a new UTR.",
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        }
                     }
-                },
-                onLoginSuccess = { phoneOrEmail ->
+                },                onLoginSuccess = { phoneOrEmail ->
                     prefs.isLoggedIn = true
                     prefs.hasOpenedBefore = true
                     val email = if (phoneOrEmail.contains("@")) phoneOrEmail else userProfile.email
@@ -755,12 +783,46 @@ fun SmartDrivoApp(
                 plan = selectedPlanForPayment,
                 prefs = prefs,
                 onSubmitPayment = { submission ->
-                    activePaymentSubmission = submission
-                    repository.submitPayment(submission) {
-                        navController.navigate(Routes.PAYMENT_PROCESSING)
+                    repository.submitPayment(submission) { success, existingPayment ->
+                        if (success) {
+                            activePaymentSubmission = existingPayment
+                                ?: submission.copy(
+                                    paymentId = "UTR-${submission.utrNumber.trim()}"
+                                )
+                            navController.navigate(Routes.PAYMENT_PROCESSING)
+                        } else if (existingPayment != null) {
+                            activePaymentSubmission = existingPayment
+                            when (existingPayment.status) {
+                                com.example.model.PaymentStatus.PENDING -> {
+                                    android.widget.Toast.makeText(
+                                        appContext,
+                                        "UTR already submitted. Opening current payment status.",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                    navController.navigate(Routes.PAYMENT_PENDING) {
+                                        launchSingleTop = true
+                                    }
+                                }
+
+                                com.example.model.PaymentStatus.APPROVED ->
+                                    navController.navigate(Routes.PAYMENT_SUCCESS) {
+                                        launchSingleTop = true
+                                    }
+
+                                com.example.model.PaymentStatus.REJECTED ->
+                                    navController.navigate(Routes.PAYMENT_FAILED) {
+                                        launchSingleTop = true
+                                    }
+                            }
+                        } else {
+                            android.widget.Toast.makeText(
+                                appContext,
+                                "Payment request could not be submitted. Please check internet or use a new UTR.",
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        }
                     }
-                },
-                onBack = { navController.popBackStack() }
+                },                onBack = { navController.popBackStack() }
             )
         }
 

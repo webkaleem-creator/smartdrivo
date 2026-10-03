@@ -533,24 +533,29 @@ class FirebaseRepository(
     }
 
     // --- Payment Submission Sync ---
-    fun submitPayment(submission: PaymentSubmission, onComplete: (Boolean) -> Unit) {
+    fun submitPayment(
+        submission: PaymentSubmission,
+        onComplete: (Boolean, PaymentSubmission?) -> Unit
+    ) {
         val fs = firestore
         val authUid = auth?.currentUser?.uid
 
         if (fs == null || authUid.isNullOrBlank()) {
             Log.e("FirebaseRepo", "Payment submit blocked: Firebase/Auth unavailable")
-            onComplete(false)
+            onComplete(false, null)
             return
         }
 
         val cleanUtr = submission.utrNumber.trim()
         if (cleanUtr.length != 12 || !cleanUtr.all { it.isDigit() }) {
             Log.e("FirebaseRepo", "Payment submit blocked: invalid 12-digit UTR")
-            onComplete(false)
+            onComplete(false, null)
             return
         }
 
+        val stablePaymentId = "UTR-$cleanUtr"
         val normalized = submission.copy(
+            paymentId = stablePaymentId,
             uid = authUid,
             utrNumber = cleanUtr,
             status = com.example.model.PaymentStatus.PENDING,
@@ -559,35 +564,82 @@ class FirebaseRepository(
 
         scope.launch {
             try {
-                fs.collection("payments").document(normalized.paymentId).set(
-                    mapOf(
-                        "paymentId" to normalized.paymentId,
-                        "uid" to normalized.uid,
-                        "userName" to normalized.userName,
-                        "utrNumber" to normalized.utrNumber,
-                        "planSelected" to normalized.planSelected,
-                        "amount" to normalized.amount,
-                        "status" to "PENDING",
-                        "submittedAt" to normalized.submittedAt,
-                        "approvedAt" to null,
-                        "note" to normalized.note
+                val ownSnapshot = fs.collection("payments")
+                    .whereEqualTo("uid", authUid)
+                    .get()
+                    .await()
+
+                val existingPayment = ownSnapshot.documents
+                    .map { paymentFromDocument(it) }
+                    .filter {
+                        it.utrNumber.trim().equals(cleanUtr, ignoreCase = true)
+                    }
+                    .sortedWith(
+                        compareByDescending<PaymentSubmission> {
+                            it.status == com.example.model.PaymentStatus.PENDING
+                        }.thenByDescending { it.submittedAt }
                     )
-                ).await()
+                    .firstOrNull()
+
+                if (existingPayment != null) {
+                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                        onComplete(false, existingPayment)
+                    }
+                    return@launch
+                }
+
+                val paymentData = mapOf(
+                    "paymentId" to stablePaymentId,
+                    "uid" to authUid,
+                    "userName" to normalized.userName,
+                    "utrNumber" to cleanUtr,
+                    "planSelected" to normalized.planSelected,
+                    "amount" to normalized.amount,
+                    "status" to "PENDING",
+                    "submittedAt" to normalized.submittedAt,
+                    "approvedAt" to null,
+                    "note" to normalized.note
+                )
+
+                fs.collection("payments")
+                    .document(stablePaymentId)
+                    .set(paymentData)
+                    .await()
 
                 prefs.addPaymentSubmission(normalized)
 
                 kotlinx.coroutines.withContext(Dispatchers.Main) {
-                    onComplete(true)
+                    onComplete(true, normalized)
                 }
             } catch (e: Exception) {
-                Log.e("FirebaseRepo", "Payment submission FAILED: ${e.message}")
+                Log.w(
+                    "FirebaseRepo",
+                    "Payment submit blocked/failed for UTR $cleanUtr: ${e.message}"
+                )
+
+                val retryExisting = try {
+                    val retry = fs.collection("payments")
+                        .whereEqualTo("uid", authUid)
+                        .get()
+                        .await()
+
+                    retry.documents
+                        .map { paymentFromDocument(it) }
+                        .filter {
+                            it.utrNumber.trim().equals(cleanUtr, ignoreCase = true)
+                        }
+                        .sortedByDescending { it.submittedAt }
+                        .firstOrNull()
+                } catch (_: Exception) {
+                    null
+                }
+
                 kotlinx.coroutines.withContext(Dispatchers.Main) {
-                    onComplete(false)
+                    onComplete(false, retryExisting)
                 }
             }
         }
     }
-
     fun adminApprovePayment(
         submission: PaymentSubmission,
         onComplete: (Boolean, String) -> Unit

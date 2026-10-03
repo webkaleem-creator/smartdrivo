@@ -582,16 +582,11 @@ fun PaymentScreen(
 
                         } else {
 
+
                             val submission =
                                 PaymentSubmission(
                                     paymentId =
-                                        "PAY-${
-                                            UUID
-                                                .randomUUID()
-                                                .toString()
-                                                .take(8)
-                                                .uppercase()
-                                        }",
+                                        "UTR-$utrNumber",
                                     uid =
                                         userProfile.uid,
                                     userName =

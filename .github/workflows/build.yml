@@ -50,20 +50,28 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease --no-configuration-cache
 
+      - name: Read App Version
+        shell: bash
+        run: |
+          APP_VERSION=$(grep -m1 'versionName = "' app/build.gradle.kts | sed -E 's/.*versionName = "([^"]+)".*/\1/')
+          test -n "$APP_VERSION"
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "Building SmartDrivo v$APP_VERSION"
+
       - name: Prepare Final APK
         shell: bash
         run: |
-          cp app/build/outputs/apk/release/app-release.apk SmartDrivo-v1.0.1-release.apk
-          test -f SmartDrivo-v1.0.1-release.apk
+          cp app/build/outputs/apk/release/app-release.apk "SmartDrivo-v${APP_VERSION}-release.apk"
+          test -f "SmartDrivo-v${APP_VERSION}-release.apk"
 
       - name: Verify APK Signature
         shell: bash
         run: |
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)
-          "$APKSIGNER" verify --verbose --print-certs SmartDrivo-v1.0.1-release.apk
+          "$APKSIGNER" verify --verbose --print-certs "SmartDrivo-v${APP_VERSION}-release.apk"
 
       - name: Upload Signed Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: SmartDrivo-v1.0.1-Release
-          path: SmartDrivo-v1.0.1-release.apk
+          name: SmartDrivo-v${{ env.APP_VERSION }}-Release
+          path: SmartDrivo-v${{ env.APP_VERSION }}-release.apk
