@@ -64,6 +64,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.BuildConfig
 import com.example.data.PreferencesManager
 import com.example.ui.theme.BlueContainer
 import com.example.ui.theme.BluePrimary
@@ -515,7 +516,7 @@ fun MoreScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "SmartDrivo • v1.0",
+                        text = "SmartDrivo • v${BuildConfig.VERSION_NAME}",
                         fontWeight = FontWeight.Normal,
                         fontSize = 13.sp,
                         color = TextDarkTertiary

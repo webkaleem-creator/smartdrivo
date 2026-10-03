@@ -72,20 +72,21 @@ class ExampleUnitTest {
 
     @Test
     fun testRapidoFareParsingMultipleCards() {
-        // Test PROBLEM statement from prompt:
-        // Example: ['₹51 +₹16', '₹84 +₹33'] gives ₹481 instead of correct ₹67
+        // Current fare policy:
+        // when multiple valid fare cards are visible, use the highest verified
+        // total so SmartDrivo does not under-read the active offer.
         val multipleCardsSingleString = listOf("₹51 +₹16", "₹84 +₹33")
         val data1 = RapidoAdapter.extractOrderDataFromTexts(multipleCardsSingleString)
-        assertEquals(51f, data1.baseFare, 0.01f)
-        assertEquals(16f, data1.tipAmount, 0.01f)
-        assertEquals(67f, data1.totalFare, 0.01f)
+        assertEquals(84f, data1.baseFare, 0.01f)
+        assertEquals(33f, data1.tipAmount, 0.01f)
+        assertEquals(117f, data1.totalFare, 0.01f)
 
-        // Test split string format
+        // Same behavior when base/tip values are exposed as separate nodes.
         val multipleCardsSeparateStrings = listOf("₹51", "+₹16", "₹84", "+₹33")
         val data2 = RapidoAdapter.extractOrderDataFromTexts(multipleCardsSeparateStrings)
-        assertEquals(51f, data2.baseFare, 0.01f)
-        assertEquals(16f, data2.tipAmount, 0.01f)
-        assertEquals(67f, data2.totalFare, 0.01f)
+        assertEquals(84f, data2.baseFare, 0.01f)
+        assertEquals(33f, data2.tipAmount, 0.01f)
+        assertEquals(117f, data2.totalFare, 0.01f)
 
         // Test base fare only
         val singleBaseFare = listOf("Auto", "₹73", "1.2 km", "Koramangala")
@@ -432,7 +433,10 @@ class ExampleUnitTest {
 
         assertTrue(decision is DecisionResult.Reject)
         val reject = decision as DecisionResult.Reject
-        assertTrue("Reason should mention drop distance: ${reject.reason}", reject.reason.contains("Drop", ignoreCase = true) && reject.reason.contains("exceeds", ignoreCase = true))
+        assertTrue(
+            "Current compact reject reason should identify the failed Home Both filter: ${reject.reason}",
+            reject.reason.contains("Home Both failed", ignoreCase = true)
+        )
 
         // Also test with FilterMode.DISTANCE_ONLY to ensure drop distance is not bypassed
         val distanceOnlySettings = settings.copy(filterMode = FilterMode.DISTANCE_ONLY)

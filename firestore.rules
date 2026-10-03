@@ -54,12 +54,18 @@ service cloud.firestore {
         (resource != null && resource.data.uid == request.auth.uid)
       );
       
-      // Drivers can create payment submissions for their own UID with status PENDING
+      // Drivers can create payment submissions only with a deterministic
+      // document id derived from the 12-digit UTR.
+      // This prevents the same UTR being submitted again under a new random id.
       allow create: if isAuthenticated() && (
         isAdmin() ||
         (
           request.resource.data.uid == request.auth.uid &&
-          request.resource.data.status == 'PENDING'
+          request.resource.data.status == 'PENDING' &&
+          request.resource.data.utrNumber is string &&
+          request.resource.data.utrNumber.matches('^[0-9]{12}$') &&
+          request.resource.data.paymentId == paymentId &&
+          paymentId == 'UTR-' + request.resource.data.utrNumber
         )
       );
       
