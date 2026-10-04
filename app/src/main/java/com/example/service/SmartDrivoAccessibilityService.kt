@@ -4785,7 +4785,10 @@ private val processingTimeoutRunnable = Runnable {
     // RAPIDO_POST_ACCEPT_FIX_V1
     // Rapido may keep a visible card/container after Match/Accept succeeds.
     // These texts are confirmation/status UI, NOT a new ride offer.
-    private fun isRapidoPostAcceptScreen(root: AccessibilityNodeInfo?): Boolean {
+    // RAPIDO_HISTORY_VERIFY_RACE_V1
+    private fun isRapidoAcceptedConfirmationScreen(
+        root: AccessibilityNodeInfo?
+    ): Boolean {
         if (root == null) return false
 
         val textList = mutableListOf<String>()
@@ -4794,11 +4797,34 @@ private val processingTimeoutRunnable = Runnable {
 
         return allText.contains("thanks for accepting") ||
             allText.contains("checking order status") ||
-            allText.contains("you missed the order") ||
+            allText.contains("go to pickup") ||
+            allText.contains("go to pick up") ||
+            allText.contains("pick up here") ||
+            allText.contains("message customer") ||
+            allText.contains("arrived")
+    }
+
+    private fun isRapidoMissedOrExpiredScreen(
+        root: AccessibilityNodeInfo?
+    ): Boolean {
+        if (root == null) return false
+
+        val textList = mutableListOf<String>()
+        collectAllNodeText(root, textList)
+        val allText = textList.joinToString(" ").lowercase(Locale.ROOT)
+
+        return allText.contains("you missed the order") ||
             allText.contains("order missed") ||
             allText.contains("order expired") ||
             allText.contains("no longer available") ||
             allText.contains("accepted by another")
+    }
+
+    private fun isRapidoPostAcceptScreen(
+        root: AccessibilityNodeInfo?
+    ): Boolean {
+        return isRapidoAcceptedConfirmationScreen(root) ||
+            isRapidoMissedOrExpiredScreen(root)
     }
     private fun isRapidoOrderScreenVisible(root: AccessibilityNodeInfo?): Boolean {
         return isRapidoOrderPopupShowing(root)
@@ -5305,13 +5331,63 @@ private val processingTimeoutRunnable = Runnable {
                 !isRapidoOrderPopupShowing(rapidoRoot)
             )
         ) {
-            Log.i(TAG, "Rapido order popup nodes are not visible (fare and Accept button required). No click triggered.")
+            val latestRoot = rootInActiveWindow
+            val missed =
+                isRapidoMissedOrExpiredScreen(latestRoot)
+            val acceptedScreen =
+                isRapidoAcceptedConfirmationScreen(latestRoot)
 
-            val recordId = pinnedRecordId
+            // RAPIDO_HISTORY_VERIFY_RACE_V1
+            // attemptNumber > 1 means a verified Accept click was already sent.
+            // Popup disappearing between verification and retry is a post-click
+            // transition, not "IGNORED".
+            if (attemptNumber > 1 || acceptedScreen) {
+                val recordId = pinnedRecordId
 
+                if (missed) {
+                    onOrderActionCompletedFast(
+                        recordId = recordId,
+                        candidate = candidate,
+                        status = OrderStatus.MISSED,
+                        reasonCode = "ORDER_MISSED_AFTER_ACCEPT_ATTEMPT",
+                        reasonText = "Order became unavailable after accept attempt",
+                        actionSucceeded = false,
+                        timesClicked = (attemptNumber - 1).coerceAtLeast(1),
+                        buttonFound = true,
+                        buttonDetails = "Verified Rapido Accept was attempted",
+                        clickMethod = "Strict Button Click"
+                    )
+                } else {
+                    showAcceptedOrderOverlay(candidate)
+
+                    onOrderActionCompletedFast(
+                        recordId = recordId,
+                        candidate = candidate,
+                        status = OrderStatus.ACCEPTED,
+                        reasonCode = "FILTERS_MATCHED",
+                        reasonText =
+                            acceptedHistoryReason
+                                ?.takeIf { it.isNotBlank() }
+                                ?: buildAcceptedFilterReason(candidate),
+                        actionSucceeded = true,
+                        timesClicked = (attemptNumber - 1).coerceAtLeast(1),
+                        buttonFound = true,
+                        buttonDetails = "Verified Rapido Accept completed before retry",
+                        clickMethod = "Strict Button Click"
+                    )
+                }
+
+                resetProcessing()
+                return
+            }
+
+            Log.i(
+                TAG,
+                "Rapido popup closed before any verified Accept click was completed."
+            )
 
             onOrderDecisionFast(
-                recordId = recordId,
+                recordId = pinnedRecordId,
                 candidate = candidate,
                 status = OrderStatus.IGNORED,
                 reasonCode = "ORDER_POPUP_CLOSED",
@@ -5483,12 +5559,36 @@ private val processingTimeoutRunnable = Runnable {
         serviceScope.launch(Dispatchers.IO) {
             delay(40L) // RAPIDO_SPEED_V3
             val currentRoot = getRapidoOrderRootNode(orderRoot)
-                        val postAcceptConfirmed = isRapidoPostAcceptScreen(currentRoot)
-val isOrderStillVisible =
-    currentRoot != null &&
-        isRapidoOrderPopupShowing(currentRoot)
+            val acceptedConfirmation =
+                isRapidoAcceptedConfirmationScreen(currentRoot)
+            val missedConfirmation =
+                isRapidoMissedOrExpiredScreen(currentRoot)
 
-                        if (postAcceptConfirmed || !isOrderStillVisible) {
+            val isOrderStillVisible =
+                currentRoot != null &&
+                    isRapidoOrderPopupShowing(currentRoot)
+
+            if (missedConfirmation) {
+                val recordId = pinnedRecordId
+
+                onOrderActionCompletedFast(
+                    recordId = recordId,
+                    candidate = candidate,
+                    status = OrderStatus.MISSED,
+                    reasonCode = "ORDER_MISSED_AFTER_ACCEPT_ATTEMPT",
+                    reasonText = "Order expired or was taken after accept attempt",
+                    actionSucceeded = false,
+                    timesClicked = attemptNumber,
+                    buttonFound = true,
+                    buttonDetails = "Verified Rapido Accept button was attempted",
+                    clickMethod = "Strict Button Click (attempt #$attemptNumber)"
+                )
+
+                resetProcessing()
+                return@launch
+            }
+
+            if (acceptedConfirmation || !isOrderStillVisible) {
                 // RAPIDO_ACCEPTED_OVERLAY_FAST_V3
                 // Acceptance confirmed: show popup first.
                 // History/database work must not delay the overlay.
