@@ -265,7 +265,7 @@ fun PlanSelectionScreen(
                                                 "Full SmartDrivo access - Free"
 
                                             else ->
-                                                "â‚¹${if (currentPlanPrice > 0) currentPlanPrice else currentPlan?.price ?: 0} plan"
+                                                "₹${if (currentPlanPrice > 0) currentPlanPrice else currentPlan?.price ?: 0} plan"
                                         },                                        fontSize = 12.sp,
                                         color = Color(0xFF64748B)
                                     )
@@ -470,7 +470,7 @@ fun PlanSelectionScreen(
 
                                 Text(
                                     text = plan.label,
-                                    fontSize = 16.sp,
+                                    fontSize = 17.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF0F172A)
                                 )
@@ -535,15 +535,16 @@ fun PlanSelectionScreen(
 
                             Text(
                                 text = "${plan.days} Days SmartDrivo Access",
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
                                 color = Color(0xFF64748B)
                             )
 
                             if (plan.description.isNotBlank()) {
                                 Text(
                                     text = plan.description,
-                                    fontSize = 10.5.sp,
-                                    color = Color(0xFF94A3B8)
+                                    fontSize = 11.5.sp,
+                                    color = Color(0xFF64748B)
                                 )
                             }
                         }
@@ -551,7 +552,7 @@ fun PlanSelectionScreen(
 
                         Text(
                             text = "₹${plan.price}",
-                            fontSize = 19.sp,
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color(0xFF2196F3)
                         )
