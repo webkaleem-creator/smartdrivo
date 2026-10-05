@@ -133,6 +133,25 @@ object RapidoAdapter {
         return false
     }
 
+    // RAPIDO_CUSTOMER_EXTRA_V1
+    // "Customer added ₹10 extra" is informational.
+    // Do NOT treat it as another fare and do NOT add it again.
+    private fun isCustomerAddedExtraFareLine(text: String): Boolean {
+        val lower = text.lowercase().trim()
+
+        if (!lower.contains("customer")) {
+            return false
+        }
+
+        val isExtraInfo =
+            lower.contains("added") ||
+                lower.contains("extra") ||
+                lower.contains("tip") ||
+                lower.contains("bonus")
+
+        return isExtraInfo &&
+            RUPEE_AMOUNT_REGEX.matcher(text).find()
+    }
     /**
      * Checks whether an accessibility node is inside a "Today's Earnings" or "Earnings" container.
      */
@@ -441,7 +460,10 @@ object RapidoAdapter {
         val verifiedPairs = mutableListOf<Triple<Float, Float, Float>>()
 
         for (i in texts.indices) {
-            if (isEarningsContext(texts, i)) {
+            if (
+                isEarningsContext(texts, i) ||
+                isCustomerAddedExtraFareLine(texts[i])
+            ) {
                 continue
             }
 
@@ -537,7 +559,11 @@ object RapidoAdapter {
         if (isBundleOrder) {
             val bundleFareAmounts = mutableListOf<Float>()
             for (i in texts.indices) {
-                if (isEarningsContext(texts, i)) continue
+                if (
+                    isEarningsContext(texts, i) ||
+                    isCustomerAddedExtraFareLine(texts[i])
+                ) continue
+
                 val bundleMatcher = rupeeMatcher.matcher(texts[i])
                 while (bundleMatcher.find()) {
                     bundleMatcher.group(1)?.toFloatOrNull()?.let {
@@ -1350,6 +1376,7 @@ object RapidoAdapter {
         val fareLines =
             texts.filterIndexed { index, line ->
                 !isEarningsContext(texts, index) &&
+                    !isCustomerAddedExtraFareLine(line) &&
                     RUPEE_AMOUNT_REGEX.matcher(line).find()
             }
 
