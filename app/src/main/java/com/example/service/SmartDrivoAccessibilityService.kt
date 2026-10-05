@@ -7099,12 +7099,11 @@ private fun isRapidoAcceptedConfirmationScreen(
         fun fareRange(): String {
             val min = settings.minFare.toInt()
             return if (settings.maxFare > 0f) {
-                "Γé╣$minΓÇôΓé╣${settings.maxFare.toInt()}"
+                "\u20B9$min - \u20B9${settings.maxFare.toInt()}"
             } else {
-                "Γé╣$min+"
+                "\u20B9$min+"
             }
         }
-
         // Priority modes should describe the mode that actually controlled acceptance.
         val hasActiveGoTo =
             settings.isGoToEnabled &&
