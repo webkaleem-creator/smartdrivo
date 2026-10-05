@@ -303,9 +303,6 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
     @Volatile
     private var lastRapidoEventDispatchAt = 0L
-
-
-
     @Volatile
     private var activeRapidoPopupOrderId: String? = null
 
@@ -1236,6 +1233,7 @@ private val processingTimeoutRunnable = Runnable {
 
             lastRapidoEventDispatchAt = now
 
+
             Log.d("SmartDrivo", "Rapido event received: ${event.eventType}")
             Log.i(
                 TAG,
@@ -1481,6 +1479,9 @@ private val processingTimeoutRunnable = Runnable {
             val candidateRoots =
                 mutableListOf<AccessibilityNodeInfo>()
 
+            val seenRapidoWindows =
+                mutableSetOf<String>()
+
             fun addCandidateRoot(node: AccessibilityNodeInfo?) {
                 if (node == null) return
 
@@ -1493,7 +1494,21 @@ private val processingTimeoutRunnable = Runnable {
                         .lowercase(Locale.ROOT)
 
                 if (isRapidoPackage(pkg) || pkg == "com.rapido.passenger") {
-                    if (candidateRoots.none { it === top }) {
+                    val windowId =
+                        try {
+                            top.windowId
+                        } catch (_: Exception) {
+                            -1
+                        }
+
+                    val key =
+                        if (windowId >= 0) {
+                            "$pkg|window:$windowId"
+                        } else {
+                            "$pkg|node:${System.identityHashCode(top)}"
+                        }
+
+                    if (seenRapidoWindows.add(key)) {
                         candidateRoots.add(top)
                     }
                 }
@@ -4844,7 +4859,10 @@ private val processingTimeoutRunnable = Runnable {
         // Never parse Rapido confirmation/status UI as a fresh ride.
         // The running accept-verification coroutine will finalize the ORIGINAL
         // history row, preserving fare, distance and addresses.
-        if (isRapidoPostAcceptScreen(root)) {
+        // RAPIDO_REDUNDANT_SCAN_SPEED_V1
+        // If processAccessibilityEvent already supplied a valid popup,
+        // do not immediately scan the whole tree again for post-accept text.
+        if (preValidation == null && isRapidoPostAcceptScreen(root)) {
             Log.i(TAG, "RAPIDO POST-ACCEPT screen detected; blocking duplicate candidate/history insert")
             return
         }
@@ -5358,7 +5376,7 @@ private val processingTimeoutRunnable = Runnable {
                         clickMethod = "Strict Button Click"
                     )
                 } else {
-                    showAcceptedOrderOverlay(candidate)
+                        showAcceptedOrderOverlay(candidate)
 
                     onOrderActionCompletedFast(
                         recordId = recordId,

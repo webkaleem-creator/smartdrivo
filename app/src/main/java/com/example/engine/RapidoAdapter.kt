@@ -1491,22 +1491,28 @@ object RapidoAdapter {
             )
         }
 
-        if (isRapidoHomeScreen(root)) {
+        // RAPIDO_REDUNDANT_SCAN_SPEED_V1
+        // Search the verified Accept target first. A genuine offer still MUST
+        // pass same-card fare + pickup + drop validation below.
+        // Only perform the expensive Home-screen scan when Accept is absent.
+        val acceptBtn =
+            findAcceptButton(root)
+
+        if (acceptBtn == null) {
+            if (isRapidoHomeScreen(root)) {
+                return RapidoPopupValidation(
+                    isValid = false,
+                    failureReason =
+                        "Home screen detected ('Today's Earnings' / 'ON DUTY' / 'Blue Performance')"
+                )
+            }
+
             return RapidoPopupValidation(
                 isValid = false,
                 failureReason =
-                    "Home screen detected ('Today's Earnings' / 'ON DUTY' / 'Blue Performance')"
+                    "Missing 'Accept' or 'ACCEPT' button"
             )
         }
-
-        // Find the real Accept target FIRST.
-        val acceptBtn =
-            findAcceptButton(root)
-                ?: return RapidoPopupValidation(
-                    isValid = false,
-                    failureReason =
-                        "Missing 'Accept' or 'ACCEPT' button"
-                )
 
         val bounds = Rect()
         acceptBtn.node.getBoundsInScreen(bounds)
