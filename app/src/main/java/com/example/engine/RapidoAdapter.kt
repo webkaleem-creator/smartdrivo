@@ -1329,6 +1329,200 @@ object RapidoAdapter {
      * In addition:
      * - If the root node contains "Today's Earnings" or "ON DUTY" or "Blue Performance" -> HOME SCREEN, skip completely.
      */
+    // RAPIDO_ONE_PASS_SCAN_V1
+    // Traverse the Rapido accessibility tree exactly once.
+    // Collect order text + home-screen text + Accept node together.
+    // Step 6B will connect this scanner to live validation.
+    private data class RapidoOnePassScan(
+        val entries: List<TextNodeEntry>,
+        val orderTexts: List<String>,
+        val homeTexts: List<String>,
+        val acceptButton: DetectedButton?,
+        val isHomeScreen: Boolean,
+        val nodeCount: Int
+    )
+
+    private fun collectRapidoOnePassScan(
+        root: AccessibilityNodeInfo
+    ): RapidoOnePassScan {
+
+        val entries =
+            mutableListOf<TextNodeEntry>()
+
+        val orderTexts =
+            mutableListOf<String>()
+
+        val homeTexts =
+            mutableListOf<String>()
+
+        val rootPkg =
+            root.packageName
+                ?.toString()
+                .orEmpty()
+
+        val queue =
+            ArrayDeque<Pair<AccessibilityNodeInfo, String>>()
+
+        queue.add(
+            Pair(root, rootPkg)
+        )
+
+        var acceptButton: DetectedButton? = null
+        var nodeCount = 0
+
+        while (
+            queue.isNotEmpty() &&
+            nodeCount < 350
+        ) {
+
+            val item =
+                queue.removeFirst()
+
+            val node =
+                item.first
+
+            val inheritedPkg =
+                item.second
+
+            nodeCount++
+
+            val nodePkg =
+                node.packageName
+                    ?.toString()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: inheritedPkg
+
+            if (isSmartDrivoPackage(nodePkg)) {
+                continue
+            }
+
+            val text =
+                node.text
+                    ?.toString()
+                    ?.trim()
+
+            val desc =
+                node.contentDescription
+                    ?.toString()
+                    ?.trim()
+
+            if (!text.isNullOrEmpty()) {
+                homeTexts.add(text)
+            }
+
+            if (!desc.isNullOrEmpty()) {
+                homeTexts.add(desc)
+            }
+
+            val content =
+                when {
+                    !text.isNullOrEmpty() -> text
+                    !desc.isNullOrEmpty() -> desc
+                    else -> null
+                }
+
+            if (!content.isNullOrEmpty()) {
+
+                val bounds = Rect()
+                node.getBoundsInScreen(bounds)
+
+                entries.add(
+                    TextNodeEntry(
+                        text = content,
+                        bounds = bounds,
+                        viewId = node.viewIdResourceName,
+                        packageName = nodePkg
+                    )
+                )
+
+                orderTexts.add(content)
+            }
+
+            if (acceptButton == null) {
+
+                val fullId =
+                    node.viewIdResourceName
+                        .orEmpty()
+
+                val bareId =
+                    fullId.substringAfterLast(":id/")
+
+                val idMatches =
+                    BARE_ACCEPT_IDS.any { known ->
+                        bareId.equals(
+                            known,
+                            ignoreCase = true
+                        )
+                    }
+
+                val labelMatches =
+                    isAcceptText(text) ||
+                        isAcceptDescription(desc)
+
+                if (idMatches || labelMatches) {
+
+                    val target =
+                        resolveClickableTarget(node)
+
+                    val targetBounds = Rect()
+                    target.getBoundsInScreen(
+                        targetBounds
+                    )
+
+                    if (
+                        targetBounds.width() > 0 &&
+                        targetBounds.height() > 0
+                    ) {
+
+                        val targetPkg =
+                            target.packageName
+                                ?.toString()
+                                ?.takeIf { it.isNotBlank() }
+                                ?: nodePkg
+
+                        acceptButton =
+                            DetectedButton(
+                                node = target,
+                                buttonId =
+                                    if (fullId.isNotBlank()) {
+                                        fullId
+                                    } else {
+                                        text
+                                            ?: desc
+                                            ?: "Accept"
+                                    },
+                                packageName = targetPkg,
+                                method = "ONE_PASS"
+                            )
+                    }
+                }
+            }
+
+            for (i in 0 until node.childCount) {
+
+                val child =
+                    node.getChild(i)
+
+                if (child != null) {
+                    queue.add(
+                        Pair(child, nodePkg)
+                    )
+                }
+            }
+        }
+
+        return RapidoOnePassScan(
+            entries = entries,
+            orderTexts = orderTexts,
+            homeTexts = homeTexts,
+            acceptButton = acceptButton,
+            isHomeScreen =
+                isRapidoHomeScreenTexts(
+                    homeTexts
+                ),
+            nodeCount = nodeCount
+        )
+    }
     fun validateRapidoOrderPopup(root: AccessibilityNodeInfo?): RapidoPopupValidation {
         if (root == null) {
             return RapidoPopupValidation(isValid = false, failureReason = "Null root node")

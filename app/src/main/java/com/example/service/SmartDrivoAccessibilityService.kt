@@ -304,6 +304,13 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     @Volatile
     private var lastRapidoEventDispatchAt = 0L
 
+    // RAPIDO_PENDING_RESCAN_V1
+    // Keep only ONE newest Rapido rescan while parser is busy.
+    @Volatile
+    private var rapidoPendingRescan = false
+
+    private val rapidoProcessingLock = Any()
+
 
 
     @Volatile
@@ -1138,6 +1145,98 @@ private val processingTimeoutRunnable = Runnable {
         }
 
         val eventPkg = event.packageName?.toString().orEmpty().trim().lowercase()
+
+        // RAPIDO_DIRECT_PRIORITY_V1
+        // RAPIDO_DEBOUNCE_1MS_V1
+        // Direct Rapido events bypass Uber/Ola discovery.
+        val directRapidoEvent =
+            isRapidoPackage(eventPkg)
+
+        if (directRapidoEvent) {
+
+            val now = System.currentTimeMillis()
+
+            if (
+                event.eventType ==
+                    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+                now - lastRapidoEventDispatchAt < 1L
+            ) {
+                return
+            }
+
+            lastRapidoEventDispatchAt = now
+
+            val directSource =
+                try {
+                    event.source
+                } catch (_: Exception) {
+                    null
+                }
+
+            val shouldLaunch =
+                synchronized(rapidoProcessingLock) {
+
+                    if (isRapidoEventProcessing) {
+                        // RAPIDO_PENDING_RESCAN_V1
+                        // Never queue hundreds of events.
+                        // Remember only that one fresh rescan is needed.
+                        rapidoPendingRescan = true
+                        false
+                    } else {
+                        isRapidoEventProcessing = true
+                        rapidoPendingRescan = false
+                        true
+                    }
+                }
+
+            if (shouldLaunch) {
+
+                serviceScope.launch(Dispatchers.IO) {
+
+                    var firstPass = true
+                    var keepRunning = true
+
+                    while (keepRunning) {
+
+                        try {
+                            processAccessibilityEvent(
+                                eventPkg = eventPkg,
+                                eventSource =
+                                    if (firstPass) directSource else null,
+                                eventType =
+                                    if (firstPass) {
+                                        event.eventType
+                                    } else {
+                                        AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                                    }
+                            )
+                        } catch (e: Exception) {
+                            Log.e(
+                                TAG,
+                                "Rapido pending worker error: ${e.message}",
+                                e
+                            )
+                        }
+
+                        firstPass = false
+
+                        keepRunning =
+                            synchronized(rapidoProcessingLock) {
+
+                                if (rapidoPendingRescan) {
+                                    rapidoPendingRescan = false
+                                    true
+                                } else {
+                                    isRapidoEventProcessing = false
+                                    false
+                                }
+                            }
+                    }
+                }
+            }
+
+            return
+        }
         val activeRootPkg = rootInActiveWindow?.packageName?.toString().orEmpty().trim().lowercase()
         val selfPkg = packageName.trim().lowercase()
 
@@ -1478,6 +1577,101 @@ private val processingTimeoutRunnable = Runnable {
         if (isRapidoPkg) {
             Log.d("SmartDrivo", "Rapido event received: $eventType")
 
+            // RAPIDO_EVENT_SOURCE_FIRST_V1
+            // RAPIDO_SOURCE_SUBTREE_FAST_V1
+            // Fastest path: validate the raw changed subtree first.
+            // Use it only when the FULL order is already present.
+            // Otherwise keep the existing full-root/window fallback.
+            val directRapidoSource =
+                eventSource
+                    ?.takeIf { source ->
+                        val sourcePkg =
+                            source.packageName
+                                ?.toString()
+                                .orEmpty()
+
+                        isRapidoPackage(sourcePkg)
+                    }
+
+            if (directRapidoSource != null) {
+
+                val sourceValidation =
+                    RapidoAdapter.validateRapidoOrderPopup(
+                        directRapidoSource
+                    )
+
+                val sourceDropKm =
+                    sourceValidation.orderData
+                        ?.dropKm
+
+                val sourceIsComplete =
+                    sourceValidation.isValid &&
+                        sourceDropKm != null &&
+                        sourceDropKm > 0f
+
+                if (sourceIsComplete) {
+
+                    lastValidRapidoPopupAt =
+                        System.currentTimeMillis()
+
+                    Log.d(
+                        TAG,
+                        "RAPIDO SOURCE SUBTREE FAST: complete order found"
+                    )
+
+                    handleRapidoOrder(
+                        directRapidoSource,
+                        sourceValidation
+                    )
+
+                    return
+                }
+            }
+
+            // Raw subtree was incomplete.
+            // Promote to the full Rapido root before scanning windows.
+            val directRapidoRoot =
+                directRapidoSource
+                    ?.let { source ->
+                        getTopRootNode(source)
+                    }
+                    ?.takeIf { sourceRoot ->
+                        val sourcePkg =
+                            sourceRoot.packageName
+                                ?.toString()
+                                .orEmpty()
+
+                        isRapidoPackage(sourcePkg)
+                    }
+
+            if (
+                directRapidoRoot != null &&
+                directRapidoRoot !== directRapidoSource
+            ) {
+
+                val directValidation =
+                    RapidoAdapter.validateRapidoOrderPopup(
+                        directRapidoRoot
+                    )
+
+                if (directValidation.isValid) {
+
+                    lastValidRapidoPopupAt =
+                        System.currentTimeMillis()
+
+                    Log.d(
+                        TAG,
+                        "RAPIDO SOURCE ROOT FALLBACK: genuine popup found"
+                    )
+
+                    handleRapidoOrder(
+                        directRapidoRoot,
+                        directValidation
+                    )
+
+                    return
+                }
+            }
             val candidateRoots =
                 mutableListOf<AccessibilityNodeInfo>()
 
@@ -4804,56 +4998,31 @@ private val processingTimeoutRunnable = Runnable {
         return isRapidoOrderPopupShowing(root)
     }
 
-    private fun handleRapidoOrder(root: AccessibilityNodeInfo?, preValidation: RapidoPopupValidation? = null) {
-        if (root == null) return
+    // RAPIDO_FAST_SNAPSHOT_V1
+    // One immutable in-memory representation of the visible offer.
+    // The same candidate is reused by History, filters and Accept.
+    // No History UI or Room schema changes.
+    private data class RapidoFastSnapshot(
+        val candidate: RideCandidate,
+        val acceptNode: AccessibilityNodeInfo?,
+        val orderId: String,
+        val capturedAtMs: Long
+    )
 
-        val rootPkg = root.packageName?.toString().orEmpty()
-        if (RapidoAdapter.isSmartDrivoPackage(rootPkg)) {
-            Log.d(TAG, "Ignoring handleRapidoOrder on SmartDrivo UI package: $rootPkg")
-            return
-        }
+    private fun captureRapidoFastSnapshot(
+        root: AccessibilityNodeInfo,
+        validation: RapidoPopupValidation
+    ): RapidoFastSnapshot? {
 
-
-        // RAPIDO_POST_ACCEPT_FIX_V1
-        // Never parse Rapido confirmation/status UI as a fresh ride.
-        // The running accept-verification coroutine will finalize the ORIGINAL
-        // history row, preserving fare, distance and addresses.
-        if (isRapidoPostAcceptScreen(root)) {
-            Log.i(TAG, "RAPIDO POST-ACCEPT screen detected; blocking duplicate candidate/history insert")
-            return
-        }
-// Validate genuine popup BEFORE applying home-screen detection.
-        // A real Rapido order card can be rendered as an overlay while
-        // underlying Home text is still present in the same node tree.
-        val validation =
-            preValidation
-                ?: RapidoAdapter.validateRapidoOrderPopup(root)
-
-        if (!validation.isValid) {
-            if (RapidoAdapter.isRapidoHomeScreen(root)) {
-                Log.i(
-                    TAG,
-                    "🏠 Rapido HOME SCREEN detected with no valid order popup. " +
-                        "Skipping completely."
-                )
-            } else {
-                Log.d(
-                    TAG,
-                    "❌ Rapido order popup missing required elements: " +
-                        "${validation.failureReason}. " +
-                        "Do NOT log to history, do NOT process."
-                )
-            }
-            return
-        }
-        // RAPIDO_TURBO_DROP_ONLY_V4
-        // Validation already parsed this popup once. Do not walk the tree again.
-        val turboStartNs =
-            System.nanoTime()
+        val capturedAtMs =
+            System.currentTimeMillis()
 
         val profileSnapshot =
             prefs.userProfile.value
 
+        // Prefer data already captured during popup validation.
+        // Only use the existing fallback parser when validation
+        // did not provide orderData.
         val orderData =
             validation.orderData
                 ?: RapidoAdapter.extractOrderData(
@@ -4870,9 +5039,9 @@ private val processingTimeoutRunnable = Runnable {
         if (finalFare == null || finalFare <= 0f) {
             Log.d(
                 TAG,
-                "Rapido candidate has no valid fare. Skipping."
+                "RAPIDO SNAPSHOT: invalid fare - waiting for next event"
             )
-            return
+            return null
         }
 
         val candidate =
@@ -4897,7 +5066,7 @@ private val processingTimeoutRunnable = Runnable {
                 isBundledOrder =
                     orderData.isBundledOrder,
                 detectionTimeMs =
-                    System.currentTimeMillis(),
+                    capturedAtMs,
                 baseFare =
                     orderData.baseFare
                         .takeIf { it > 0f }
@@ -4905,6 +5074,84 @@ private val processingTimeoutRunnable = Runnable {
                 tipAmount =
                     orderData.tipAmount
             )
+
+        return RapidoFastSnapshot(
+            candidate = candidate,
+            acceptNode = validation.acceptButton?.node,
+            orderId = getOrderIdentifier(candidate),
+            capturedAtMs = capturedAtMs
+        )
+    }
+    private fun handleRapidoOrder(root: AccessibilityNodeInfo?, preValidation: RapidoPopupValidation? = null) {
+        if (root == null) return
+
+        val rootPkg = root.packageName?.toString().orEmpty()
+        if (RapidoAdapter.isSmartDrivoPackage(rootPkg)) {
+            Log.d(TAG, "Ignoring handleRapidoOrder on SmartDrivo UI package: $rootPkg")
+            return
+        }
+
+
+        // RAPIDO_POST_ACCEPT_LAZY_CHECK_V1
+        // Do not scan the full tree for post-accept text before
+        // the one-pass live validator. Genuine offers take the
+        // shortest path; status-screen check runs only on failure.
+// Validate genuine popup BEFORE applying home-screen detection.
+        // A real Rapido order card can be rendered as an overlay while
+        // underlying Home text is still present in the same node tree.
+        val validation =
+            preValidation
+                ?: RapidoAdapter.validateRapidoOrderPopup(root)
+
+        if (!validation.isValid) {
+
+            // RAPIDO_POST_ACCEPT_LAZY_CHECK_V1
+            // Expensive status-text scan is fallback only.
+            if (isRapidoPostAcceptScreen(root)) {
+                Log.i(
+                    TAG,
+                    "RAPIDO POST-ACCEPT screen detected; blocking duplicate candidate/history insert"
+                )
+                return
+            }
+            if (RapidoAdapter.isRapidoHomeScreen(root)) {
+                Log.i(
+                    TAG,
+                    "🏠 Rapido HOME SCREEN detected with no valid order popup. " +
+                        "Skipping completely."
+                )
+            } else {
+                Log.d(
+                    TAG,
+                    "❌ Rapido order popup missing required elements: " +
+                        "${validation.failureReason}. " +
+                        "Do NOT log to history, do NOT process."
+                )
+            }
+            return
+        }
+        // RAPIDO_TURBO_DROP_ONLY_V4
+        // Validation already parsed this popup once. Do not walk the tree again.
+        val turboStartNs =
+            System.nanoTime()
+
+        // RAPIDO_FAST_SNAPSHOT_V1
+        // Freeze this validated popup once and reuse it everywhere.
+        val snapshot =
+            captureRapidoFastSnapshot(
+                root = root,
+                validation = validation
+            ) ?: return
+
+        val candidate =
+            snapshot.candidate
+
+        Log.d(
+            TAG,
+            "RAPIDO SNAPSHOT ready: orderId=${snapshot.orderId}, " +
+                "fare=${candidate.fare}, pickup=${candidate.pickupDistKm}, " +
+                "trip=${candidate.dropDistKm}"
+        )
         // RAPIDO_COMPLETE_HISTORY_V4
         // Wait for the complete card before inserting History.
         // This prevents Trip:N/A + a second full row for the same offer.
@@ -4925,7 +5172,7 @@ private val processingTimeoutRunnable = Runnable {
             return
         }
         val bookingId = candidate.bookingId
-        val orderId = getOrderIdentifier(candidate)
+        val orderId = snapshot.orderId
 
         if (activeRapidoPopupOrderId == orderId) {
             Log.i(
@@ -5184,7 +5431,7 @@ private val processingTimeoutRunnable = Runnable {
                 candidate = candidate,
                 orderRoot = root,
                 prevalidatedAcceptNode =
-                    validation.acceptButton?.node,
+                    snapshot.acceptNode,
                 historyRecordId = recordId,
                 acceptedHistoryReason =
                     acceptedHistoryReason
