@@ -152,6 +152,55 @@ object RapidoAdapter {
         return isExtraInfo &&
             RUPEE_AMOUNT_REGEX.matcher(text).find()
     }
+    // RAPIDO_SERVICE_VARIANTS_V1
+    // Rapido Auto Priority / Auto Boost can expose a small service
+    // fee/bonus inside the SAME order card. It is informational and
+    // must not make the real top order fare look "ambiguous".
+    //
+    // IMPORTANT: "Auto Priority ₹xxx" itself is NOT ignored because
+    // that can be the actual order fare.
+    private fun isRapidoServiceAddonFareLine(
+        text: String
+    ): Boolean {
+
+        if (!RUPEE_AMOUNT_REGEX.matcher(text).find()) {
+            return false
+        }
+
+        val lower =
+            text.trim().lowercase()
+
+        if (
+            lower.contains("auto priority") ||
+            lower.contains("auto boost") ||
+            lower.contains("auto parcel")
+        ) {
+            return false
+        }
+
+        val serviceWord =
+            lower.contains("priority") ||
+                lower.contains("boost")
+
+        if (!serviceWord) {
+            return false
+        }
+
+        val informationalWord =
+            lower.contains("fee") ||
+                lower.contains("fees") ||
+                lower.contains("charge") ||
+                lower.contains("charges") ||
+                lower.contains("extra") ||
+                lower.contains("bonus") ||
+                lower.contains("premium") ||
+                lower.contains("additional") ||
+                lower.contains("add-on") ||
+                lower.contains("addon") ||
+                lower.contains("incentive")
+
+        return informationalWord
+    }
     /**
      * Checks whether an accessibility node is inside a "Today's Earnings" or "Earnings" container.
      */
@@ -252,7 +301,18 @@ object RapidoAdapter {
     }
 
     val FORBIDDEN_ADDRESS_TEXTS = setOf(
-        "auto", "services", "nearby",
+        "auto",
+        "auto priority",
+        "auto boost",
+        "auto parcel",
+        "priority",
+        "boost",
+        "parcel",
+        "priority fee",
+        "boost fee",
+        "parcel delivery",
+        "services",
+        "nearby",
         "view", "go to", "home", "credit", "orders", "surge",
         "accept", "decline", "reject", "pass", "skip",
         "ride", "trip", "captain", "rapido", "bike", "cab",
@@ -438,6 +498,41 @@ object RapidoAdapter {
             it.contains("Bundled Order", ignoreCase = true)
         }
 
+        // RAPIDO_SERVICE_VARIANTS_V1
+        val rapidoServiceVariant =
+            when {
+                texts.any {
+                    it.contains(
+                        "Auto Priority",
+                        ignoreCase = true
+                    )
+                } ->
+                    "AUTO_PRIORITY"
+
+                texts.any {
+                    it.contains(
+                        "Auto Boost",
+                        ignoreCase = true
+                    )
+                } ->
+                    "AUTO_BOOST"
+
+                texts.any {
+                    it.contains(
+                        "Auto Parcel",
+                        ignoreCase = true
+                    )
+                } ->
+                    "AUTO_PARCEL"
+
+                else ->
+                    "AUTO"
+            }
+
+        logI(
+            TAG,
+            "RAPIDO SERVICE VARIANT: $rapidoServiceVariant"
+        )
         // 1. Fare extraction - RAPIDO_FARE_ACCURACY_V2
         //
         // Rapido may expose Total Fare, Base Fare and Tip/Bonus together.
@@ -845,7 +940,19 @@ object RapidoAdapter {
         "btnAccept",
         "btn_accept_order",
         "button_accept",
-        "accept_btn"
+        "accept_btn",
+
+        // RAPIDO_SERVICE_VARIANTS_V1
+        "priority_accept_button",
+        "btn_accept_priority",
+        "accept_priority_order",
+        "boost_accept_button",
+        "btn_accept_boost",
+        "accept_boost_order",
+        "parcel_accept_button",
+        "btn_accept_parcel",
+        "accept_parcel_order",
+        "service_accept_button"
     )
 
     // METHOD B: Texts to match (Exact & keywords)
@@ -1377,6 +1484,7 @@ object RapidoAdapter {
             texts.filterIndexed { index, line ->
                 !isEarningsContext(texts, index) &&
                     !isCustomerAddedExtraFareLine(line) &&
+                    !isRapidoServiceAddonFareLine(line) &&
                     RUPEE_AMOUNT_REGEX.matcher(line).find()
             }
 
