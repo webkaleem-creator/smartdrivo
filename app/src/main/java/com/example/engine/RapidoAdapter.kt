@@ -1496,6 +1496,226 @@ object RapidoAdapter {
         return null
     }
 
+
+    // =========================================================
+    // RAPIDO_ULTRA_FAST_ALL_MODES_V1
+    //
+    // Read only the fields required by the active filter.
+    //
+    // Fare Only     -> fare
+    // Distance Only -> pickup + drop
+    // Both          -> fare + pickup + drop
+    // Speed Only    -> pickup
+    //
+    // Go-To / No-Go / Filter 2 can request extra fields.
+    // Bundle offers fall back to full-card verification.
+    // =========================================================
+    private fun extractOrderDataBoundToAcceptCardFast(
+        acceptNode: AccessibilityNodeInfo,
+        requireFare: Boolean,
+        requirePickup: Boolean,
+        requireDrop: Boolean,
+        requireDropAddress: Boolean
+    ): RapidoOrderData? {
+
+        var current: AccessibilityNodeInfo? =
+            acceptNode
+
+        var depth = 0
+
+        while (
+            current != null &&
+            depth <= 10
+        ) {
+
+            val data =
+                extractOrderData(
+                    root = current,
+                    skipHomeCheck = true,
+                    skipPickupAddress = true
+                )
+
+            var safeData = data
+
+            // If fare is present, preserve the existing
+            // same-Accept-card fare accuracy protection.
+            if (
+                data.totalFare > 0f &&
+                !data.isBundledOrder &&
+                !isAcceptCardFareUnambiguous(
+                    current,
+                    data
+                )
+            ) {
+
+                if (requireFare) {
+                    current = current.parent
+                    depth++
+                    continue
+                }
+
+                // Fare is not required for this mode.
+                // Do not allow an ambiguous fare to pollute History.
+                safeData =
+                    data.copy(
+                        baseFare = 0f,
+                        tipAmount = 0f,
+                        totalFare = 0f
+                    )
+            }
+
+            val numericPickup =
+                safeData.pickupKm != null &&
+                    safeData.pickupKm > 0f
+
+            // "Nearby" is a known pickup state.
+            // Service will safely Ignore it when numeric pickup
+            // is mandatory instead of accepting it.
+            val pickupReady =
+                !requirePickup ||
+                    numericPickup ||
+                    safeData.hasNearby
+
+            val fareReady =
+                !requireFare ||
+                    safeData.totalFare > 0f
+
+            val dropReady =
+                !requireDrop ||
+                    (
+                        safeData.dropKm != null &&
+                            safeData.dropKm > 0f
+                    )
+
+            val dropAddress =
+                safeData.dropAddress
+                    .orEmpty()
+                    .trim()
+
+            val dropAddressReady =
+                !requireDropAddress ||
+                    (
+                        dropAddress.isNotEmpty() &&
+                            !dropAddress.equals(
+                                "Address unavailable",
+                                ignoreCase = true
+                            )
+                    )
+
+            if (
+                fareReady &&
+                pickupReady &&
+                dropReady &&
+                dropAddressReady
+            ) {
+
+                // Bundles can contain multiple pickup/drop pairs.
+                // Never race-accept from only the first visible leg.
+                if (safeData.isBundledOrder) {
+                    return extractOrderDataBoundToAcceptCard(
+                        acceptNode
+                    )
+                }
+
+                return safeData
+            }
+
+            current = current.parent
+            depth++
+        }
+
+        return null
+    }
+
+    fun validateRapidoOrderPopupFast(
+        root: AccessibilityNodeInfo?,
+        requireFare: Boolean,
+        requirePickup: Boolean,
+        requireDrop: Boolean,
+        requireDropAddress: Boolean
+    ): RapidoPopupValidation {
+
+        if (root == null) {
+            return RapidoPopupValidation(
+                isValid = false,
+                failureReason = "Null root node"
+            )
+        }
+
+        val pkg =
+            root.packageName
+                ?.toString()
+                .orEmpty()
+
+        if (isSmartDrivoPackage(pkg)) {
+            return RapidoPopupValidation(
+                isValid = false,
+                failureReason =
+                    "SmartDrivo UI package"
+            )
+        }
+
+        // Accept button FIRST.
+        // Do not waste time scanning Rapido Home before this.
+        val acceptBtn =
+            findAcceptButton(root)
+
+        if (acceptBtn == null) {
+            return RapidoPopupValidation(
+                isValid = false,
+                failureReason =
+                    "Verified Accept button not available yet"
+            )
+        }
+
+        val bounds = Rect()
+
+        acceptBtn.node
+            .getBoundsInScreen(bounds)
+
+        if (
+            bounds.width() <= 0 ||
+            bounds.height() <= 0
+        ) {
+            return RapidoPopupValidation(
+                isValid = false,
+                acceptButton = acceptBtn,
+                failureReason =
+                    "Accept button not visible"
+            )
+        }
+
+        val orderData =
+            extractOrderDataBoundToAcceptCardFast(
+                acceptNode = acceptBtn.node,
+                requireFare = requireFare,
+                requirePickup = requirePickup,
+                requireDrop = requireDrop,
+                requireDropAddress =
+                    requireDropAddress
+            )
+                ?: return RapidoPopupValidation(
+                    isValid = false,
+                    acceptButton = acceptBtn,
+                    failureReason =
+                        "Waiting only for fields required by active filter"
+                )
+
+        return RapidoPopupValidation(
+            isValid = true,
+            fare =
+                orderData.totalFare
+                    .takeIf { it > 0f },
+            pickupDistKm =
+                orderData.pickupKm,
+            hasNearby =
+                orderData.hasNearby,
+            acceptButton =
+                acceptBtn,
+            orderData =
+                orderData
+        )
+    }
     /**
      * Validates a genuine Rapido live order.
      * Fare/pickup/drop must belong to the SAME card hierarchy
