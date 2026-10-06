@@ -1664,7 +1664,15 @@ private val processingTimeoutRunnable = Runnable {
                 isRapidoPackage(eventPkg)
 
         if (isRapidoPkg) {
-            Log.d("SmartDrivo", "Rapido event received: $eventType")
+            Log.d(
+                "SmartDrivo",
+                "Rapido event received: $eventType"
+            )
+
+            // RAPIDO_ULTRA_FAST_SINGLE_SCAN_V2
+            // Resolve filter requirements once for this event.
+            val fastRequirements =
+                getRapidoFastRequirements()
 
             val candidateRoots =
                 mutableListOf<AccessibilityNodeInfo>()
@@ -1672,90 +1680,171 @@ private val processingTimeoutRunnable = Runnable {
             val seenRapidoWindows =
                 mutableSetOf<String>()
 
-            fun addCandidateRoot(node: AccessibilityNodeInfo?) {
-                if (node == null) return
+            fun addCandidateRoot(
+                node: AccessibilityNodeInfo?
+            ) {
+                if (node == null) {
+                    return
+                }
 
-                val top = getTopRootNode(node) ?: node
+                val top =
+                    getTopRootNode(node)
+                        ?: node
+
                 val pkg =
                     top.packageName
                         ?.toString()
                         .orEmpty()
                         .trim()
-                        .lowercase(Locale.ROOT)
+                        .lowercase(
+                            Locale.ROOT
+                        )
 
-                if (isRapidoPackage(pkg) || pkg == "com.rapido.passenger") {
-                    val windowId =
-                        try {
-                            top.windowId
-                        } catch (_: Exception) {
-                            -1
-                        }
+                if (
+                    !isRapidoPackage(pkg) &&
+                    pkg !=
+                        "com.rapido.passenger"
+                ) {
+                    return
+                }
 
-                    val key =
-                        if (windowId >= 0) {
-                            "$pkg|window:$windowId"
-                        } else {
-                            "$pkg|node:${System.identityHashCode(top)}"
-                        }
+                val windowId =
+                    try {
+                        top.windowId
+                    } catch (_: Exception) {
+                        -1
+                    }
 
-                    if (seenRapidoWindows.add(key)) {
-                        candidateRoots.add(top)
+                val key =
+                    if (windowId >= 0) {
+                        "$pkg|window:$windowId"
+                    } else {
+                        "$pkg|node:${
+                            System.identityHashCode(
+                                top
+                            )
+                        }"
+                    }
+
+                if (
+                    seenRapidoWindows.add(
+                        key
+                    )
+                ) {
+                    candidateRoots.add(
+                        top
+                    )
+                }
+            }
+
+            var validatedRoot:
+                AccessibilityNodeInfo? =
+                    null
+
+            var validatedPopup:
+                RapidoPopupValidation? =
+                    null
+
+            var validatedCount = 0
+
+            fun validateNewRoots() {
+
+                while (
+                    validatedRoot == null &&
+                    validatedCount <
+                        candidateRoots.size
+                ) {
+
+                    val root =
+                        candidateRoots[
+                            validatedCount
+                        ]
+
+                    validatedCount++
+
+                    val validation =
+                        RapidoAdapter
+                            .validateRapidoOrderPopupFast(
+                                root = root,
+                                requireFare =
+                                    fastRequirements
+                                        .requireFare,
+                                requirePickup =
+                                    fastRequirements
+                                        .requirePickup,
+                                requireDrop =
+                                    fastRequirements
+                                        .requireDrop,
+                                requireDropAddress =
+                                    fastRequirements
+                                        .requireDropAddress
+                            )
+
+                    if (validation.isValid) {
+
+                        validatedRoot =
+                            root
+
+                        validatedPopup =
+                            validation
+
+                        break
                     }
                 }
             }
 
-            addCandidateRoot(eventSource)
-            addCandidateRoot(rootInActiveWindow)
+            // V2 FASTEST PATH:
+            // Try the direct Accessibility event source FIRST.
+            // If it is complete, do not touch rootInActiveWindow
+            // and do not enumerate Accessibility windows.
+            addCandidateRoot(
+                eventSource
+            )
 
-            try {
-                windows.forEach { window ->
-                    addCandidateRoot(window.root)
-                }
-            } catch (e: Exception) {
-                Log.w(
-                    TAG,
-                    "ΓÜá∩╕Å [Rapido] Unable to scan accessibility windows: ${e.message}"
+            validateNewRoots()
+
+            // Fallback 1: active root only if direct source was
+            // missing/incomplete.
+            if (validatedRoot == null) {
+
+                addCandidateRoot(
+                    rootInActiveWindow
                 )
+
+                validateNewRoots()
             }
 
-            var validatedRoot: AccessibilityNodeInfo? = null
-            var validatedPopup: RapidoPopupValidation? = null
+            // Fallback 2: cross-window scan only when the first
+            // two sources still did not expose a complete card.
+            if (validatedRoot == null) {
 
-            // RAPIDO_ULTRA_FAST_ALL_MODES_V1
-            // Do not wait for data the selected mode does not use.
-            val fastRequirements =
-                getRapidoFastRequirements()
+                try {
 
-            for (root in candidateRoots) {
+                    windows.forEach {
+                        window ->
 
-                val validation =
-                    RapidoAdapter
-                        .validateRapidoOrderPopupFast(
-                            root = root,
-                            requireFare =
-                                fastRequirements.requireFare,
-                            requirePickup =
-                                fastRequirements.requirePickup,
-                            requireDrop =
-                                fastRequirements.requireDrop,
-                            requireDropAddress =
-                                fastRequirements.requireDropAddress
+                        addCandidateRoot(
+                            window.root
                         )
+                    }
 
-                if (validation.isValid) {
-                    validatedRoot = root
-                    validatedPopup = validation
-                    break
+                } catch (e: Exception) {
+
+                    Log.w(
+                        TAG,
+                        "[Rapido V2] Unable to scan accessibility windows: ${e.message}"
+                    )
                 }
-            }
 
+                validateNewRoots()
+            }
             if (validatedRoot != null && validatedPopup != null) {
                 // RAPIDO_VALID_POPUP_V4
                 lastValidRapidoPopupAt = System.currentTimeMillis()
                 Log.i(
                     TAG,
-                    "≡ƒÄ» [Rapido] Genuine order popup detected across windows: " +
-                        "fare=Γé╣${validatedPopup.fare}, " +
+                    "🎯 [Rapido] Genuine order popup detected across windows: " +
+                        "fare=₹${validatedPopup.fare}, " +
                         "pickupKm=${validatedPopup.pickupDistKm}, " +
                         "nearby=${validatedPopup.hasNearby}, " +
                         "rootsScanned=${candidateRoots.size}"
@@ -1791,7 +1880,7 @@ private val processingTimeoutRunnable = Runnable {
                 }
                 Log.d(
                     TAG,
-                    "≡ƒÅá Rapido home screen detected and NO valid order popup " +
+                    "🏠 Rapido home screen detected and NO valid order popup " +
                         "was found across ${candidateRoots.size} Rapido root(s). " +
                         "Skipping."
                 )
@@ -1802,7 +1891,7 @@ private val processingTimeoutRunnable = Runnable {
 
             Log.d(
                 TAG,
-                "Γä╣∩╕Å [Rapido] No genuine order popup found across " +
+                "ℹ️ [Rapido] No genuine order popup found across " +
                     "${candidateRoots.size} Rapido root(s). " +
                     "Need fare + pickup distance + Accept button."
             )

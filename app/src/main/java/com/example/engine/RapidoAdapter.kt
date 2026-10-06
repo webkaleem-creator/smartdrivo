@@ -1618,6 +1618,662 @@ object RapidoAdapter {
     // Go-To / No-Go / Filter 2 can request extra fields.
     // Bundle offers fall back to full-card verification.
     // =========================================================
+    // =========================================================
+    // RAPIDO_ULTRA_FAST_SINGLE_SCAN_V2
+    //
+    // The old Ultra Fast path could traverse the same Accept-card
+    // subtree once for extraction and again for fare validation.
+    //
+    // V2:
+    // - collect card text ONCE per candidate ancestor
+    // - parse fare + pickup + drop in one numeric pass
+    // - validate fare from the SAME collected text
+    // - do not run address extraction unless area rules need it
+    // - Bundle orders keep the proven full-card safe path
+    // =========================================================
+
+    private data class RapidoFastTextResult(
+        val data: RapidoOrderData,
+        val fareUnambiguous: Boolean,
+        val secondKmIndex: Int?
+    )
+
+    private fun isFastFareUnambiguous(
+        fareLines: List<String>,
+        isBundleOrder: Boolean
+    ): Boolean {
+
+        if (isBundleOrder) {
+            return true
+        }
+
+        if (fareLines.isEmpty()) {
+            return false
+        }
+
+        if (fareLines.size == 1) {
+            return true
+        }
+
+        val amounts =
+            mutableListOf<Float>()
+
+        fareLines.forEach { line ->
+
+            val matcher =
+                RUPEE_AMOUNT_REGEX.matcher(line)
+
+            while (matcher.find()) {
+                matcher.group(1)
+                    ?.toFloatOrNull()
+                    ?.takeIf { it > 0f }
+                    ?.let {
+                        amounts.add(it)
+                    }
+            }
+        }
+
+        val distinctAmounts =
+            amounts
+                .map {
+                    kotlin.math.round(
+                        it * 100f
+                    ).toInt()
+                }
+                .distinct()
+
+        if (distinctAmounts.size == 1) {
+            return true
+        }
+
+        if (
+            fareLines.size == 2 &&
+            Regex(
+                """^\s*\+\s*₹?\s*[0-9]+(?:\.[0-9]+)?\s*$"""
+            ).matches(fareLines[1])
+        ) {
+            return true
+        }
+
+        return false
+    }
+
+    private fun parseRapidoFastTexts(
+        texts: List<String>
+    ): RapidoFastTextResult {
+
+        val isBundleOrder =
+            texts.any {
+                it.contains(
+                    "Bundle Order",
+                    ignoreCase = true
+                ) ||
+                    it.contains(
+                        "Bundled Order",
+                        ignoreCase = true
+                    )
+            }
+
+        var hasNearby = false
+        var bookingId: String? = null
+
+        val bookingRegex =
+            Regex(
+                "(?:CRN|ID|#|Booking\\s*ID)[:\\s-]*([A-Za-z0-9-]+)",
+                RegexOption.IGNORE_CASE
+            )
+
+        val pairRegex =
+            Regex(
+                """₹\s*([0-9]+(?:\.[0-9]+)?)\s*\+\s*₹?\s*([0-9]+(?:\.[0-9]+)?)"""
+            )
+
+        val nextTipRegex =
+            Regex(
+                """^\s*\+\s*₹?\s*([0-9]+(?:\.[0-9]+)?)"""
+            )
+
+        val speedRegex =
+            Regex(
+                """[0-9]+(?:\.[0-9]+)?\s*(?:km/h|kmph|km\s*/\s*h|km/hr)\b""",
+                RegexOption.IGNORE_CASE
+            )
+
+        val explicitDropRegex =
+            Regex(
+                """(?:(?:drop|trip|distance|destination)[^\n0-9]*([0-9]+(?:\.[0-9]+)?)\s*km)|(?:([0-9]+(?:\.[0-9]+)?)\s*km[^\n]*(?:drop|trip|distance|destination))""",
+                RegexOption.IGNORE_CASE
+            )
+
+        val fareLines =
+            mutableListOf<String>()
+
+        val visibleAmounts =
+            mutableListOf<Float>()
+
+        val verifiedPairs =
+            mutableListOf<Triple<Float, Float, Float>>()
+
+        val kmMatches =
+            mutableListOf<Pair<Int, Float>>()
+
+        var explicitDropKm: Float? = null
+
+        for (i in texts.indices) {
+
+            val line =
+                texts[i]
+
+            val lower =
+                line.trim().lowercase()
+
+            if (
+                lower == "nearby" ||
+                lower.contains("nearby")
+            ) {
+                hasNearby = true
+            }
+
+            if (bookingId == null) {
+                val bookingMatch =
+                    bookingRegex.find(line)
+
+                if (bookingMatch != null) {
+                    bookingId =
+                        bookingMatch
+                            .groupValues
+                            .getOrNull(1)
+                            ?.trim()
+                }
+            }
+
+            val sanitized =
+                line.replace(
+                    speedRegex,
+                    " "
+                )
+
+            KM_REGEX
+                .findAll(sanitized)
+                .forEach { match ->
+
+                    val value =
+                        match
+                            .groupValues
+                            .getOrNull(1)
+                            ?.toFloatOrNull()
+
+                    if (
+                        value != null &&
+                        value > 0f
+                    ) {
+                        kmMatches.add(
+                            Pair(i,value)
+                        )
+                    }
+                }
+
+            if (explicitDropKm == null) {
+
+                val dropMatch =
+                    explicitDropRegex.find(
+                        sanitized
+                    )
+
+                if (dropMatch != null) {
+
+                    val raw =
+                        dropMatch
+                            .groupValues
+                            .getOrNull(1)
+                            .orEmpty()
+                            .ifEmpty {
+                                dropMatch
+                                    .groupValues
+                                    .getOrNull(2)
+                                    .orEmpty()
+                            }
+
+                    val parsed =
+                        raw.toFloatOrNull()
+
+                    if (
+                        parsed != null &&
+                        parsed > 0f
+                    ) {
+                        explicitDropKm =
+                            parsed
+                    }
+                }
+            }
+
+            val skipFareLine =
+                isEarningsContext(
+                    texts,
+                    i
+                ) ||
+                    isCustomerAddedExtraFareLine(
+                        line
+                    ) ||
+                    isRapidoServiceAddonFareLine(
+                        line
+                    )
+
+            if (!skipFareLine) {
+
+                val fareMatcher =
+                    RUPEE_AMOUNT_REGEX
+                        .matcher(line)
+
+                var hasRupee = false
+                var firstAmount: Float? = null
+                var firstEnd = -1
+
+                while (fareMatcher.find()) {
+
+                    val value =
+                        fareMatcher
+                            .group(1)
+                            ?.toFloatOrNull()
+
+                    if (
+                        value != null &&
+                        value > 0f
+                    ) {
+                        hasRupee = true
+                        visibleAmounts.add(value)
+
+                        if (firstAmount == null) {
+                            firstAmount = value
+                            firstEnd =
+                                fareMatcher.end()
+                        }
+                    }
+                }
+
+                if (hasRupee) {
+                    fareLines.add(line)
+                }
+
+                pairRegex
+                    .find(line)
+                    ?.let { match ->
+
+                        val base =
+                            match
+                                .groupValues
+                                .getOrNull(1)
+                                ?.toFloatOrNull()
+
+                        val tip =
+                            match
+                                .groupValues
+                                .getOrNull(2)
+                                ?.toFloatOrNull()
+
+                        if (
+                            base != null &&
+                            tip != null &&
+                            base > 0f &&
+                            tip >= 0f
+                        ) {
+                            verifiedPairs.add(
+                                Triple(
+                                    base,
+                                    tip,
+                                    base + tip
+                                )
+                            )
+                        }
+                    }
+
+                if (
+                    firstAmount != null &&
+                    firstEnd >= 0 &&
+                    line
+                        .substring(firstEnd)
+                        .trim()
+                        .isEmpty() &&
+                    i + 1 < texts.size
+                ) {
+
+                    val nextTip =
+                        nextTipRegex
+                            .find(
+                                texts[i + 1]
+                                    .trim()
+                            )
+                            ?.groupValues
+                            ?.getOrNull(1)
+                            ?.toFloatOrNull()
+
+                    if (
+                        nextTip != null &&
+                        nextTip >= 0f
+                    ) {
+                        verifiedPairs.add(
+                            Triple(
+                                firstAmount,
+                                nextTip,
+                                firstAmount +
+                                    nextTip
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        val highestVisible =
+            visibleAmounts
+                .maxOrNull()
+                ?: 0f
+
+        val bestPair =
+            verifiedPairs
+                .maxByOrNull {
+                    it.third
+                }
+
+        var totalFare =
+            maxOf(
+                highestVisible,
+                bestPair?.third ?: 0f
+            )
+
+        var baseFare =
+            totalFare
+
+        var tipAmount =
+            0f
+
+        val pairForTotal =
+            verifiedPairs
+                .firstOrNull {
+                    kotlin.math.abs(
+                        it.third -
+                            totalFare
+                    ) < 0.01f
+                }
+
+        if (pairForTotal != null) {
+            baseFare =
+                pairForTotal.first
+
+            tipAmount =
+                pairForTotal.second
+        }
+
+        if (isBundleOrder) {
+
+            val bundleTotal =
+                visibleAmounts
+                    .maxOrNull()
+
+            if (
+                bundleTotal != null &&
+                bundleTotal > 0f
+            ) {
+                totalFare =
+                    bundleTotal
+
+                baseFare =
+                    bundleTotal
+
+                tipAmount =
+                    0f
+            }
+        }
+
+        var pickupKm: Float? = null
+        var dropKm: Float? = null
+
+        if (explicitDropKm != null) {
+
+            dropKm =
+                explicitDropKm
+
+            pickupKm =
+                if (hasNearby) {
+                    null
+                } else {
+                    kmMatches
+                        .map { it.second }
+                        .firstOrNull {
+                            kotlin.math.abs(
+                                it -
+                                    explicitDropKm
+                            ) > 0.0001f
+                        }
+                        ?: kmMatches
+                            .firstOrNull()
+                            ?.second
+                }
+
+        } else if (hasNearby) {
+
+            pickupKm = null
+
+            dropKm =
+                kmMatches
+                    .firstOrNull()
+                    ?.second
+
+        } else {
+
+            pickupKm =
+                kmMatches
+                    .getOrNull(0)
+                    ?.second
+
+            dropKm =
+                kmMatches
+                    .getOrNull(1)
+                    ?.second
+        }
+
+        if (
+            isBundleOrder &&
+            kmMatches.size >= 2
+        ) {
+
+            val distances =
+                kmMatches
+                    .map {
+                        it.second
+                    }
+
+            val bundlePickup =
+                distances
+                    .filterIndexed {
+                        index,
+                        _ ->
+                        index % 2 == 0
+                    }
+                    .maxOrNull()
+
+            val bundleDrop =
+                distances
+                    .filterIndexed {
+                        index,
+                        _ ->
+                        index % 2 == 1
+                    }
+                    .maxOrNull()
+
+            if (
+                bundlePickup != null &&
+                bundlePickup > 0f
+            ) {
+                pickupKm =
+                    bundlePickup
+            }
+
+            if (
+                bundleDrop != null &&
+                bundleDrop > 0f
+            ) {
+                dropKm =
+                    bundleDrop
+            }
+        }
+
+        val data =
+            RapidoOrderData(
+                baseFare =
+                    baseFare,
+                tipAmount =
+                    tipAmount,
+                totalFare =
+                    totalFare,
+                pickupKm =
+                    pickupKm,
+                dropKm =
+                    dropKm,
+                pickupAddress =
+                    "Address unavailable",
+                dropAddress =
+                    "Address unavailable",
+                bookingId =
+                    bookingId,
+                hasNearby =
+                    hasNearby,
+                isBundledOrder =
+                    isBundleOrder
+            )
+
+        return RapidoFastTextResult(
+            data = data,
+            fareUnambiguous =
+                isFastFareUnambiguous(
+                    fareLines,
+                    isBundleOrder
+                ),
+            secondKmIndex =
+                kmMatches
+                    .getOrNull(1)
+                    ?.first
+        )
+    }
+
+    // Test/benchmark hook. Production uses the same parser.
+    internal fun extractOrderDataFastFromTextsForTest(
+        texts: List<String>
+    ): RapidoOrderData {
+        return parseRapidoFastTexts(
+            texts
+        ).data
+    }
+
+    private fun extractFastDropAddress(
+        entries: List<TextNodeEntry>,
+        texts: List<String>,
+        secondKmIndex: Int?
+    ): String? {
+
+        for (entry in entries) {
+
+            val id =
+                entry.viewId
+                    ?.lowercase()
+                    .orEmpty()
+
+            if (
+                id.contains("drop") ||
+                id.contains("dest") ||
+                id.contains("tv_drop")
+            ) {
+
+                val clean =
+                    cleanRapidoAddress(
+                        entry.text
+                    )
+
+                if (
+                    clean.length >= 3 &&
+                    !isInvalidAddress(clean)
+                ) {
+                    return clean
+                }
+            }
+        }
+
+        for (i in texts.indices) {
+
+            val raw =
+                texts[i].trim()
+
+            val lower =
+                raw.lowercase()
+
+            if (
+                lower.startsWith("drop:") ||
+                lower.startsWith("to:") ||
+                lower.startsWith(
+                    "destination:"
+                )
+            ) {
+
+                val clean =
+                    cleanRapidoAddress(
+                        raw.substringAfter(":")
+                    )
+
+                if (
+                    clean.length >= 3 &&
+                    !isInvalidAddress(clean)
+                ) {
+                    return clean
+                }
+            }
+
+            if (
+                lower == "drop" ||
+                lower == "to" ||
+                lower == "destination"
+            ) {
+
+                if (i + 1 < texts.size) {
+
+                    val clean =
+                        cleanRapidoAddress(
+                            texts[i + 1]
+                        )
+
+                    if (
+                        clean.length >= 3 &&
+                        !isInvalidAddress(clean)
+                    ) {
+                        return clean
+                    }
+                }
+            }
+        }
+
+        if (secondKmIndex != null) {
+
+            for (
+                i in (secondKmIndex + 1)
+                    until texts.size
+            ) {
+
+                val clean =
+                    cleanRapidoAddress(
+                        texts[i]
+                    )
+
+                if (
+                    clean.length >= 3 &&
+                    !isInvalidAddress(clean)
+                ) {
+                    return clean
+                }
+            }
+        }
+
+        return null
+    }
+
     private fun extractOrderDataBoundToAcceptCardFast(
         acceptNode: AccessibilityNodeInfo,
         requireFare: Boolean,
@@ -1626,8 +2282,109 @@ object RapidoAdapter {
         requireDropAddress: Boolean
     ): RapidoOrderData? {
 
-        var current: AccessibilityNodeInfo? =
-            acceptNode
+        // Area filters require robust destination text.
+        // Keep the proven full parser for Go-To / No-Go.
+        if (requireDropAddress) {
+
+            var current:
+                AccessibilityNodeInfo? =
+                    acceptNode
+
+            var depth = 0
+
+            while (
+                current != null &&
+                depth <= 10
+            ) {
+
+                val data =
+                    extractOrderData(
+                        root = current,
+                        skipHomeCheck = true,
+                        skipPickupAddress = true
+                    )
+
+                var safeData =
+                    data
+
+                if (
+                    data.totalFare > 0f &&
+                    !data.isBundledOrder &&
+                    !isAcceptCardFareUnambiguous(
+                        current,
+                        data
+                    )
+                ) {
+
+                    if (requireFare) {
+                        current =
+                            current.parent
+
+                        depth++
+                        continue
+                    }
+
+                    safeData =
+                        data.copy(
+                            baseFare = 0f,
+                            tipAmount = 0f,
+                            totalFare = 0f
+                        )
+                }
+
+                val pickupReady =
+                    !requirePickup ||
+                        (
+                            safeData.pickupKm != null &&
+                            safeData.pickupKm > 0f
+                        ) ||
+                        safeData.hasNearby
+
+                val fareReady =
+                    !requireFare ||
+                        safeData.totalFare > 0f
+
+                val dropReady =
+                    !requireDrop ||
+                        (
+                            safeData.dropKm != null &&
+                            safeData.dropKm > 0f
+                        )
+
+                val dropAddress =
+                    safeData
+                        .dropAddress
+                        .orEmpty()
+                        .trim()
+
+                val dropAddressReady =
+                    dropAddress.isNotEmpty() &&
+                        !dropAddress.equals(
+                            "Address unavailable",
+                            ignoreCase = true
+                        )
+
+                if (
+                    fareReady &&
+                    pickupReady &&
+                    dropReady &&
+                    dropAddressReady
+                ) {
+                    return safeData
+                }
+
+                current =
+                    current.parent
+
+                depth++
+            }
+
+            return null
+        }
+
+        var current:
+            AccessibilityNodeInfo? =
+                acceptNode
 
         var depth = 0
 
@@ -1636,52 +2393,91 @@ object RapidoAdapter {
             depth <= 10
         ) {
 
-            val data =
-                extractOrderData(
-                    root = current,
-                    skipHomeCheck = true,
-                    skipPickupAddress = true
+            // ONE accessibility-tree collection.
+            val entries =
+                mutableListOf<TextNodeEntry>()
+
+            collectEntries(
+                current,
+                entries,
+                current
+                    .packageName
+                    ?.toString()
+            )
+
+            val validEntries =
+                entries.filter { entry ->
+
+                    val pkg =
+                        entry.packageName
+                            .orEmpty()
+
+                    !isSmartDrivoPackage(pkg) &&
+                        (
+                            pkg.isEmpty() ||
+                                isRapidoPackage(pkg) ||
+                                pkg ==
+                                    "com.rapido.passenger"
+                        )
+                }
+
+            val texts =
+                validEntries.map {
+                    it.text
+                }
+
+            if (texts.isEmpty()) {
+
+                current =
+                    current.parent
+
+                depth++
+                continue
+            }
+
+            val parsed =
+                parseRapidoFastTexts(
+                    texts
                 )
 
-            var safeData = data
+            var safeData =
+                parsed.data
 
-            // If fare is present, preserve the existing
-            // same-Accept-card fare accuracy protection.
+            // Bundles keep the proven multi-leg parser.
+            if (safeData.isBundledOrder) {
+                return extractOrderDataBoundToAcceptCard(
+                    acceptNode
+                )
+            }
+
             if (
-                data.totalFare > 0f &&
-                !data.isBundledOrder &&
-                !isAcceptCardFareUnambiguous(
-                    current,
-                    data
-                )
+                safeData.totalFare > 0f &&
+                !parsed.fareUnambiguous
             ) {
 
                 if (requireFare) {
-                    current = current.parent
+
+                    current =
+                        current.parent
+
                     depth++
                     continue
                 }
 
-                // Fare is not required for this mode.
-                // Do not allow an ambiguous fare to pollute History.
                 safeData =
-                    data.copy(
+                    safeData.copy(
                         baseFare = 0f,
                         tipAmount = 0f,
                         totalFare = 0f
                     )
             }
 
-            val numericPickup =
-                safeData.pickupKm != null &&
-                    safeData.pickupKm > 0f
-
-            // "Nearby" is a known pickup state.
-            // Service will safely Ignore it when numeric pickup
-            // is mandatory instead of accepting it.
             val pickupReady =
                 !requirePickup ||
-                    numericPickup ||
+                    (
+                        safeData.pickupKm != null &&
+                            safeData.pickupKm > 0f
+                    ) ||
                     safeData.hasNearby
 
             val fareReady =
@@ -1695,46 +2491,39 @@ object RapidoAdapter {
                             safeData.dropKm > 0f
                     )
 
-            val dropAddress =
-                safeData.dropAddress
-                    .orEmpty()
-                    .trim()
-
-            val dropAddressReady =
-                !requireDropAddress ||
-                    (
-                        dropAddress.isNotEmpty() &&
-                            !dropAddress.equals(
-                                "Address unavailable",
-                                ignoreCase = true
-                            )
-                    )
-
             if (
                 fareReady &&
                 pickupReady &&
-                dropReady &&
-                dropAddressReady
+                dropReady
             ) {
 
-                // Bundles can contain multiple pickup/drop pairs.
-                // Never race-accept from only the first visible leg.
-                if (safeData.isBundledOrder) {
-                    return extractOrderDataBoundToAcceptCard(
-                        acceptNode
+                // Best-effort History destination.
+                // It NEVER blocks numeric filter readiness.
+                val fastDropAddress =
+                    extractFastDropAddress(
+                        entries =
+                            validEntries,
+                        texts =
+                            texts,
+                        secondKmIndex =
+                            parsed.secondKmIndex
                     )
-                }
 
-                return safeData
+                return safeData.copy(
+                    dropAddress =
+                        fastDropAddress
+                            ?: "Address unavailable"
+                )
             }
 
-            current = current.parent
+            current =
+                current.parent
+
             depth++
         }
 
         return null
     }
-
     fun validateRapidoOrderPopupFast(
         root: AccessibilityNodeInfo?,
         requireFare: Boolean,
