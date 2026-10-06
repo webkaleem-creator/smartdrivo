@@ -223,6 +223,24 @@ class RideHistoryRepository(
     ): RideHistoryEntity? = withContext(ioDispatcher) {
         mutex.withLock {
             val existing = dao.getById(id) ?: dao.getByBookingId(id) ?: dao.getByFingerprint(id) ?: return@withContext null
+
+            // HISTORY_ACCEPTED_STICKY_V1
+            // A late timeout/unconfirmed callback must not change
+            // a genuinely ACCEPTED ride into FAILED.
+            // Explicit MISSED remains allowed.
+            if (
+                existing.status ==
+                    OrderStatus.ACCEPTED.name &&
+                status ==
+                    OrderStatus.FAILED
+            ) {
+                Log.w(
+                    "RideHistoryRepo",
+                    "Ignoring late FAILED downgrade for accepted ride ${existing.id}"
+                )
+
+                return@withContext existing
+            }
             val now = System.currentTimeMillis()
             val decisionLatency = (now - existing.detectedAt).coerceAtLeast(0L)
             val totalProcessing = if (status != OrderStatus.ACCEPTED) decisionLatency else existing.totalProcessingMs

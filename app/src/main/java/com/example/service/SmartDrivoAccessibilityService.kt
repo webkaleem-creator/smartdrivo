@@ -305,6 +305,22 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     @Volatile
     private var rapidoPendingScanRequested = false
 
+    // RAPIDO_FAST_CONFIRM_V2
+    @Volatile
+    private var rapidoResultWatchStartedAt = 0L
+
+    @Volatile
+    private var rapidoAcceptedSignalAt = 0L
+
+    @Volatile
+    private var rapidoMissedSignalAt = 0L
+
+    @Volatile
+    private var rapidoResultFinalized = true
+
+    private val rapidoResultFinalizeLock = Any()
+
+
     @Volatile
     private var lastRapidoEventDispatchAt = 0L
     @Volatile
@@ -394,7 +410,7 @@ private val processingTimeoutRunnable = Runnable {
             val notification = NotificationHelper.buildNotification(
                 context = applicationContext,
                 title = "SmartDrivo Active",
-                text = "Γ£à SmartDrivo Active ΓÇö Monitoring orders"
+                text = "Auto Accept ON - Monitoring orders"
             )
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -1232,6 +1248,59 @@ private val processingTimeoutRunnable = Runnable {
         }
 
         val eventPkg = event.packageName?.toString().orEmpty().trim().lowercase()
+
+        // RAPIDO_FAST_CONFIRM_V2
+        // During the short post-Accept window, confirmation events
+        // are checked BEFORE normal debounce/order parsing.
+        if (
+            isRapidoPackage(eventPkg) &&
+            rapidoResultWatchStartedAt > 0L
+        ) {
+            val directResultText =
+                buildString {
+                    try {
+                        event.text?.forEach { value ->
+                            if (value != null) {
+                                append(value.toString())
+                                append(' ')
+                            }
+                        }
+
+                        event.contentDescription
+                            ?.toString()
+                            ?.let {
+                                append(it)
+                            }
+                    } catch (_: Exception) {
+                    }
+                }
+
+            if (directResultText.isNotBlank()) {
+                captureRapidoResultText(
+                    directResultText
+                )
+            }
+
+            val watchStarted =
+                rapidoResultWatchStartedAt
+
+            if (
+                watchStarted > 0L &&
+                rapidoAcceptedSignalAt < watchStarted &&
+                rapidoMissedSignalAt < watchStarted
+            ) {
+                val resultSource =
+                    try {
+                        event.source
+                    } catch (_: Exception) {
+                        null
+                    }
+
+                captureRapidoResultSignal(
+                    resultSource
+                )
+            }
+        }
         val activeRootPkg = rootInActiveWindow?.packageName?.toString().orEmpty().trim().lowercase()
         val selfPkg = packageName.trim().lowercase()
 
@@ -5163,6 +5232,214 @@ private val processingTimeoutRunnable = Runnable {
         return candidates.firstOrNull()
     }
 
+    // RAPIDO_FAST_CONFIRM_V2
+    private fun armRapidoResultWatch() {
+        synchronized(rapidoResultFinalizeLock) {
+            val now =
+                System.currentTimeMillis()
+
+            rapidoResultWatchStartedAt =
+                now
+
+            rapidoAcceptedSignalAt =
+                0L
+
+            rapidoMissedSignalAt =
+                0L
+
+            rapidoResultFinalized =
+                false
+        }
+    }
+
+    private fun clearRapidoResultWatch() {
+        synchronized(rapidoResultFinalizeLock) {
+            rapidoResultWatchStartedAt =
+                0L
+
+            rapidoAcceptedSignalAt =
+                0L
+
+            rapidoMissedSignalAt =
+                0L
+
+            rapidoResultFinalized =
+                true
+        }
+    }
+
+    private fun tryMarkRapidoResultFinalized(
+        watchStarted: Long
+    ): Boolean {
+        return synchronized(
+            rapidoResultFinalizeLock
+        ) {
+            if (
+                rapidoResultWatchStartedAt != watchStarted ||
+                rapidoResultFinalized
+            ) {
+                false
+            } else {
+                rapidoResultFinalized =
+                    true
+
+                true
+            }
+        }
+    }
+
+    private fun isRapidoMissedOrExpiredText(
+        rawText: String
+    ): Boolean {
+
+        val allText =
+            rawText.lowercase(
+                Locale.ROOT
+            )
+
+        return allText.contains(
+            "you missed the order"
+        ) ||
+            allText.contains(
+                "order missed"
+            ) ||
+            allText.contains(
+                "order expired"
+            ) ||
+            allText.contains(
+                "no longer available"
+            ) ||
+            allText.contains(
+                "accepted by another"
+            )
+    }
+
+    private fun isRapidoAcceptedConfirmationText(
+        rawText: String
+    ): Boolean {
+
+        val allText =
+            rawText.lowercase(
+                Locale.ROOT
+            )
+
+        // MISSED always wins over ACCEPTED.
+        if (
+            isRapidoMissedOrExpiredText(
+                allText
+            )
+        ) {
+            return false
+        }
+
+        return CONFIRMATION_KEYWORDS.any {
+            keyword ->
+
+            allText.contains(
+                keyword.lowercase(
+                    Locale.ROOT
+                )
+            )
+        } ||
+            allText.contains(
+                "checking order status"
+            ) ||
+            allText.contains(
+                "pick up here"
+            ) ||
+            allText.contains(
+                "heading to pickup"
+            ) ||
+            allText.contains(
+                "pickup location"
+            ) ||
+            allText.contains(
+                "message customer"
+            ) ||
+            allText.contains(
+                "call customer"
+            ) ||
+            allText.contains(
+                "customer details"
+            ) ||
+            allText.contains(
+                "start trip"
+            ) ||
+            allText.contains(
+                "arrived"
+            )
+    }
+
+    private fun captureRapidoResultText(
+        rawText: String
+    ) {
+        if (rawText.isBlank()) return
+
+        val watchStarted =
+            rapidoResultWatchStartedAt
+
+        if (watchStarted <= 0L) return
+
+        val now =
+            System.currentTimeMillis()
+
+        // Ignore old/stale events.
+        if (
+            now - watchStarted >
+                2_000L
+        ) {
+            return
+        }
+
+        if (
+            isRapidoMissedOrExpiredText(
+                rawText
+            )
+        ) {
+            rapidoMissedSignalAt =
+                now
+
+            Log.i(
+                TAG,
+                "RAPIDO FAST CONFIRM: MISSED signal"
+            )
+
+            return
+        }
+
+        if (
+            isRapidoAcceptedConfirmationText(
+                rawText
+            )
+        ) {
+            rapidoAcceptedSignalAt =
+                now
+
+            Log.i(
+                TAG,
+                "RAPIDO FAST CONFIRM: ACCEPTED signal"
+            )
+        }
+    }
+
+    private fun captureRapidoResultSignal(
+        root: AccessibilityNodeInfo?
+    ) {
+        if (root == null) return
+
+        val texts =
+            mutableListOf<String>()
+
+        collectAllNodeText(
+            root,
+            texts
+        )
+
+        captureRapidoResultText(
+            texts.joinToString(" ")
+        )
+    }
+
     private fun verifyRapidoOutcomeAfterPopupClosed(
         candidate: RideCandidate,
         recordId: String,
@@ -5170,39 +5447,104 @@ private val processingTimeoutRunnable = Runnable {
         timesClicked: Int,
         fallbackRoot: AccessibilityNodeInfo?
     ) {
-        serviceScope.launch(Dispatchers.IO) {
+        serviceScope.launch(
+            Dispatchers.IO
+        ) {
+
+            val watchStarted =
+                rapidoResultWatchStartedAt
+                    .takeIf { it > 0L }
+                    ?: return@launch
 
             var missed = false
             var accepted = false
 
-            for (check in 0 until 6) {
+            // Direct Rapido event signals are checked every 20ms.
+            // Full-window verification is only an occasional fallback.
+            for (check in 0 until 60) {
 
-                val statusRoot =
+                missed =
+                    rapidoMissedSignalAt >=
+                        watchStarted
+
+                accepted =
+                    !missed &&
+                    rapidoAcceptedSignalAt >=
+                        watchStarted
+
+                if (
+                    missed ||
+                    accepted
+                ) {
+                    break
+                }
+
+                if (
+                    check == 0 ||
+                    check % 10 == 0
+                ) {
+                    val statusRoot =
+                        getRapidoStatusRootForVerification(
+                            fallbackRoot
+                        )
+
+                    captureRapidoResultSignal(
+                        statusRoot
+                    )
+
+                    missed =
+                        rapidoMissedSignalAt >=
+                            watchStarted
+
+                    accepted =
+                        !missed &&
+                        rapidoAcceptedSignalAt >=
+                            watchStarted
+
+                    if (
+                        missed ||
+                        accepted
+                    ) {
+                        break
+                    }
+                }
+
+                delay(20L)
+            }
+
+            // Final fallback scan.
+            if (
+                !missed &&
+                !accepted
+            ) {
+                captureRapidoResultSignal(
                     getRapidoStatusRootForVerification(
                         fallbackRoot
                     )
+                )
 
                 missed =
-                    isRapidoMissedOrExpiredScreen(
-                        statusRoot
-                    )
-
-                if (missed) break
+                    rapidoMissedSignalAt >=
+                        watchStarted
 
                 accepted =
-                    isRapidoAcceptedConfirmationScreen(
-                        statusRoot
-                    )
+                    !missed &&
+                    rapidoAcceptedSignalAt >=
+                        watchStarted
+            }
 
-                if (accepted) break
-
-                delay(
-                    if (check == 0) 60L else 100L
+            if (
+                !tryMarkRapidoResultFinalized(
+                    watchStarted
                 )
+            ) {
+                return@launch
             }
 
             when {
+
                 missed -> {
+
                     Log.w(
                         TAG,
                         "RAPIDO RESULT: MISSED / accepted by another captain"
@@ -5228,29 +5570,40 @@ private val processingTimeoutRunnable = Runnable {
                 }
 
                 accepted -> {
+
                     Log.i(
                         TAG,
-                        "RAPIDO RESULT: explicit acceptance confirmation detected"
+                        "RAPIDO RESULT: FAST explicit acceptance confirmation detected"
                     )
 
-                    showAcceptedOrderOverlay(candidate)
-
-                    NotificationHelper.updateNotification(
-                        context = applicationContext,
-                        title = "SmartDrivo Active",
-                        text =
-                            "🎉 Order Accepted! Monitoring next..."
+                    showAcceptedOrderOverlay(
+                        candidate
                     )
+
+                    NotificationHelper
+                        .updateNotification(
+                            context =
+                                applicationContext,
+                            title =
+                                "SmartDrivo Active",
+                            text =
+                                "Order Accepted - Monitoring next order"
+                        )
 
                     onOrderActionCompletedFast(
                         recordId = recordId,
                         candidate = candidate,
                         status = OrderStatus.ACCEPTED,
-                        reasonCode = "FILTERS_MATCHED",
+                        reasonCode =
+                            "FILTERS_MATCHED",
                         reasonText =
                             acceptedHistoryReason
-                                ?.takeIf { it.isNotBlank() }
-                                ?: buildAcceptedFilterReason(candidate),
+                                ?.takeIf {
+                                    it.isNotBlank()
+                                }
+                                ?: buildAcceptedFilterReason(
+                                    candidate
+                                ),
                         actionSucceeded = true,
                         timesClicked =
                             timesClicked.coerceAtLeast(1),
@@ -5263,9 +5616,10 @@ private val processingTimeoutRunnable = Runnable {
                 }
 
                 else -> {
+
                     Log.w(
                         TAG,
-                        "RAPIDO RESULT: accept sent but result not explicitly confirmed"
+                        "RAPIDO RESULT: no explicit result after fallback window"
                     )
 
                     onOrderActionCompletedFast(
@@ -5290,6 +5644,7 @@ private val processingTimeoutRunnable = Runnable {
                 }
             }
 
+            clearRapidoResultWatch()
             resetProcessing()
         }
     }
@@ -5298,17 +5653,17 @@ private fun isRapidoAcceptedConfirmationScreen(
     ): Boolean {
         if (root == null) return false
 
-        val textList = mutableListOf<String>()
-        collectAllNodeText(root, textList)
-        val allText = textList.joinToString(" ").lowercase(Locale.ROOT)
+        val textList =
+            mutableListOf<String>()
 
-        return allText.contains("thanks for accepting") ||
-            allText.contains("checking order status") ||
-            allText.contains("go to pickup") ||
-            allText.contains("go to pick up") ||
-            allText.contains("pick up here") ||
-            allText.contains("message customer") ||
-            allText.contains("arrived")
+        collectAllNodeText(
+            root,
+            textList
+        )
+
+        return isRapidoAcceptedConfirmationText(
+            textList.joinToString(" ")
+        )
     }
 
     private fun isRapidoMissedOrExpiredScreen(
@@ -5316,17 +5671,18 @@ private fun isRapidoAcceptedConfirmationScreen(
     ): Boolean {
         if (root == null) return false
 
-        val textList = mutableListOf<String>()
-        collectAllNodeText(root, textList)
-        val allText = textList.joinToString(" ").lowercase(Locale.ROOT)
+        val textList =
+            mutableListOf<String>()
 
-        return allText.contains("you missed the order") ||
-            allText.contains("order missed") ||
-            allText.contains("order expired") ||
-            allText.contains("no longer available") ||
-            allText.contains("accepted by another")
+        collectAllNodeText(
+            root,
+            textList
+        )
+
+        return isRapidoMissedOrExpiredText(
+            textList.joinToString(" ")
+        )
     }
-
     private fun isRapidoPostAcceptScreen(
         root: AccessibilityNodeInfo?
     ): Boolean {
@@ -6012,6 +6368,12 @@ private fun isRapidoAcceptedConfirmationScreen(
                 "Clickable: ${acceptNode.isClickable}"
         )
 
+        // RAPIDO_FAST_CONFIRM_V2
+        // Arm before the first click so even the first confirmation
+        // accessibility event cannot be missed.
+        if (attemptNumber == 1) {
+            armRapidoResultWatch()
+        }
         notifyClickInitiated()
 
         var clicked = false
@@ -6060,12 +6422,47 @@ private fun isRapidoAcceptedConfirmationScreen(
             }
         }
 
-                // RAPIDO_STRICT_ACCEPT_CONFIRM_V1
-        // Accept click remains fast. Only RESULT verification is strict.
-        // Disappearing popup alone is NOT acceptance proof.
-        serviceScope.launch(Dispatchers.IO) {
+                // RAPIDO_FAST_CONFIRM_V2
+        // Accept click stays unchanged and fast.
+        // Result confirmation now prioritizes direct Rapido events.
+        serviceScope.launch(
+            Dispatchers.IO
+        ) {
 
-            delay(40L)
+            val watchStarted =
+                rapidoResultWatchStartedAt
+
+            // Very short event-first window.
+            repeat(4) {
+
+                val hasSignal =
+                    watchStarted > 0L &&
+                    (
+                        rapidoMissedSignalAt >=
+                            watchStarted ||
+                        rapidoAcceptedSignalAt >=
+                            watchStarted
+                    )
+
+                if (hasSignal) {
+
+                    verifyRapidoOutcomeAfterPopupClosed(
+                        candidate = candidate,
+                        recordId =
+                            pinnedRecordId,
+                        acceptedHistoryReason =
+                            acceptedHistoryReason,
+                        timesClicked =
+                            attemptNumber,
+                        fallbackRoot =
+                            orderRoot
+                    )
+
+                    return@launch
+                }
+
+                delay(10L)
+            }
 
             val currentRoot =
                 getRapidoOrderRootNode(
@@ -6074,18 +6471,24 @@ private fun isRapidoAcceptedConfirmationScreen(
 
             val statusRoot =
                 getRapidoStatusRootForVerification(
-                    currentRoot ?: orderRoot
+                    currentRoot
+                        ?: orderRoot
                 )
+
+            captureRapidoResultSignal(
+                statusRoot
+            )
 
             val missedConfirmation =
-                isRapidoMissedOrExpiredScreen(
-                    statusRoot
-                )
+                watchStarted > 0L &&
+                    rapidoMissedSignalAt >=
+                        watchStarted
 
             val acceptedConfirmation =
-                isRapidoAcceptedConfirmationScreen(
-                    statusRoot
-                )
+                !missedConfirmation &&
+                    watchStarted > 0L &&
+                    rapidoAcceptedSignalAt >=
+                        watchStarted
 
             val isOrderStillVisible =
                 currentRoot != null &&
@@ -6098,9 +6501,11 @@ private fun isRapidoAcceptedConfirmationScreen(
                 acceptedConfirmation ||
                 !isOrderStillVisible
             ) {
+
                 verifyRapidoOutcomeAfterPopupClosed(
                     candidate = candidate,
-                    recordId = pinnedRecordId,
+                    recordId =
+                        pinnedRecordId,
                     acceptedHistoryReason =
                         acceptedHistoryReason,
                     timesClicked =
@@ -6114,19 +6519,21 @@ private fun isRapidoAcceptedConfirmationScreen(
                 return@launch
             }
 
-            // Order still visible: retry the SAME verified Accept flow.
             Log.i(
                 TAG,
                 "Rapido order popup still visible. Fast retry..."
             )
 
-            if (attemptNumber < 5) {
+            if (
+                attemptNumber < 5
+            ) {
 
-                delay(50L)
+                delay(40L)
 
                 executeRapidoAutoAccept(
                     candidate = candidate,
-                    orderRoot = currentRoot,
+                    orderRoot =
+                        currentRoot,
                     attemptNumber =
                         attemptNumber + 1,
                     historyRecordId =
@@ -6142,18 +6549,25 @@ private fun isRapidoAcceptedConfirmationScreen(
                     "Reached max attempts for Rapido auto-accept verification."
                 )
 
+                clearRapidoResultWatch()
+
                 onOrderActionCompletedFast(
-                    recordId = pinnedRecordId,
-                    candidate = candidate,
-                    status = OrderStatus.FAILED,
+                    recordId =
+                        pinnedRecordId,
+                    candidate =
+                        candidate,
+                    status =
+                        OrderStatus.FAILED,
                     reasonCode =
                         "VERIFICATION_TIMEOUT",
                     reasonText =
                         "Order popup still visible after max attempts",
-                    actionSucceeded = false,
+                    actionSucceeded =
+                        false,
                     timesClicked =
                         attemptNumber,
-                    buttonFound = true,
+                    buttonFound =
+                        true,
                     buttonDetails =
                         "Verified Rapido Accept button was clicked but order remained visible",
                     clickMethod =
