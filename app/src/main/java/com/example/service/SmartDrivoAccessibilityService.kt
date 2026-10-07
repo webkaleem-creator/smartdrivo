@@ -1875,7 +1875,37 @@ private val processingTimeoutRunnable = Runnable {
                 return
             }
 
-            activeRapidoPopupOrderId = null
+            // RAPIDO_ACCEPTED_STALE_EVENT_GUARD_V1
+            // After a successful Accept, Rapido can emit stale accessibility
+            // events while the old offer tree is disappearing.
+            // Keep the current order identity briefly so the same accepted
+            // ride cannot create a second false-IGNORED History result.
+            // This is only on the no-valid-popup fallback path, so the
+            // live Accept/filter fast path remains unchanged.
+            val anyRapidoPostAccept =
+                candidateRoots.any { candidateRoot ->
+                    isRapidoPostAcceptScreen(candidateRoot)
+                }
+
+            val popupGapMs =
+                System.currentTimeMillis() -
+                    lastValidRapidoPopupAt
+
+            if (
+                !anyRapidoPostAccept &&
+                (
+                    lastValidRapidoPopupAt <= 0L ||
+                        popupGapMs > 1_200L
+                )
+            ) {
+                activeRapidoPopupOrderId = null
+                lastValidRapidoPopupAt = 0L
+            } else {
+                Log.d(
+                    TAG,
+                    "RAPIDO transition/post-accept gap; keeping current order identity"
+                )
+            }
 
             Log.d(
                 TAG,
