@@ -404,6 +404,24 @@ class PreferencesManager(private val context: Context) {
                 KEY_SECONDARY_BOTH_MAX_DROP,
                 settings.secondaryBothMaxDropDistanceKm
             )
+
+            putBoolean(
+                KEY_TERTIARY_BOTH_ENABLED,
+                settings.isTertiaryBothFilterEnabled
+            )
+            putFloat(
+                KEY_TERTIARY_BOTH_MIN_FARE,
+                settings.tertiaryBothMinFare
+            )
+            putFloat(
+                KEY_TERTIARY_BOTH_MAX_PICKUP,
+                settings.tertiaryBothMaxPickupDistanceKm
+            )
+            putFloat(
+                KEY_TERTIARY_BOTH_MAX_DROP,
+                settings.tertiaryBothMaxDropDistanceKm
+            )
+
             putBoolean(KEY_RAPIDO_ENABLED, settings.rapidoEnabled)
             putBoolean(KEY_UBER_ENABLED, settings.uberEnabled)
             putBoolean(KEY_OLA_ENABLED, settings.olaEnabled)
@@ -497,6 +515,31 @@ class PreferencesManager(private val context: Context) {
                     KEY_SECONDARY_BOTH_MAX_DROP,
                     7.5f
                 ),
+
+            isTertiaryBothFilterEnabled =
+                prefs.getBoolean(
+                    KEY_TERTIARY_BOTH_ENABLED,
+                    false
+                ),
+
+            tertiaryBothMinFare =
+                getSafeFloat(
+                    KEY_TERTIARY_BOTH_MIN_FARE,
+                    50f
+                ),
+
+            tertiaryBothMaxPickupDistanceKm =
+                getSafeFloat(
+                    KEY_TERTIARY_BOTH_MAX_PICKUP,
+                    3.0f
+                ),
+
+            tertiaryBothMaxDropDistanceKm =
+                getSafeFloat(
+                    KEY_TERTIARY_BOTH_MAX_DROP,
+                    7.5f
+                ),
+
             rapidoEnabled = prefs.getBoolean(KEY_RAPIDO_ENABLED, true),
             uberEnabled = prefs.getBoolean(KEY_UBER_ENABLED, true),
             olaEnabled = prefs.getBoolean(KEY_OLA_ENABLED, true),
@@ -1346,6 +1389,16 @@ class PreferencesManager(private val context: Context) {
             "setting_secondary_both_max_pickup_km"
         private const val KEY_SECONDARY_BOTH_MAX_DROP =
             "setting_secondary_both_max_drop_km"
+
+        private const val KEY_TERTIARY_BOTH_ENABLED =
+            "setting_tertiary_both_filter_enabled"
+        private const val KEY_TERTIARY_BOTH_MIN_FARE =
+            "setting_tertiary_both_min_fare"
+        private const val KEY_TERTIARY_BOTH_MAX_PICKUP =
+            "setting_tertiary_both_max_pickup_km"
+        private const val KEY_TERTIARY_BOTH_MAX_DROP =
+            "setting_tertiary_both_max_drop_km"
+
         private const val KEY_RAPIDO_ENABLED = "setting_rapido"
         private const val KEY_UBER_ENABLED = "setting_uber"
         private const val KEY_OLA_ENABLED = "setting_ola"

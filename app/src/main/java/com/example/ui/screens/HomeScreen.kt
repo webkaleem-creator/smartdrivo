@@ -780,434 +780,751 @@ val goToAreas by prefs.goToAreas.collectAsState()
                     }
                 }
             }
-            // 3. Filter Mode buttons + Fare Criteria card + Distance Criteria card
+            // HOME_FILTER_COMPACT_V1
+            // Same compact visual family as Order Filter 2 / 3.
+            // Existing Fare / Distance / Both behavior is unchanged.
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = CardBackground),
+                    colors = CardDefaults.cardColors(
+                        containerColor = BlueContainer
+                    ),
                     shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, CardBorderDefault)
+                    border = BorderStroke(
+                        1.dp,
+                        BluePrimary
+                    )
                 ) {
                     Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        modifier = Modifier.padding(11.dp),
+                        verticalArrangement = Arrangement.spacedBy(9.dp)
                     ) {
-                        // Clean Filter Mode selector
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Column {
+
+                        // Header
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement =
+                                Arrangement.SpaceBetween,
+                            verticalAlignment =
+                                Alignment.CenterVertically
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            Color.White.copy(
+                                                alpha = 0.75f
+                                            ),
+                                            RoundedCornerShape(9.dp)
+                                        )
+                                        .padding(
+                                            horizontal = 9.dp,
+                                            vertical = 5.dp
+                                        )
+                                ) {
+                                    Text(
+                                        text = "FILTER 1",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = BluePrimary
+                                    )
+                                }
+
+                                Spacer(
+                                    modifier =
+                                        Modifier.height(7.dp)
+                                )
+
                                 Text(
-                                    text = "Order Filters",
+                                    text = "Home Filter",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
+                                    fontSize = 15.sp,
                                     color = TextDarkPrimary
                                 )
+
                                 Text(
-                                    text = "Choose what SmartDrivo should check",
-                                    fontSize = 12.sp,
+                                    text = "Primary ride option",
+                                    fontSize = 11.sp,
                                     color = TextDarkSecondary
                                 )
                             }
 
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color(0xFFF1F5F9), RoundedCornerShape(12.dp))
-                                    .padding(4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                FilterMode.values().forEach { mode ->
-                                    val isSelected = pendingFilterMode == mode
-                                    val selectedBg = when (mode) {
-                                        FilterMode.FARE_ONLY -> BluePrimary
-                                        FilterMode.DISTANCE_ONLY -> BlueSecondary
-                                        FilterMode.BOTH -> StatusActiveGreen
+                            Text(
+                                text = "ON",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = BluePrimary
+                            )
+                        }
+
+                        // Fare / Distance / Both selector
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    Color.White.copy(
+                                        alpha = 0.72f
+                                    ),
+                                    RoundedCornerShape(11.dp)
+                                )
+                                .padding(3.dp),
+                            horizontalArrangement =
+                                Arrangement.spacedBy(3.dp)
+                        ) {
+                            FilterMode.values().forEach { mode ->
+
+                                val isSelected =
+                                    pendingFilterMode == mode
+
+                                val selectedBg =
+                                    when (mode) {
+                                        FilterMode.FARE_ONLY ->
+                                            BluePrimary
+
+                                        FilterMode.DISTANCE_ONLY ->
+                                            BlueSecondary
+
+                                        FilterMode.BOTH ->
+                                            StatusActiveGreen
                                     }
 
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(9.dp))
-                                            .background(if (isSelected) selectedBg else Color.Transparent)
-                                            .clickable {
-                                                if (pendingFilterMode != mode) {
-                                                    pendingFilterMode = mode
-                                                    hasUnsavedChanges = true
-                                                }
-                                            }
-                                            .padding(vertical = 7.dp, horizontal = 4.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = when (mode) {
-                                                FilterMode.FARE_ONLY -> "Fare"
-                                                FilterMode.DISTANCE_ONLY -> "Distance"
-                                                FilterMode.BOTH -> "Both"
-                                            },
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            fontSize = 12.sp,
-                                            color = if (isSelected) Color.White else TextDarkSecondary,
-                                            maxLines = 1
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(
+                                            RoundedCornerShape(
+                                                8.dp
+                                            )
                                         )
-                                    }
+                                        .background(
+                                            if (isSelected) {
+                                                selectedBg
+                                            } else {
+                                                Color.Transparent
+                                            }
+                                        )
+                                        .clickable {
+                                            if (
+                                                pendingFilterMode !=
+                                                mode
+                                            ) {
+                                                pendingFilterMode =
+                                                    mode
+                                                hasUnsavedChanges =
+                                                    true
+                                            }
+                                        }
+                                        .padding(
+                                            vertical = 6.dp,
+                                            horizontal = 3.dp
+                                        ),
+                                    contentAlignment =
+                                        Alignment.Center
+                                ) {
+                                    Text(
+                                        text =
+                                            when (mode) {
+                                                FilterMode.FARE_ONLY ->
+                                                    "Fare"
+
+                                                FilterMode.DISTANCE_ONLY ->
+                                                    "Distance"
+
+                                                FilterMode.BOTH ->
+                                                    "Both"
+                                            },
+                                        fontWeight =
+                                            if (isSelected) {
+                                                FontWeight.Bold
+                                            } else {
+                                                FontWeight.Medium
+                                            },
+                                        fontSize = 11.sp,
+                                        color =
+                                            if (isSelected) {
+                                                Color.White
+                                            } else {
+                                                TextDarkSecondary
+                                            },
+                                        maxLines = 1
+                                    )
                                 }
                             }
                         }
 
-                        // Badge status belongs to the CURRENTLY VIEWED mode.
-                        // Fare/Distance keep their own saved status.
-                        // BOTH is one combined mode: until BOTH itself is saved,
-                        // both criteria must show Disabled; after saving BOTH,
-                        // both criteria show Enabled.
-                        val fareIsEnabled = when (pendingFilterMode) {
-                            FilterMode.FARE_ONLY -> savedFilterMode == FilterMode.FARE_ONLY
-                            FilterMode.DISTANCE_ONLY -> false
-                            FilterMode.BOTH -> savedFilterMode == FilterMode.BOTH
-                        }
+                        Text(
+                            text =
+                                when (pendingFilterMode) {
+                                    FilterMode.FARE_ONLY ->
+                                        "Fare must match saved Minimum / Maximum"
 
-                        val distanceIsEnabled = when (pendingFilterMode) {
-                            FilterMode.FARE_ONLY -> false
-                            FilterMode.DISTANCE_ONLY -> savedFilterMode == FilterMode.DISTANCE_ONLY
-                            FilterMode.BOTH -> savedFilterMode == FilterMode.BOTH
-                        }
+                                    FilterMode.DISTANCE_ONLY ->
+                                        "Pickup and Drop must match saved maximums"
 
-                        val fareSection: @Composable () -> Unit = {
-                            Column(
-                                modifier = Modifier.padding(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(30.dp)
-                                                .background(BlueContainer, RoundedCornerShape(10.dp)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                Icons.Default.CurrencyRupee,
-                                                contentDescription = null,
-                                                tint = BluePrimary,
-                                                modifier = Modifier.size(17.dp)
-                                            )
-                                        }
+                                    FilterMode.BOTH ->
+                                        "Fare + Pickup + Drop must all match"
+                                },
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = BluePrimary
+                        )
 
-                                        Column {
-                                            Text(
-                                                text = "Fare Filter",
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 14.sp,
-                                                color = TextDarkPrimary
-                                            )
-                                            Text(
-                                                text = "Accept ₹${settings.minFare.toInt()} to ₹${settings.maxFare.toInt()}",
-                                                fontSize = 12.sp,
-                                                color = BluePrimary
-                                            )
-                                        }
-                                    }
+                        // Inputs
+                        when (pendingFilterMode) {
 
-                                    Text(
-                                        text = if (fareIsEnabled) "Enabled" else "Disabled",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = if (fareIsEnabled) StatusActiveGreen else StatusInactiveRed
-                                    )
-                                }
+                            FilterMode.FARE_ONLY -> {
 
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    horizontalArrangement =
+                                        Arrangement.spacedBy(
+                                            7.dp
+                                        )
                                 ) {
                                     OutlinedTextField(
                                         value = minFareInput,
                                         onValueChange = { input ->
-                                            if (input.isEmpty() || input.matches(Regex("""^\d*\.?\d*$"""))) {
-                                                minFareInput = input
-                                                hasUnsavedChanges = true
+                                            if (
+                                                input.isEmpty() ||
+                                                input.matches(
+                                                    Regex(
+                                                        """^\d*\.?\d*$"""
+                                                    )
+                                                )
+                                            ) {
+                                                minFareInput =
+                                                    input
+                                                hasUnsavedChanges =
+                                                    true
                                             }
                                         },
-                                        label = { Text("Minimum Fare", fontSize = 11.sp) },
-                                        placeholder = { Text("50", fontSize = 12.sp, color = TextDarkTertiary) },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        label = {
+                                            Text(
+                                                "Min Fare ₹",
+                                                fontSize = 9.sp,
+                                                maxLines = 1
+                                            )
+                                        },
+                                        keyboardOptions =
+                                            KeyboardOptions(
+                                                keyboardType =
+                                                    KeyboardType.Decimal
+                                            ),
                                         singleLine = true,
-                                        shape = RoundedCornerShape(10.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = BluePrimary,
-                                            focusedLabelColor = BluePrimary,
-                                            unfocusedBorderColor = CardBorderDefault,
-                                            focusedTextColor = TextDarkPrimary,
-                                            unfocusedTextColor = TextDarkPrimary
-                                        ),
-                                        modifier = Modifier.weight(1f)
+                                        modifier =
+                                            Modifier.weight(1f),
+                                        shape =
+                                            RoundedCornerShape(
+                                                10.dp
+                                            ),
+                                        colors =
+                                            OutlinedTextFieldDefaults
+                                                .colors(
+                                                    focusedBorderColor =
+                                                        BluePrimary,
+                                                    focusedLabelColor =
+                                                        BluePrimary,
+                                                    unfocusedBorderColor =
+                                                        CardBorderDefault,
+                                                    focusedTextColor =
+                                                        TextDarkPrimary,
+                                                    unfocusedTextColor =
+                                                        TextDarkPrimary
+                                                )
                                     )
 
                                     OutlinedTextField(
                                         value = maxFareInput,
                                         onValueChange = { input ->
-                                            if (input.isEmpty() || input.matches(Regex("""^\d*\.?\d*$"""))) {
-                                                maxFareInput = input
-                                                hasUnsavedChanges = true
+                                            if (
+                                                input.isEmpty() ||
+                                                input.matches(
+                                                    Regex(
+                                                        """^\d*\.?\d*$"""
+                                                    )
+                                                )
+                                            ) {
+                                                maxFareInput =
+                                                    input
+                                                hasUnsavedChanges =
+                                                    true
                                             }
                                         },
-                                        label = { Text("Maximum Fare", fontSize = 11.sp) },
-                                        placeholder = { Text("999", fontSize = 12.sp, color = TextDarkTertiary) },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        label = {
+                                            Text(
+                                                "Max Fare ₹",
+                                                fontSize = 9.sp,
+                                                maxLines = 1
+                                            )
+                                        },
+                                        keyboardOptions =
+                                            KeyboardOptions(
+                                                keyboardType =
+                                                    KeyboardType.Decimal
+                                            ),
                                         singleLine = true,
-                                        shape = RoundedCornerShape(10.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = BluePrimary,
-                                            focusedLabelColor = BluePrimary,
-                                            unfocusedBorderColor = CardBorderDefault,
-                                            focusedTextColor = TextDarkPrimary,
-                                            unfocusedTextColor = TextDarkPrimary
-                                        ),
-                                        modifier = Modifier.weight(1f)
+                                        modifier =
+                                            Modifier.weight(1f),
+                                        shape =
+                                            RoundedCornerShape(
+                                                10.dp
+                                            ),
+                                        colors =
+                                            OutlinedTextFieldDefaults
+                                                .colors(
+                                                    focusedBorderColor =
+                                                        BluePrimary,
+                                                    focusedLabelColor =
+                                                        BluePrimary,
+                                                    unfocusedBorderColor =
+                                                        CardBorderDefault,
+                                                    focusedTextColor =
+                                                        TextDarkPrimary,
+                                                    unfocusedTextColor =
+                                                        TextDarkPrimary
+                                                )
                                     )
                                 }
                             }
-                        }
 
-                        val distanceSection: @Composable () -> Unit = {
-                            Column(
-                                modifier = Modifier.padding(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(30.dp)
-                                                .background(BlueContainer, RoundedCornerShape(10.dp)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                Icons.Default.NearMe,
-                                                contentDescription = null,
-                                                tint = BlueSecondary,
-                                                modifier = Modifier.size(17.dp)
-                                            )
-                                        }
-
-                                        Column {
-                                            Column {
-                                            Text(
-                                                text = "Distance Criteria",
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 14.sp,
-                                                color = TextDarkPrimary
-                                            )
-
-                                            val savedPickupText =
-                                                if (settings.maxPickupDistanceKm % 1f == 0f) {
-                                                    settings.maxPickupDistanceKm.toInt().toString()
-                                                } else {
-                                                    settings.maxPickupDistanceKm.toString()
-                                                }
-
-                                            val savedDropText =
-                                                if (settings.maxDropDistanceKm % 1f == 0f) {
-                                                    settings.maxDropDistanceKm.toInt().toString()
-                                                } else {
-                                                    settings.maxDropDistanceKm.toString()
-                                                }
-
-                                            Text(
-                                                text = "Accept ₹$savedPickupText km to ₹$savedDropText km",
-                                                fontSize = 12.sp,
-                                                color = BluePrimary
-                                            )
-                                        }
-
-                                            val savedPickupText =
-                                                if (settings.maxPickupDistanceKm % 1f == 0f)
-                                                    settings.maxPickupDistanceKm.toInt().toString()
-                                                else
-                                                    settings.maxPickupDistanceKm.toString()
-
-                                            val savedDropText =
-                                                if (settings.maxDropDistanceKm % 1f == 0f)
-                                                    settings.maxDropDistanceKm.toInt().toString()
-                                                else
-                                                    settings.maxDropDistanceKm.toString()
-                                        }
-                                    }
-
-                                    Text(
-                                        text = if (distanceIsEnabled) "Enabled" else "Disabled",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = if (distanceIsEnabled) StatusActiveGreen else StatusInactiveRed
-                                    )
-                                }
+                            FilterMode.DISTANCE_ONLY -> {
 
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    horizontalArrangement =
+                                        Arrangement.spacedBy(
+                                            7.dp
+                                        )
                                 ) {
                                     OutlinedTextField(
                                         value = maxPickupInput,
                                         onValueChange = { input ->
-                                            if (input.isEmpty() || input.matches(Regex("""^\d*\.?\d*$"""))) {
-                                                maxPickupInput = input
-                                                hasUnsavedChanges = true
+                                            if (
+                                                input.isEmpty() ||
+                                                input.matches(
+                                                    Regex(
+                                                        """^\d*\.?\d*$"""
+                                                    )
+                                                )
+                                            ) {
+                                                maxPickupInput =
+                                                    input
+                                                hasUnsavedChanges =
+                                                    true
                                             }
                                         },
-                                        label = { Text("Max Pickup (km)", fontSize = 11.sp) },
-                                        placeholder = { Text("3.0", fontSize = 12.sp, color = TextDarkTertiary) },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        label = {
+                                            Text(
+                                                "Max Pickup",
+                                                fontSize = 9.sp,
+                                                maxLines = 1
+                                            )
+                                        },
+                                        keyboardOptions =
+                                            KeyboardOptions(
+                                                keyboardType =
+                                                    KeyboardType.Decimal
+                                            ),
                                         singleLine = true,
-                                        shape = RoundedCornerShape(10.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = BlueSecondary,
-                                            focusedLabelColor = BlueSecondary,
-                                            unfocusedBorderColor = CardBorderDefault,
-                                            focusedTextColor = TextDarkPrimary,
-                                            unfocusedTextColor = TextDarkPrimary
-                                        ),
-                                        modifier = Modifier.weight(1f)
+                                        modifier =
+                                            Modifier.weight(1f),
+                                        shape =
+                                            RoundedCornerShape(
+                                                10.dp
+                                            ),
+                                        colors =
+                                            OutlinedTextFieldDefaults
+                                                .colors(
+                                                    focusedBorderColor =
+                                                        BluePrimary,
+                                                    focusedLabelColor =
+                                                        BluePrimary,
+                                                    unfocusedBorderColor =
+                                                        CardBorderDefault,
+                                                    focusedTextColor =
+                                                        TextDarkPrimary,
+                                                    unfocusedTextColor =
+                                                        TextDarkPrimary
+                                                )
                                     )
 
                                     OutlinedTextField(
                                         value = maxDropInput,
                                         onValueChange = { input ->
-                                            if (input.isEmpty() || input.matches(Regex("""^\d*\.?\d*$"""))) {
-                                                maxDropInput = input
-                                                hasUnsavedChanges = true
+                                            if (
+                                                input.isEmpty() ||
+                                                input.matches(
+                                                    Regex(
+                                                        """^\d*\.?\d*$"""
+                                                    )
+                                                )
+                                            ) {
+                                                maxDropInput =
+                                                    input
+                                                hasUnsavedChanges =
+                                                    true
                                             }
                                         },
-                                        label = { Text("Max Drop (km)", fontSize = 11.sp) },
-                                        placeholder = { Text("7.5", fontSize = 12.sp, color = TextDarkTertiary) },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        label = {
+                                            Text(
+                                                "Max Drop",
+                                                fontSize = 9.sp,
+                                                maxLines = 1
+                                            )
+                                        },
+                                        keyboardOptions =
+                                            KeyboardOptions(
+                                                keyboardType =
+                                                    KeyboardType.Decimal
+                                            ),
                                         singleLine = true,
-                                        shape = RoundedCornerShape(10.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = BlueSecondary,
-                                            focusedLabelColor = BlueSecondary,
-                                            unfocusedBorderColor = CardBorderDefault,
-                                            focusedTextColor = TextDarkPrimary,
-                                            unfocusedTextColor = TextDarkPrimary
-                                        ),
-                                        modifier = Modifier.weight(1f)
+                                        modifier =
+                                            Modifier.weight(1f),
+                                        shape =
+                                            RoundedCornerShape(
+                                                10.dp
+                                            ),
+                                        colors =
+                                            OutlinedTextFieldDefaults
+                                                .colors(
+                                                    focusedBorderColor =
+                                                        BluePrimary,
+                                                    focusedLabelColor =
+                                                        BluePrimary,
+                                                    unfocusedBorderColor =
+                                                        CardBorderDefault,
+                                                    focusedTextColor =
+                                                        TextDarkPrimary,
+                                                    unfocusedTextColor =
+                                                        TextDarkPrimary
+                                                )
                                     )
-                                }
-                            }
-                        }
-
-                        when (pendingFilterMode) {
-                            FilterMode.FARE_ONLY -> {
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                                    shape = RoundedCornerShape(14.dp),
-                                    border = BorderStroke(1.dp, CardBorderDefault)
-                                ) {
-                                    fareSection()
-                                }
-                            }
-
-                            FilterMode.DISTANCE_ONLY -> {
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                                    shape = RoundedCornerShape(14.dp),
-                                    border = BorderStroke(1.dp, CardBorderDefault)
-                                ) {
-                                    distanceSection()
                                 }
                             }
 
                             FilterMode.BOTH -> {
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                                    shape = RoundedCornerShape(14.dp),
-                                    border = BorderStroke(1.dp, CardBorderDefault)
-                                ) {
-                                    Column {
-                                        fareSection()
-                                        HorizontalDivider(
-                                            modifier = Modifier.padding(horizontal = 14.dp),
-                                            thickness = 1.dp,
-                                            color = CardBorderDefault
+
+                                // Keep BOTH compact: all four inputs
+                                // stay in one row.
+                                Row(
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    horizontalArrangement =
+                                        Arrangement.spacedBy(
+                                            5.dp
                                         )
-                                        distanceSection()
-                                    }
+                                ) {
+                                    OutlinedTextField(
+                                        value = minFareInput,
+                                        onValueChange = { input ->
+                                            if (
+                                                input.isEmpty() ||
+                                                input.matches(
+                                                    Regex(
+                                                        """^\d*\.?\d*$"""
+                                                    )
+                                                )
+                                            ) {
+                                                minFareInput =
+                                                    input
+                                                hasUnsavedChanges =
+                                                    true
+                                            }
+                                        },
+                                        label = {
+                                            Text(
+                                                "Min ₹",
+                                                fontSize = 8.sp,
+                                                maxLines = 1
+                                            )
+                                        },
+                                        keyboardOptions =
+                                            KeyboardOptions(
+                                                keyboardType =
+                                                    KeyboardType.Decimal
+                                            ),
+                                        singleLine = true,
+                                        modifier =
+                                            Modifier.weight(1f),
+                                        shape =
+                                            RoundedCornerShape(
+                                                9.dp
+                                            ),
+                                        colors =
+                                            OutlinedTextFieldDefaults
+                                                .colors(
+                                                    focusedBorderColor =
+                                                        BluePrimary,
+                                                    focusedLabelColor =
+                                                        BluePrimary,
+                                                    unfocusedBorderColor =
+                                                        CardBorderDefault,
+                                                    focusedTextColor =
+                                                        TextDarkPrimary,
+                                                    unfocusedTextColor =
+                                                        TextDarkPrimary
+                                                )
+                                    )
+
+                                    OutlinedTextField(
+                                        value = maxFareInput,
+                                        onValueChange = { input ->
+                                            if (
+                                                input.isEmpty() ||
+                                                input.matches(
+                                                    Regex(
+                                                        """^\d*\.?\d*$"""
+                                                    )
+                                                )
+                                            ) {
+                                                maxFareInput =
+                                                    input
+                                                hasUnsavedChanges =
+                                                    true
+                                            }
+                                        },
+                                        label = {
+                                            Text(
+                                                "Max ₹",
+                                                fontSize = 8.sp,
+                                                maxLines = 1
+                                            )
+                                        },
+                                        keyboardOptions =
+                                            KeyboardOptions(
+                                                keyboardType =
+                                                    KeyboardType.Decimal
+                                            ),
+                                        singleLine = true,
+                                        modifier =
+                                            Modifier.weight(1f),
+                                        shape =
+                                            RoundedCornerShape(
+                                                9.dp
+                                            ),
+                                        colors =
+                                            OutlinedTextFieldDefaults
+                                                .colors(
+                                                    focusedBorderColor =
+                                                        BluePrimary,
+                                                    focusedLabelColor =
+                                                        BluePrimary,
+                                                    unfocusedBorderColor =
+                                                        CardBorderDefault,
+                                                    focusedTextColor =
+                                                        TextDarkPrimary,
+                                                    unfocusedTextColor =
+                                                        TextDarkPrimary
+                                                )
+                                    )
+
+                                    OutlinedTextField(
+                                        value = maxPickupInput,
+                                        onValueChange = { input ->
+                                            if (
+                                                input.isEmpty() ||
+                                                input.matches(
+                                                    Regex(
+                                                        """^\d*\.?\d*$"""
+                                                    )
+                                                )
+                                            ) {
+                                                maxPickupInput =
+                                                    input
+                                                hasUnsavedChanges =
+                                                    true
+                                            }
+                                        },
+                                        label = {
+                                            Text(
+                                                "Pickup",
+                                                fontSize = 8.sp,
+                                                maxLines = 1
+                                            )
+                                        },
+                                        keyboardOptions =
+                                            KeyboardOptions(
+                                                keyboardType =
+                                                    KeyboardType.Decimal
+                                            ),
+                                        singleLine = true,
+                                        modifier =
+                                            Modifier.weight(1f),
+                                        shape =
+                                            RoundedCornerShape(
+                                                9.dp
+                                            ),
+                                        colors =
+                                            OutlinedTextFieldDefaults
+                                                .colors(
+                                                    focusedBorderColor =
+                                                        BluePrimary,
+                                                    focusedLabelColor =
+                                                        BluePrimary,
+                                                    unfocusedBorderColor =
+                                                        CardBorderDefault,
+                                                    focusedTextColor =
+                                                        TextDarkPrimary,
+                                                    unfocusedTextColor =
+                                                        TextDarkPrimary
+                                                )
+                                    )
+
+                                    OutlinedTextField(
+                                        value = maxDropInput,
+                                        onValueChange = { input ->
+                                            if (
+                                                input.isEmpty() ||
+                                                input.matches(
+                                                    Regex(
+                                                        """^\d*\.?\d*$"""
+                                                    )
+                                                )
+                                            ) {
+                                                maxDropInput =
+                                                    input
+                                                hasUnsavedChanges =
+                                                    true
+                                            }
+                                        },
+                                        label = {
+                                            Text(
+                                                "Drop",
+                                                fontSize = 8.sp,
+                                                maxLines = 1
+                                            )
+                                        },
+                                        keyboardOptions =
+                                            KeyboardOptions(
+                                                keyboardType =
+                                                    KeyboardType.Decimal
+                                            ),
+                                        singleLine = true,
+                                        modifier =
+                                            Modifier.weight(1f),
+                                        shape =
+                                            RoundedCornerShape(
+                                                9.dp
+                                            ),
+                                        colors =
+                                            OutlinedTextFieldDefaults
+                                                .colors(
+                                                    focusedBorderColor =
+                                                        BluePrimary,
+                                                    focusedLabelColor =
+                                                        BluePrimary,
+                                                    unfocusedBorderColor =
+                                                        CardBorderDefault,
+                                                    focusedTextColor =
+                                                        TextDarkPrimary,
+                                                    unfocusedTextColor =
+                                                        TextDarkPrimary
+                                                )
+                                    )
                                 }
                             }
                         }
-                        // Save Settings Button
+
                         Button(
                             onClick = {
-                                val minF = minFareInput.toFloatOrNull() ?: settings.minFare
-                                val maxF = maxFareInput.toFloatOrNull() ?: settings.maxFare
-                                val maxP = maxPickupInput.toFloatOrNull() ?: settings.maxPickupDistanceKm
-                                val maxD = maxDropInput.toFloatOrNull() ?: settings.maxDropDistanceKm
+
+                                val minF =
+                                    minFareInput.toFloatOrNull()
+                                        ?: settings.minFare
+
+                                val maxF =
+                                    maxFareInput.toFloatOrNull()
+                                        ?: settings.maxFare
+
+                                val maxP =
+                                    maxPickupInput.toFloatOrNull()
+                                        ?: settings.maxPickupDistanceKm
+
+                                val maxD =
+                                    maxDropInput.toFloatOrNull()
+                                        ?: settings.maxDropDistanceKm
 
                                 prefs.saveAppSettings(
                                     settings.copy(
-                                        filterMode = pendingFilterMode,
+                                        filterMode =
+                                            pendingFilterMode,
                                         minFare = minF,
                                         maxFare = maxF,
-                                        maxPickupDistanceKm = maxP,
-                                        maxDropDistanceKm = maxD
+                                        maxPickupDistanceKm =
+                                            maxP,
+                                        maxDropDistanceKm =
+                                            maxD
                                     )
                                 )
-                                savedFilterMode = pendingFilterMode
-                                hasUnsavedChanges = false
 
-                                val savedModeLabel = when (pendingFilterMode) {
-                                    FilterMode.FARE_ONLY -> "Fare"
-                                    FilterMode.DISTANCE_ONLY -> "Distance"
-                                    FilterMode.BOTH -> "Both"
-                                }
+                                savedFilterMode =
+                                    pendingFilterMode
+
+                                hasUnsavedChanges =
+                                    false
+
+                                val savedModeLabel =
+                                    when (
+                                        pendingFilterMode
+                                    ) {
+                                        FilterMode.FARE_ONLY ->
+                                            "Fare"
+
+                                        FilterMode.DISTANCE_ONLY ->
+                                            "Distance"
+
+                                        FilterMode.BOTH ->
+                                            "Both"
+                                    }
 
                                 coroutineScope.launch {
-                                    snackbarHostState.showSnackbar(
-                                        "$savedModeLabel settings saved ✓"
-                                    )
+                                    snackbarHostState
+                                        .showSnackbar(
+                                            "$savedModeLabel settings saved ✓"
+                                        )
                                 }
                             },
-                            enabled = true,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(44.dp)
-                                .testTag("save_settings_button"),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = BluePrimary,
-                                contentColor = Color.White
-                            )
+                                .testTag(
+                                    "save_settings_button"
+                                ),
+                            shape =
+                                RoundedCornerShape(11.dp),
+                            colors =
+                                ButtonDefaults.buttonColors(
+                                    containerColor =
+                                        BluePrimary,
+                                    contentColor =
+                                        Color.White
+                                )
                         ) {
                             Icon(
                                 Icons.Default.CheckCircle,
                                 contentDescription = null,
-                                modifier = Modifier.size(17.dp)
+                                modifier =
+                                    Modifier.size(16.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Spacer(
+                                modifier =
+                                    Modifier.width(7.dp)
+                            )
+
                             Text(
-                                text = "Save Settings",
+                                text = "Save Home Filter",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
+                                fontSize = 11.sp
                             )
                         }
                     }
                 }
             }
-
             // 7. Area Rules Engine card — COMPACT
             item {
                 Card(

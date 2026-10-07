@@ -709,7 +709,12 @@ private val processingTimeoutRunnable = Runnable {
         val secondaryBothEnabled: Boolean = false,
         val secondaryBothMinFare: Float = 50f,
         val secondaryBothMaxPickupKm: Float = 3.0f,
-        val secondaryBothMaxDropKm: Float = 7.5f
+        val secondaryBothMaxDropKm: Float = 7.5f,
+
+        val tertiaryBothEnabled: Boolean = false,
+        val tertiaryBothMinFare: Float = 50f,
+        val tertiaryBothMaxPickupKm: Float = 3.0f,
+        val tertiaryBothMaxDropKm: Float = 7.5f
     )
 
     private fun getDirectPreferencesString(sp: SharedPreferences, keys: List<String>, defaultVal: String): String {
@@ -805,6 +810,38 @@ private val processingTimeoutRunnable = Runnable {
                 listOf("setting_secondary_both_max_drop_km"),
                 7.5f
             )
+
+        val tertiaryBothEnabled =
+            try {
+                sp.getBoolean(
+                    "setting_tertiary_both_filter_enabled",
+                    false
+                )
+            } catch (_: Exception) {
+                false
+            }
+
+        val tertiaryBothMinFare =
+            getDirectPreferencesFloat(
+                sp,
+                listOf("setting_tertiary_both_min_fare"),
+                50f
+            )
+
+        val tertiaryBothMaxPickupKm =
+            getDirectPreferencesFloat(
+                sp,
+                listOf("setting_tertiary_both_max_pickup_km"),
+                3.0f
+            )
+
+        val tertiaryBothMaxDropKm =
+            getDirectPreferencesFloat(
+                sp,
+                listOf("setting_tertiary_both_max_drop_km"),
+                7.5f
+            )
+
         return DirectRideFilterSettings(
             minFare = minFare,
             maxFare = maxFare,
@@ -819,7 +856,16 @@ private val processingTimeoutRunnable = Runnable {
             secondaryBothMaxPickupKm =
                 secondaryBothMaxPickupKm,
             secondaryBothMaxDropKm =
-                secondaryBothMaxDropKm
+                secondaryBothMaxDropKm,
+
+            tertiaryBothEnabled =
+                tertiaryBothEnabled,
+            tertiaryBothMinFare =
+                tertiaryBothMinFare,
+            tertiaryBothMaxPickupKm =
+                tertiaryBothMaxPickupKm,
+            tertiaryBothMaxDropKm =
+                tertiaryBothMaxDropKm
         )
     }
 
@@ -978,27 +1024,24 @@ private val processingTimeoutRunnable = Runnable {
             }
         }
 
-        // Filter 2 filter.
-        // It is independent from Home settings.
+        // Order Filter 2.
         val secondaryFailureReasons =
             mutableListOf<String>()
 
         if (direct.secondaryBothEnabled) {
 
             if (fare == null || fare <= 0f) {
-                secondaryFailureReasons +=
-                    "Fare unavailable"
+                secondaryFailureReasons += "Fare unavailable"
             } else if (
                 direct.secondaryBothMinFare > 0f &&
                 fare < direct.secondaryBothMinFare
             ) {
                 secondaryFailureReasons +=
-                    "Fare ₹${fare.toInt()} < min ₹${direct.secondaryBothMinFare.toInt()}"
+                    "Fare \u20B9${fare.toInt()} < min \u20B9${direct.secondaryBothMinFare.toInt()}"
             }
 
             if (pickup == null) {
-                secondaryFailureReasons +=
-                    "Pickup unavailable"
+                secondaryFailureReasons += "Pickup unavailable"
             } else if (
                 direct.secondaryBothMaxPickupKm > 0f &&
                 pickup > direct.secondaryBothMaxPickupKm
@@ -1008,8 +1051,7 @@ private val processingTimeoutRunnable = Runnable {
             }
 
             if (drop == null) {
-                secondaryFailureReasons +=
-                    "Trip unavailable"
+                secondaryFailureReasons += "Trip unavailable"
             } else if (
                 direct.secondaryBothMaxDropKm > 0f &&
                 drop > direct.secondaryBothMaxDropKm
@@ -1019,23 +1061,73 @@ private val processingTimeoutRunnable = Runnable {
             }
         }
 
+        // Order Filter 3.
+        val tertiaryFailureReasons =
+            mutableListOf<String>()
+
+        if (direct.tertiaryBothEnabled) {
+
+            if (fare == null || fare <= 0f) {
+                tertiaryFailureReasons += "Fare unavailable"
+            } else if (
+                direct.tertiaryBothMinFare > 0f &&
+                fare < direct.tertiaryBothMinFare
+            ) {
+                tertiaryFailureReasons +=
+                    "Fare \u20B9${fare.toInt()} < min \u20B9${direct.tertiaryBothMinFare.toInt()}"
+            }
+
+            if (pickup == null) {
+                tertiaryFailureReasons += "Pickup unavailable"
+            } else if (
+                direct.tertiaryBothMaxPickupKm > 0f &&
+                pickup > direct.tertiaryBothMaxPickupKm
+            ) {
+                tertiaryFailureReasons +=
+                    "Pickup ${String.format(Locale.ENGLISH, "%.1f", pickup)} km > max ${String.format(Locale.ENGLISH, "%.1f", direct.tertiaryBothMaxPickupKm)} km"
+            }
+
+            if (drop == null) {
+                tertiaryFailureReasons += "Trip unavailable"
+            } else if (
+                direct.tertiaryBothMaxDropKm > 0f &&
+                drop > direct.tertiaryBothMaxDropKm
+            ) {
+                tertiaryFailureReasons +=
+                    "Trip ${String.format(Locale.ENGLISH, "%.1f", drop)} km > max ${String.format(Locale.ENGLISH, "%.1f", direct.tertiaryBothMaxDropKm)} km"
+            }
+        }
+
         val secondaryMatched =
             direct.secondaryBothEnabled &&
                 secondaryFailureReasons.isEmpty()
 
-        // Home failed but Filter 2 passed -> ACCEPT.
+        val tertiaryMatched =
+            direct.tertiaryBothEnabled &&
+                tertiaryFailureReasons.isEmpty()
+
+        // Home failed but Filter 2 or Filter 3 passed -> ACCEPT.
         if (
             failureReasons.isNotEmpty() &&
-            secondaryMatched
-        ) {
-            Log.i(
-                TAG,
-                "✅ [Filter OR MATCH] Home failed, Filter 2 matched"
+            (
+                secondaryMatched ||
+                tertiaryMatched
             )
+        ) {
+            val matched =
+                mutableListOf<String>()
+
+            if (secondaryMatched) {
+                matched += "Filter 2"
+            }
+
+            if (tertiaryMatched) {
+                matched += "Filter 3"
+            }
 
             return DirectFilterResult(
                 OrderStatus.ACCEPTED,
-                "Filter 2 matched"
+                matched.joinToString(" + ") + " matched"
             )
         }
         if (failureReasons.isNotEmpty()) {
@@ -1080,6 +1172,19 @@ private val processingTimeoutRunnable = Runnable {
                     )
                 } else {
                     append("\nFilter 2: OFF")
+                }
+
+                if (direct.tertiaryBothEnabled) {
+                    append(
+                        "\nFilter 3: ${
+                            if (tertiaryFailureReasons.isEmpty())
+                                "matched"
+                            else
+                                tertiaryFailureReasons.joinToString("; ")
+                        }"
+                    )
+                } else {
+                    append("\nFilter 3: OFF")
                 }
             }
 
