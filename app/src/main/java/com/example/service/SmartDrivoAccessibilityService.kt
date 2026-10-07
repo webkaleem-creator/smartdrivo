@@ -1489,6 +1489,18 @@ private val processingTimeoutRunnable = Runnable {
             resetProcessing()
             return
         }
+        // UBER_DISABLED_OLA_FOCUS_V1
+        // SmartDrivo is currently focusing on Ola.
+        // Ignore every Uber accessibility event immediately.
+        // Rapido and Ola logic remain independent.
+        if (isUberPackage(eventPkg)) {
+            Log.d(
+                TAG,
+                "UBER DISABLED - Ola focus mode"
+            )
+            return
+        }
+
         // 1. UBER OVERLAY-SAFE DETECTION
         //
         // Uber Trip Radar can appear over SmartDrivo or another
@@ -1875,37 +1887,7 @@ private val processingTimeoutRunnable = Runnable {
                 return
             }
 
-            // RAPIDO_ACCEPTED_STALE_EVENT_GUARD_V1
-            // After a successful Accept, Rapido can emit stale accessibility
-            // events while the old offer tree is disappearing.
-            // Keep the current order identity briefly so the same accepted
-            // ride cannot create a second false-IGNORED History result.
-            // This is only on the no-valid-popup fallback path, so the
-            // live Accept/filter fast path remains unchanged.
-            val anyRapidoPostAccept =
-                candidateRoots.any { candidateRoot ->
-                    isRapidoPostAcceptScreen(candidateRoot)
-                }
-
-            val popupGapMs =
-                System.currentTimeMillis() -
-                    lastValidRapidoPopupAt
-
-            if (
-                !anyRapidoPostAccept &&
-                (
-                    lastValidRapidoPopupAt <= 0L ||
-                        popupGapMs > 1_200L
-                )
-            ) {
-                activeRapidoPopupOrderId = null
-                lastValidRapidoPopupAt = 0L
-            } else {
-                Log.d(
-                    TAG,
-                    "RAPIDO transition/post-accept gap; keeping current order identity"
-                )
-            }
+            activeRapidoPopupOrderId = null
 
             Log.d(
                 TAG,
@@ -1914,15 +1896,134 @@ private val processingTimeoutRunnable = Runnable {
                     "Need fare + pickup distance + Accept button."
             )
         }
-        // 3. Check Ola window or event for ola.cabs / com.olacabs.oladriver
-        val isOlaPkg = isOlaPackage(eventPkg)
-        if (isOlaPkg && preferencesManager.isAutoAcceptEnabled) {
-            val root = rootInActiveWindow ?: eventSource
-            val rootPkg = root?.packageName?.toString().orEmpty().trim().lowercase()
-            if (root != null && isOlaPackage(rootPkg)) {
-                handleOlaOrder(root, eventPkg)
+        // OLA_REFERENCE_MULTI_WINDOW_V1
+        // Ola may publish its live order card in eventSource,
+        // active root, or another accessibility window.
+        // Score every Ola root and use the strongest real order window.
+        val isOlaPkg =
+            isOlaPackage(eventPkg)
+
+        if (
+            isOlaPkg &&
+            preferencesManager.isAutoAcceptEnabled
+        ) {
+
+            val olaRoots =
+                mutableListOf<AccessibilityNodeInfo>()
+
+            val seenOlaRoots =
+                mutableSetOf<Int>()
+
+
+            fun addOlaRoot(
+                node: AccessibilityNodeInfo?
+            ) {
+
+                if (node == null) {
+                    return
+                }
+
+                val top =
+                    getTopRootNode(node)
+                        ?: node
+
+                val pkg =
+                    top.packageName
+                        ?.toString()
+                        .orEmpty()
+                        .trim()
+                        .lowercase(Locale.ROOT)
+
+                if (!isOlaPackage(pkg)) {
+                    return
+                }
+
+                val key =
+                    System.identityHashCode(top)
+
+                if (
+                    seenOlaRoots.add(key)
+                ) {
+                    olaRoots.add(top)
+                }
+            }
+
+
+            // Fastest/direct source first.
+            addOlaRoot(eventSource)
+
+            // Active window second.
+            addOlaRoot(rootInActiveWindow)
+
+            // Ola order popup may exist in another interactive window.
+            try {
+
+                windows.forEach { window ->
+                    addOlaRoot(window.root)
+                }
+
+            } catch (e: Exception) {
+
+                Log.w(
+                    TAG,
+                    "OLA window scan failed: ${e.message}"
+                )
+            }
+
+
+            var bestOlaRoot:
+                AccessibilityNodeInfo? = null
+
+            var bestOlaScore =
+                Int.MIN_VALUE
+
+
+            for (candidateRoot in olaRoots) {
+
+                val score =
+                    OlaAdapter.scoreOrderRoot(
+                        candidateRoot
+                    )
+
+                Log.d(
+                    TAG,
+                    "OLA window score=$score " +
+                        "pkg=${candidateRoot.packageName}"
+                )
+
+                if (score > bestOlaScore) {
+
+                    bestOlaScore =
+                        score
+
+                    bestOlaRoot =
+                        candidateRoot
+                }
+            }
+
+
+            if (bestOlaRoot != null) {
+
+                Log.i(
+                    TAG,
+                    "OLA BEST ORDER WINDOW selected " +
+                        "score=$bestOlaScore " +
+                        "roots=${olaRoots.size}"
+                )
+
+                handleOlaOrder(
+                    bestOlaRoot,
+                    eventPkg
+                )
+
                 return
             }
+
+
+            Log.d(
+                TAG,
+                "OLA event received but no Ola accessibility root found"
+            )
         }
     }
 
@@ -2671,8 +2772,8 @@ private val processingTimeoutRunnable = Runnable {
                 else -> { /* no-op */ }
             }
 
-            // Fix 2: Vibrate only once per order using lastVibratedOrderId
-            triggerOrderDetectedVibration(getOrderIdentifier(candidate))
+            // OLA_FAST_PATH_V1
+            // No vibration in Ola click-critical path.
 
             val profileVehicle = prefs.userProfile.value.vehicleType
             val isVehicleAllowed = candidate.vehicleType == profileVehicle
@@ -4167,11 +4268,12 @@ private val processingTimeoutRunnable = Runnable {
         if (!preferencesManager.isAutoAcceptEnabled) {
             // FIX 3: If toggle was OFF when order appeared, mark order as "IGNORED" not "REJECTED"
             try {
-                val candidate = OrderDataExtractor.extractCandidate(
-                    root = root,
-                    platform = Platform.OLA,
-                    defaultVehicle = prefs.userProfile.value.vehicleType
-                )
+                val candidate =
+                    OlaAdapter.extractCandidate(
+                        root = root,
+                        defaultVehicle =
+                            prefs.userProfile.value.vehicleType
+                    )
                 logOrderEvent(candidate.copy(platform = Platform.OLA), OrderStatus.IGNORED, "Auto-accept toggle is OFF")
                 Log.i(TAG, "Ola order appeared while toggle is OFF -> Logged as IGNORED")
             } catch (e: Exception) {
@@ -4188,9 +4290,54 @@ private val processingTimeoutRunnable = Runnable {
         if (!userProfile.isPlanValid && !userProfile.isAdmin) return
         if (!settings.olaEnabled) return
 
-        // Debounce repeated events: 150ms max
-        val now = System.currentTimeMillis()
-        if (now - lastOlaHandledTimestamp < 150L || isProcessing) return
+        // OLA_PLAIN_ACCEPT_READY_GATE_V1
+        //
+        // Ola order button is not actually ready while the screen says:
+        // Accept in 5 / 4 / 3 / 2 / 1.
+        //
+        // IMPORTANT:
+        // Return BEFORE isProcessing=true so every countdown change can
+        // generate another accessibility event.
+        // The moment plain "Accept" appears, continue immediately.
+        val olaLiveText =
+            OlaAdapter
+                .collectAllNodeTexts(root)
+                .joinToString(" ")
+                .lowercase(Locale.ROOT)
+
+        val olaCountdownActive =
+            Regex(
+                """accept\s*in\s*\d+""",
+                RegexOption.IGNORE_CASE
+            ).containsMatchIn(olaLiveText)
+
+        if (olaCountdownActive) {
+            Log.d(
+                TAG,
+                "OLA READY GATE: countdown active - waiting for plain Accept"
+            )
+
+            resetProcessing()
+            setOlaState(OlaState.IDLE)
+            return
+        }
+
+        Log.i(
+            TAG,
+            "OLA READY GATE: plain Accept stage reached - process immediately"
+        )
+        // OLA_FAST_EVENT_GATE_V1
+        // Repeated accessibility events are common.
+        // Keep the processing lock, but avoid the old 150ms delay.
+        val now =
+            System.currentTimeMillis()
+
+        if (
+            now - lastOlaHandledTimestamp < 25L ||
+            isProcessing
+        ) {
+            return
+        }
 
         // Ola detection: scan window with package com.olacabs.oladriver, find clickable accept button
         val acceptNode = findOlaAcceptButton(root)
@@ -4209,10 +4356,22 @@ private val processingTimeoutRunnable = Runnable {
         lastOlaHandledTimestamp = System.currentTimeMillis()
 
         try {
-            val candidate = OrderDataExtractor.extractCandidate(
-                root = root,
-                platform = Platform.OLA,
-                defaultVehicle = prefs.userProfile.value.vehicleType
+            val candidate =
+                    OlaAdapter.extractCandidate(
+                        root = root,
+                        defaultVehicle =
+                            prefs.userProfile.value.vehicleType
+                    )
+
+            // OLA PARSED VALUES V2
+            Log.i(
+                TAG,
+                "OLA PARSED: " +
+                    "fare=${candidate.fare}, " +
+                    "pickup=${candidate.pickupDistKm}, " +
+                    "trip=${candidate.dropDistKm}, " +
+                    "pickupAddress=${candidate.pickupAddress}, " +
+                    "dropAddress=${candidate.dropAddress}"
             )
 
             // Duplicate protection for Ola
@@ -4255,8 +4414,8 @@ private val processingTimeoutRunnable = Runnable {
                 else -> { /* no-op */ }
             }
 
-            // Fix 2: Vibrate only once per order using lastVibratedOrderId
-            triggerOrderDetectedVibration(getOrderIdentifier(candidate))
+            // OLA_FAST_PATH_V1
+            // No vibration in Ola click-critical path.
 
             val profileVehicle = prefs.userProfile.value.vehicleType
             val isVehicleAllowed = candidate.vehicleType == profileVehicle
@@ -4320,16 +4479,15 @@ private val processingTimeoutRunnable = Runnable {
                 return
             }
 
-            // Execute Ola auto-accept using 3 methods in sequence (delays capped to 150ms max)
-            val speedDelay = minOf(settings.clickSpeed.delayMs, 150L)
-            if (speedDelay <= 0L) {
-                executeOlaAutoAccept(root, candidate, acceptNode)
-            } else {
-                serviceScope.launch(Dispatchers.IO) {
-                    delay(speedDelay)
-                    executeOlaAutoAccept(root, candidate, acceptNode)
-                }
-            }
+            // OLA_INSTANT_ACCEPT_V1
+            // Filters already passed.
+            // Do not add an extra artificial delay before the verified
+            // Ola Accept button / slider action.
+            executeOlaAutoAccept(
+                root = root,
+                candidate = candidate,
+                acceptNode = acceptNode
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Error in handleOlaOrder", e)
             resetProcessing()
@@ -4381,7 +4539,7 @@ private val processingTimeoutRunnable = Runnable {
         Log.i(TAG, "Ola Method 1: performAction(ACTION_CLICK) on accept node returned: $clicked")
         if (clicked) {
             Log.i(TAG, "✓ Ola Method 1 SUCCESSFUL via ACTION_CLICK!")
-            onOlaAccepted(candidate, timesClicked = 1)
+            verifyOlaAcceptanceFast(candidate, timesClicked = 1)
             return
         }
 
@@ -4401,12 +4559,12 @@ private val processingTimeoutRunnable = Runnable {
                 simulateSwipeGesture(startX, centerY, endX, centerY) { swipeSuccess ->
                     if (swipeSuccess) {
                         Log.i(TAG, "✓ Ola Method 2 SUCCESSFUL via swipe on slider!")
-                        onOlaAccepted(candidate, timesClicked = 2)
+                        verifyOlaAcceptanceFast(candidate, timesClicked = 2)
                     } else {
                         simulateTapGesture(centerX, centerY, isInternalFallback = true) { tapSuccess ->
                             if (tapSuccess) {
                                 Log.i(TAG, "✓ Ola Method 2 SUCCESSFUL via fallback tap!")
-                                onOlaAccepted(candidate, timesClicked = 2)
+                                verifyOlaAcceptanceFast(candidate, timesClicked = 2)
                             } else {
                                 executeOlaMethod3(acceptNode, candidate)
                             }
@@ -4420,12 +4578,12 @@ private val processingTimeoutRunnable = Runnable {
                         // Also try a quick swipe across bounds in case it is a slide control
                         simulateSwipeGesture(startX, centerY, endX, centerY)
                         Log.i(TAG, "✓ Ola Method 2 SUCCESSFUL via gesture tap at coordinates!")
-                        onOlaAccepted(candidate, timesClicked = 2)
+                        verifyOlaAcceptanceFast(candidate, timesClicked = 2)
                     } else {
                         simulateSwipeGesture(startX, centerY, endX, centerY) { swipeSuccess ->
                             if (swipeSuccess) {
                                 Log.i(TAG, "✓ Ola Method 2 SUCCESSFUL via swipe across bounds!")
-                                onOlaAccepted(candidate, timesClicked = 2)
+                                verifyOlaAcceptanceFast(candidate, timesClicked = 2)
                             } else {
                                 executeOlaMethod3(acceptNode, candidate)
                             }
@@ -4449,7 +4607,7 @@ private val processingTimeoutRunnable = Runnable {
                 val parentClicked = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 if (parentClicked) {
                     Log.i(TAG, "✓ Ola Method 3 SUCCESSFUL via parent ACTION_CLICK!")
-                    onOlaAccepted(candidate, timesClicked = 3)
+                    verifyOlaAcceptanceFast(candidate, timesClicked = 3)
                     return
                 }
             }
@@ -4469,7 +4627,7 @@ private val processingTimeoutRunnable = Runnable {
                     simulateSwipeGesture(pStartX, pCenterY, pEndX, pCenterY) { swipeSuccess ->
                         if (tapSuccess || swipeSuccess) {
                             Log.i(TAG, "✓ Ola Method 3 SUCCESSFUL via parent node tap/swipe!")
-                            onOlaAccepted(candidate, timesClicked = 3)
+                            verifyOlaAcceptanceFast(candidate, timesClicked = 3)
                         } else {
                             fallbackOlaTap(candidate)
                         }
@@ -4507,6 +4665,224 @@ private val processingTimeoutRunnable = Runnable {
      * State transition: OLA_ACCEPTED
      * Add to order history with platform = "Ola" and update stats via prefs.addOrderHistory()
      */
+    // OLA_REAL_ACCEPT_VERIFY_V1
+    //
+    // ACTION_CLICK=true only means Android dispatched the click.
+    // It does NOT prove Ola actually accepted the ride.
+    //
+    // Verify the live Ola UI before History/overlay becomes ACCEPTED.
+    private fun verifyOlaAcceptanceFast(
+        candidate: RideCandidate,
+        timesClicked: Int = 1
+    ) {
+        val recordId =
+            activeOrderRecordIds[candidate.platform]
+                ?: onOrderDetectedFast(candidate)
+
+        serviceScope.launch(Dispatchers.IO) {
+
+            var confirmed =
+                false
+
+            var negativeState =
+                false
+
+            var lastRoot:
+                AccessibilityNodeInfo? = null
+
+
+            repeat(5) { checkIndex ->
+
+                if (checkIndex > 0) {
+                    delay(60L)
+                }
+
+
+                val candidateRoots =
+                    mutableListOf<AccessibilityNodeInfo>()
+
+                val seenRoots =
+                    mutableSetOf<Int>()
+
+
+                fun addRoot(
+                    node: AccessibilityNodeInfo?
+                ) {
+                    if (node == null) {
+                        return
+                    }
+
+                    val top =
+                        getTopRootNode(node)
+                            ?: node
+
+                    val pkg =
+                        top.packageName
+                            ?.toString()
+                            .orEmpty()
+
+                    if (!isOlaPackage(pkg)) {
+                        return
+                    }
+
+                    val key =
+                        System.identityHashCode(top)
+
+                    if (seenRoots.add(key)) {
+                        candidateRoots.add(top)
+                    }
+                }
+
+
+                addRoot(rootInActiveWindow)
+
+                try {
+                    windows.forEach { window ->
+                        addRoot(window.root)
+                    }
+                } catch (_: Exception) {
+                }
+
+
+                val bestRoot =
+                    candidateRoots
+                        .maxByOrNull {
+                            OlaAdapter.scoreOrderRoot(it)
+                        }
+
+
+                lastRoot =
+                    bestRoot
+
+
+                if (bestRoot == null) {
+
+                    Log.d(
+                        TAG,
+                        "OLA VERIFY: no Ola root yet " +
+                            "check=${checkIndex + 1}"
+                    )
+
+                    return@repeat
+                }
+
+
+                val texts =
+                    OlaAdapter
+                        .collectAllNodeTexts(bestRoot)
+                        .joinToString(" ")
+                        .lowercase(Locale.ROOT)
+
+
+                val hasNegativeState =
+                    texts.contains("missed") ||
+                        texts.contains("expired") ||
+                        texts.contains("no longer available") ||
+                        texts.contains("accepted by another") ||
+                        texts.contains("another driver") ||
+                        texts.contains("booking cancelled") ||
+                        texts.contains("ride cancelled")
+
+
+                if (hasNegativeState) {
+
+                    negativeState =
+                        true
+
+                    Log.w(
+                        TAG,
+                        "OLA VERIFY: negative final state detected"
+                    )
+
+                    return@repeat
+                }
+
+
+                val hasPositiveState =
+                    texts.contains("ride accepted") ||
+                        texts.contains("accepted!") ||
+                        texts.contains("navigate to pickup") ||
+                        texts.contains("go to pickup") ||
+                        texts.contains("arrived at pickup") ||
+                        texts.contains("start ride") ||
+                        texts.contains("ongoing ride")
+
+
+                val acceptStillVisible =
+                    findOlaAcceptButton(
+                        bestRoot
+                    ) != null
+
+
+                Log.i(
+                    TAG,
+                    "OLA VERIFY check=${checkIndex + 1} " +
+                        "positive=$hasPositiveState " +
+                        "acceptVisible=$acceptStillVisible"
+                )
+
+
+                if (
+                    hasPositiveState ||
+                    !acceptStillVisible
+                ) {
+
+                    confirmed =
+                        true
+
+                    return@repeat
+                }
+            }
+
+
+            if (
+                confirmed &&
+                !negativeState
+            ) {
+
+                Log.i(
+                    TAG,
+                    "OLA REAL ACCEPT CONFIRMED"
+                )
+
+                onOlaAccepted(
+                    candidate = candidate,
+                    timesClicked = timesClicked
+                )
+
+                return@launch
+            }
+
+
+            Log.w(
+                TAG,
+                "OLA ACCEPT NOT CONFIRMED - retry/fail"
+            )
+
+
+            onOrderActionCompletedFast(
+                recordId = recordId,
+                candidate = candidate,
+                status = OrderStatus.FAILED,
+                reasonCode = "OLA_ACCEPT_NOT_CONFIRMED",
+                reasonText =
+                    "Ola Accept action sent but ride acceptance was not confirmed",
+                actionSucceeded = false,
+                timesClicked = timesClicked,
+                buttonFound = true,
+                buttonDetails =
+                    "Ola Accept button/slider found",
+                clickMethod =
+                    "Ola verified click",
+                errorMsg =
+                    "Accept state not confirmed"
+            )
+
+            resetProcessing()
+            setOlaState(OlaState.IDLE)
+        }
+    }
+
     private fun onOlaAccepted(candidate: RideCandidate, timesClicked: Int = 1) {
         // MASTER OFF: ignore Ola completion.
         if (!preferencesManager.isAutoAcceptEnabled) {
@@ -5687,18 +6063,58 @@ private val processingTimeoutRunnable = Runnable {
                 !isRapidoOrderPopupShowing(rapidoRoot)
             )
         ) {
-            Log.i(TAG, "Rapido order popup nodes are not visible (fare and Accept button required). No click triggered.")
+            Log.i(TAG, "Rapido order popup nodes are not visible (fare and Accept button required).")
 
             val recordId = pinnedRecordId
 
+            // RAPIDO_RETRY_DISAPPEAR_ACCEPT_V1
+            // Attempt #1 with no popup means SmartDrivo never clicked it.
+            // But attempt #2+ is reached only after the previous verified
+            // Accept-button attempt. If the popup disappears between the
+            // fast verification and retry, do not overwrite the real
+            // accepted ride as IGNORED.
+            if (attemptNumber > 1) {
+                Log.i(
+                    TAG,
+                    "RAPIDO_RETRY_DISAPPEAR_ACCEPT_V1: popup disappeared after prior Accept attempt -> ACCEPTED"
+                )
 
-            onOrderDecisionFast(
-                recordId = recordId,
-                candidate = candidate,
-                status = OrderStatus.IGNORED,
-                reasonCode = "ORDER_POPUP_CLOSED",
-                reasonText = "Order popup closed before SmartDrivo completed the action"
-            )
+                // Popup first, DB/history work remains after the click.
+                // This does NOT add delay to Rapido Accept.
+                showAcceptedOrderOverlay(candidate)
+
+                NotificationHelper.updateNotification(
+                    context = applicationContext,
+                    title = "SmartDrivo Active",
+                    text = "Order Accepted! Monitoring next..."
+                )
+
+                onOrderActionCompletedFast(
+                    recordId = recordId,
+                    candidate = candidate,
+                    status = OrderStatus.ACCEPTED,
+                    reasonCode = "FILTERS_MATCHED",
+                    reasonText =
+                        acceptedHistoryReason
+                            ?.takeIf { it.isNotBlank() }
+                            ?: buildAcceptedFilterReason(candidate),
+                    actionSucceeded = true,
+                    timesClicked = attemptNumber - 1,
+                    buttonFound = true,
+                    buttonDetails = "Accept button was verified on previous attempt",
+                    clickMethod = "Strict Button Click (previous attempt)"
+                )
+            } else {
+                // No previous Accept attempt happened.
+                // Keep the original safe behavior.
+                onOrderDecisionFast(
+                    recordId = recordId,
+                    candidate = candidate,
+                    status = OrderStatus.IGNORED,
+                    reasonCode = "ORDER_POPUP_CLOSED",
+                    reasonText = "Order popup closed before SmartDrivo completed the action"
+                )
+            }
 
             resetProcessing()
             return
@@ -6237,8 +6653,8 @@ val isOrderStillVisible =
                 else -> { /* no-op */ }
             }
 
-            // Fix 2: Vibrate only once per order using lastVibratedOrderId
-            triggerOrderDetectedVibration(getOrderIdentifier(candidate))
+            // OLA_FAST_PATH_V1
+            // No vibration in Ola click-critical path.
 
             // Vehicle type filter & ride evaluation: load settings FRESH before evaluating every ride
             val settings = prefs.loadSettings()
