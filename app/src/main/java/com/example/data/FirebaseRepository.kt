@@ -247,8 +247,6 @@ class FirebaseRepository(
         profile: UserProfile,
         onComplete: ((Boolean) -> Unit)? = null
     ) {
-        prefs.saveUserProfile(profile)
-
         scope.launch {
             try {
                 val fs = firestore
@@ -258,15 +256,26 @@ class FirebaseRepository(
                     return@launch
                 }
 
+                // AUTH_UID_CANONICAL_USER_DOC_V1
+                // Signed-in Firebase UID is the only canonical /users document id.
+                // This prevents an old/local UUID from creating another row.
+                val authenticatedUid =
+                    auth?.currentUser?.uid.orEmpty()
+
                 val uid =
-                    profile.uid.ifBlank {
-                        auth?.currentUser?.uid.orEmpty()
+                    authenticatedUid.ifBlank {
+                        profile.uid
                     }
 
                 if (uid.isBlank()) {
                     onComplete?.invoke(false)
                     return@launch
                 }
+
+                prefs.saveUserProfile(
+                    if (profile.uid == uid) profile
+                    else profile.copy(uid = uid)
+                )
 
                 val now =
                     System.currentTimeMillis()

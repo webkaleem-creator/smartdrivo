@@ -721,14 +721,75 @@
     });
 
     // 2. REALTIME LISTENERS
+    // DRIVER_IDENTITY_DEDUPE_V1
+    // Keep legacy Firestore docs intact, but show one row per real driver identity.
+    function normalizeDriverEmail(v) {
+      return String(v || '').trim().toLowerCase();
+    }
+
+    function normalizeDriverPhone(v) {
+      const digits = String(v || '').replace(/\D/g, '');
+      return digits.length > 10 ? digits.slice(-10) : digits;
+    }
+
+    function driverIdentityKey(d) {
+      const email = normalizeDriverEmail(d.email);
+      if (email) return `email:${email}`;
+
+      const phone = normalizeDriverPhone(d.phone);
+      if (phone) return `phone:${phone}`;
+
+      return `uid:${d.uid}`;
+    }
+
+    function collapseDuplicateDrivers(rows) {
+      const groups = new Map();
+
+      rows.forEach(d => {
+        const key = driverIdentityKey(d);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(d);
+      });
+
+      return Array.from(groups.values()).map(group => {
+        const sorted = [...group].sort((a,b) => {
+          if (a.uid === currentAdminUid && b.uid !== currentAdminUid) return -1;
+          if (b.uid === currentAdminUid && a.uid !== currentAdminUid) return 1;
+          if (a.isAdmin && !b.isAdmin) return -1;
+          if (b.isAdmin && !a.isAdmin) return 1;
+
+          const aSeen = Math.max(Number(a.lastSeenAt)||0, Number(a.createdAt)||0);
+          const bSeen = Math.max(Number(b.lastSeenAt)||0, Number(b.createdAt)||0);
+          return bSeen - aSeen;
+        });
+
+        const canonical = {...sorted[0]};
+        canonical.sourceUids = group.map(x => x.uid);
+        canonical.duplicateCount = group.length;
+
+        canonical.isAdmin =
+          group.some(x => x.isAdmin === true) ||
+          group.some(x => x.uid === currentAdminUid);
+
+        const newest = sorted[0];
+        canonical.registeredDevice =
+          newest.registeredDevice || newest.lastDevice || canonical.registeredDevice;
+        canonical.registeredAndroidVersion =
+          newest.registeredAndroidVersion || canonical.registeredAndroidVersion;
+        canonical.registeredAppVersion =
+          newest.registeredAppVersion || canonical.registeredAppVersion;
+
+        return canonical;
+      });
+    }
     function startRealtimeListeners() {
       // A. Listen to /users collection
       db.collection('users').onSnapshot((snapshot) => {
         logMessage(`Live sync: ${snapshot.docs.length} driver documents received from Firestore /users.`);
-        liveDrivers = [];
+        const rawDrivers = [];
         snapshot.forEach((doc) => {
           const d = doc.data();
-          liveDrivers.push({
+          rawDrivers.push({
             uid: doc.id,
             name: d.name || 'Unnamed Driver',
             email: d.email || '',
@@ -750,6 +811,18 @@
             createdAt: Number(d.createdAt) || Date.now()
           });
         });
+
+        liveDrivers = collapseDuplicateDrivers(rawDrivers);
+
+        const hiddenDuplicateCount =
+          Math.max(0, rawDrivers.length - liveDrivers.length);
+
+        if (hiddenDuplicateCount > 0) {
+          logMessage(
+            `Driver Directory: ${liveDrivers.length} unique drivers; ` +
+            `${hiddenDuplicateCount} legacy duplicate record(s) merged in view.`
+          );
+        }
 
         // Update counts
         const total = liveDrivers.length;
@@ -875,7 +948,11 @@
 
       let html = '';
       filtered.forEach(driver => {
-        const isCurrentAdmin = (driver.isAdmin === true || driver.uid === currentAdminUid);
+        const isCurrentAdmin = (
+          driver.isAdmin === true ||
+          driver.uid === currentAdminUid ||
+          (Array.isArray(driver.sourceUids) && driver.sourceUids.includes(currentAdminUid))
+        );
 
         // Vehicle badge style
         let vehicleBg = '#172554';
