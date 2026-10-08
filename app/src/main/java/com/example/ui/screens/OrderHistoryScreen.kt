@@ -1431,7 +1431,13 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
  * e.g. "Fare ₹113 matched, Pickup 0.6km matched"
  */
 private fun normalizeHistoryReasonText(raw: String): String {
+    // PLUS_AMOUNT_MOJIBAKE_DISPLAY_FIX_V1
+    // Repairs old +Amount rows that were already stored with broken UTF-8 symbols.
     return raw
+        .replace("\u00E2\u201A\u00B9", "\u20B9")
+        .replace("\u00E2\u2030\u00A5", ">=")
+        .replace("\u00E2\u2030\u00A4", "<=")
+        .replace("\u00E2\u20AC\u00A2", " | ")
         // Old rows saved the UTF-8 bullet as mojibake.
         .replace("Ã¢â‚¬Â¢", " | ")
         .replace("Ã¢â€°Â¥", ">=")

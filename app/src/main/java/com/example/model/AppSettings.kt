@@ -74,6 +74,12 @@ data class AppSettings(
     val tertiaryBothMaxPickupDistanceKm: Float = 3.0f,
     val tertiaryBothMaxDropDistanceKm: Float = 7.5f,
 
+    // PLUS_AMOUNT_FILTER_V1
+    val isPlusAmountFilterEnabled: Boolean = false,
+    val plusAmountMin: Float = 10f,
+    val plusAmountMaxPickupDistanceKm: Float = 3.0f,
+    val plusAmountMaxDropDistanceKm: Float = 7.5f,
+
     // Platforms enabled
     val rapidoEnabled: Boolean = true,
     val uberEnabled: Boolean = true,

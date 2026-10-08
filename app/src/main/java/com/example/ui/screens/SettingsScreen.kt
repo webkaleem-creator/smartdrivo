@@ -194,6 +194,11 @@ fun SettingsScreen(
         )
     }
 
+    // PLUS_AMOUNT_FILTER_UI_V1
+    var plusAmountMinText by rememberSaveable { mutableStateOf(if (settings.plusAmountMin % 1.0f == 0f) settings.plusAmountMin.toInt().toString() else settings.plusAmountMin.toString()) }
+    var plusAmountMaxPickupText by rememberSaveable { mutableStateOf(if (settings.plusAmountMaxPickupDistanceKm % 1.0f == 0f) settings.plusAmountMaxPickupDistanceKm.toInt().toString() else settings.plusAmountMaxPickupDistanceKm.toString()) }
+    var plusAmountMaxDropText by rememberSaveable { mutableStateOf(if (settings.plusAmountMaxDropDistanceKm % 1.0f == 0f) settings.plusAmountMaxDropDistanceKm.toInt().toString() else settings.plusAmountMaxDropDistanceKm.toString()) }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
@@ -687,11 +692,58 @@ fun SettingsScreen(
                     }
                 )
 
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OrderFilterCompactCard(
+                    badge = "+ AMOUNT",
+                    title = "+ Amount Filter",
+                    subtitle = "Green +₹ amount option",
+                    isChecked = settings.isPlusAmountFilterEnabled,
+                    minFareText = plusAmountMinText,
+                    maxPickupText = plusAmountMaxPickupText,
+                    maxDropText = plusAmountMaxDropText,
+                    primaryLabel = "Min + Amount ₹",
+                    ruleText = "+ Amount + Pickup + Drop must all match",
+                    onMinFareChange = { plusAmountMinText = it },
+                    onMaxPickupChange = { plusAmountMaxPickupText = it },
+                    onMaxDropChange = { plusAmountMaxDropText = it },
+                    onCheckedChange = { enabled ->
+                        val amount = plusAmountMinText.toFloatOrNull()
+                        val pickup = plusAmountMaxPickupText.toFloatOrNull()
+                        val drop = plusAmountMaxDropText.toFloatOrNull()
+                        val valid = amount != null && amount > 0f && pickup != null && pickup > 0f && drop != null && drop > 0f
+                        if (enabled && !valid) {
+                            coroutineScope.launch { snackbarHostState.showSnackbar("Enter valid + Amount filter values first") }
+                        } else {
+                            prefs.saveAppSettings(settings.copy(
+                                isPlusAmountFilterEnabled = enabled,
+                                plusAmountMin = amount ?: settings.plusAmountMin,
+                                plusAmountMaxPickupDistanceKm = pickup ?: settings.plusAmountMaxPickupDistanceKm,
+                                plusAmountMaxDropDistanceKm = drop ?: settings.plusAmountMaxDropDistanceKm
+                            ))
+                            showSavedSnackbar()
+                        }
+                    },
+                    onSave = {
+                        val amount = plusAmountMinText.toFloatOrNull()
+                        val pickup = plusAmountMaxPickupText.toFloatOrNull()
+                        val drop = plusAmountMaxDropText.toFloatOrNull()
+                        if (amount != null && amount > 0f && pickup != null && pickup > 0f && drop != null && drop > 0f) {
+                            prefs.saveAppSettings(settings.copy(
+                                plusAmountMin = amount,
+                                plusAmountMaxPickupDistanceKm = pickup,
+                                plusAmountMaxDropDistanceKm = drop
+                            ))
+                            showSavedSnackbar()
+                        }
+                    }
+                )
+
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
                     text =
-                        "Final rule: Home Filter OR Order Filter 2 OR Order Filter 3 = eligible order.",
+                        "Final rule: Home Filter OR Order Filter 2 OR Order Filter 3 OR + Amount Filter = eligible order.",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = BluePrimary
@@ -894,20 +946,8 @@ fun SettingsScreen(
 
                         HorizontalDivider(color = CardBorderDefault)
 
-                        // Uber Toggle
-                        SettingToggleRow(
-                            icon = Icons.Default.NearMe,
-                            iconTint = PlatformUber,
-                            title = "Uber",
-                            subtitle = "Auto-accept orders for Uber Driver",
-                            isChecked = settings.uberEnabled,
-                            onCheckedChange = { isEnabled ->
-                                prefs.saveAppSettings(settings.copy(uberEnabled = isEnabled))
-                                showSavedSnackbar()
-                            }
-                        )
-
-                        HorizontalDivider(color = CardBorderDefault)
+                        // UBER_DISABLED_OLA_FOCUS_V1
+                        // Uber hidden while SmartDrivo focuses on Ola.
 
                         // Ola Toggle
                         SettingToggleRow(
@@ -941,6 +981,8 @@ private fun OrderFilterCompactCard(
     minFareText: String,
     maxPickupText: String,
     maxDropText: String,
+    primaryLabel: String = "Min Fare ₹",
+    ruleText: String = "Fare + Pickup + Drop must all match",
     onMinFareChange: (String) -> Unit,
     onMaxPickupChange: (String) -> Unit,
     onMaxDropChange: (String) -> Unit,
@@ -1043,8 +1085,7 @@ private fun OrderFilterCompactCard(
             }
 
             Text(
-                text =
-                    "Fare + Pickup + Drop must all match",
+                text = ruleText,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = BluePrimary
@@ -1056,7 +1097,7 @@ private fun OrderFilterCompactCard(
             ) {
                 CompactFilterField(
                     value = minFareText,
-                    label = "Min Fare \u20B9",
+                    label = primaryLabel,
                     modifier = Modifier.weight(1f),
                     onValueChange = onMinFareChange
                 )

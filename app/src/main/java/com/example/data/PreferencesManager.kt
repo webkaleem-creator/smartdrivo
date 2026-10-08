@@ -422,6 +422,11 @@ class PreferencesManager(private val context: Context) {
                 settings.tertiaryBothMaxDropDistanceKm
             )
 
+            putBoolean(KEY_PLUS_AMOUNT_ENABLED, settings.isPlusAmountFilterEnabled)
+            putFloat(KEY_PLUS_AMOUNT_MIN, settings.plusAmountMin)
+            putFloat(KEY_PLUS_AMOUNT_MAX_PICKUP, settings.plusAmountMaxPickupDistanceKm)
+            putFloat(KEY_PLUS_AMOUNT_MAX_DROP, settings.plusAmountMaxDropDistanceKm)
+
             putBoolean(KEY_RAPIDO_ENABLED, settings.rapidoEnabled)
             putBoolean(KEY_UBER_ENABLED, settings.uberEnabled)
             putBoolean(KEY_OLA_ENABLED, settings.olaEnabled)
@@ -539,6 +544,11 @@ class PreferencesManager(private val context: Context) {
                     KEY_TERTIARY_BOTH_MAX_DROP,
                     7.5f
                 ),
+
+            isPlusAmountFilterEnabled = prefs.getBoolean(KEY_PLUS_AMOUNT_ENABLED, false),
+            plusAmountMin = getSafeFloat(KEY_PLUS_AMOUNT_MIN, 10f),
+            plusAmountMaxPickupDistanceKm = getSafeFloat(KEY_PLUS_AMOUNT_MAX_PICKUP, 3.0f),
+            plusAmountMaxDropDistanceKm = getSafeFloat(KEY_PLUS_AMOUNT_MAX_DROP, 7.5f),
 
             rapidoEnabled = prefs.getBoolean(KEY_RAPIDO_ENABLED, true),
             uberEnabled = prefs.getBoolean(KEY_UBER_ENABLED, true),
@@ -1398,6 +1408,11 @@ class PreferencesManager(private val context: Context) {
             "setting_tertiary_both_max_pickup_km"
         private const val KEY_TERTIARY_BOTH_MAX_DROP =
             "setting_tertiary_both_max_drop_km"
+
+        private const val KEY_PLUS_AMOUNT_ENABLED = "setting_plus_amount_filter_enabled"
+        private const val KEY_PLUS_AMOUNT_MIN = "setting_plus_amount_min"
+        private const val KEY_PLUS_AMOUNT_MAX_PICKUP = "setting_plus_amount_max_pickup_km"
+        private const val KEY_PLUS_AMOUNT_MAX_DROP = "setting_plus_amount_max_drop_km"
 
         private const val KEY_RAPIDO_ENABLED = "setting_rapido"
         private const val KEY_UBER_ENABLED = "setting_uber"
