@@ -34,6 +34,8 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Tune
@@ -82,6 +84,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -319,61 +322,80 @@ val goToAreas by prefs.goToAreas.collectAsState()
         }
     }
 
+    // HOME_MEMBERSHIP_PROFILE_CARD_V1
+    // UI-only values for the Home membership/profile card.
+    val membershipIsActive =
+        userProfile.isAdmin || userProfile.isPlanValid
+
+    val membershipTitle =
+        if (membershipIsActive)
+            "Membership Active"
+        else
+            "Membership Inactive"
+
+    val membershipPlanText =
+        when (userProfile.plan.uppercase(Locale.ROOT)) {
+            "FREE_TRIAL" -> "1-Day Free Trial"
+            "3DAYS" -> "3 Days Plan"
+            "7DAYS" -> "7 Days Plan"
+            "15DAYS" -> "15 Days Plan"
+            "1MONTH", "30DAYS" -> "Monthly Plan"
+            "NONE", "" -> "No Active Plan"
+            else ->
+                userProfile.plan
+                    .replace("_", " ")
+                    .lowercase(Locale.ROOT)
+                    .replaceFirstChar {
+                        if (it.isLowerCase()) it.titlecase(Locale.ROOT)
+                        else it.toString()
+                    }
+        }
+
+    val membershipDaysText =
+        remember(
+            userProfile.planExpireMillis,
+            userProfile.isAdmin,
+            membershipIsActive
+        ) {
+            when {
+                userProfile.isAdmin ->
+                    "Unlimited"
+
+                userProfile.planExpireMillis <= 0L ->
+                    "Not activated"
+
+                userProfile.planExpireMillis > System.currentTimeMillis() -> {
+                    val millisLeft =
+                        userProfile.planExpireMillis -
+                            System.currentTimeMillis()
+
+                    val daysLeft =
+                        kotlin.math.ceil(
+                            millisLeft / 86_400_000.0
+                        ).toInt().coerceAtLeast(1)
+
+                    "$daysLeft ${if (daysLeft == 1) "day" else "days"} left"
+                }
+
+                else -> {
+                    val millisExpired =
+                        System.currentTimeMillis() -
+                            userProfile.planExpireMillis
+
+                    val daysAgo =
+                        kotlin.math.ceil(
+                            millisExpired / 86_400_000.0
+                        ).toInt().coerceAtLeast(1)
+
+                    "Expired $daysAgo ${if (daysAgo == 1) "day" else "days"} ago"
+                }
+            }
+        }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        SmartDrivoLogo(size = 40.dp)
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "SmartDrivo",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 20.sp,
-                                color = TextDarkPrimary
-                            )
-                            Text(
-                                // HOME_FREE_TRIAL_LABEL_V4
-                                text = when {
-                                    userProfile.isAdmin ->
-                                        "Membership Active"
+        topBar = {},
 
-                                    userProfile.isFreeTrialActive ->
-                                        "Free Trial Active"
-
-                                    userProfile.isPlanValid ->
-                                        "Membership Active"
-
-                                    else ->
-                                        "Membership Inactive"
-                                },
-                                fontSize = 14.sp,
-                                color =
-                                    if (userProfile.isPlanValid || userProfile.isAdmin)
-                                        StatusActiveGreen
-                                    else
-                                        StatusInactiveRed
-                            )
-                        }
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onNavigateToCommunity) {
-                        Icon(
-                            Icons.Default.People,
-                            contentDescription = "Community",
-                            tint = TextDarkSecondary
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.White,
-                    titleContentColor = TextDarkPrimary
-                )
-            )
-        },
         containerColor = LightBackground
     ) { innerPadding ->
         LazyColumn(
@@ -383,7 +405,209 @@ val goToAreas by prefs.goToAreas.collectAsState()
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            item { Spacer(modifier = Modifier.height(4.dp)) }
+            item { Spacer(modifier = Modifier.height(10.dp)) }
+
+            // HOME_MEMBERSHIP_PROFILE_CARD_V1
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color(0xFFF4FAFF)
+                    ),
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(1.dp, Color(0xFFB9DDF7))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SmartDrivoLogo(size = 46.dp)
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "SmartDrivo",
+                                    color = TextDarkPrimary,
+                                    fontSize = 23.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    text = membershipTitle,
+                                    color =
+                                        if (membershipIsActive)
+                                            StatusActiveGreen
+                                        else
+                                            StatusInactiveRed,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+
+                            Surface(
+                                onClick = onNavigateToCommunity,
+                                shape = RoundedCornerShape(14.dp),
+                                color = Color.White,
+                                border = BorderStroke(1.dp, Color(0xFFE3EDF6))
+                            ) {
+                                Box(
+                                    modifier = Modifier.size(42.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.People,
+                                        contentDescription = "Community",
+                                        tint = TextDarkSecondary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color.White.copy(alpha = 0.92f),
+                            border = BorderStroke(1.dp, Color(0xFFE2EDF6))
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Mobile Number",
+                                            color = TextDarkSecondary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Spacer(modifier = Modifier.height(3.dp))
+                                        Text(
+                                            text = userProfile.phone.ifBlank { "Not added" },
+                                            color = TextDarkPrimary,
+                                            fontSize = 13.sp,
+                                            lineHeight = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    Column(modifier = Modifier.weight(1.15f)) {
+                                        Text(
+                                            text = "Email ID",
+                                            color = TextDarkSecondary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Spacer(modifier = Modifier.height(3.dp))
+                                        Text(
+                                            text = userProfile.email.ifBlank { "Not added" },
+                                            color = TextDarkPrimary,
+                                            fontSize = 12.5.sp,
+                                            lineHeight = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(vertical = 10.dp),
+                                    color = Color(0xFFE1EBF3)
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1.2f)) {
+                                        Text(
+                                            text = "Plan",
+                                            color = TextDarkSecondary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Spacer(modifier = Modifier.height(3.dp))
+                                        Text(
+                                            text = membershipPlanText,
+                                            color = TextDarkPrimary,
+                                            fontSize = 13.sp,
+                                            lineHeight = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    Column(modifier = Modifier.weight(0.9f)) {
+                                        Text(
+                                            text = "Plan Status",
+                                            color = TextDarkSecondary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Spacer(modifier = Modifier.height(3.dp))
+                                        Text(
+                                            text =
+                                                if (membershipIsActive)
+                                                    "Active"
+                                                else
+                                                    "Inactive",
+                                            color =
+                                                if (membershipIsActive)
+                                                    StatusActiveGreen
+                                                else
+                                                    StatusInactiveRed,
+                                            fontSize = 13.sp,
+                                            lineHeight = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1
+                                        )
+                                    }
+
+                                    Column(modifier = Modifier.weight(0.95f)) {
+                                        Text(
+                                            text = "Days Left",
+                                            color = TextDarkSecondary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Spacer(modifier = Modifier.height(3.dp))
+                                        Text(
+                                            text = membershipDaysText,
+                                            color =
+                                                if (membershipIsActive)
+                                                    Color(0xFFF97316)
+                                                else
+                                                    StatusInactiveRed,
+                                            fontSize = 12.sp,
+                                            lineHeight = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // HOME TOP: Compact Today's Performance
             item {
