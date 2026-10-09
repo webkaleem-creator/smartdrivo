@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Place
@@ -79,6 +80,7 @@ import com.example.ui.screens.ProfileScreen
 import com.example.ui.screens.ProfileSetupScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SecurityLockScreen
+import com.example.ui.screens.MembershipLockedOverlay
 import com.example.ui.screens.SplashScreen
 import com.example.ui.screens.WelcomeScreen
 import com.example.ui.theme.BlueContainer
@@ -304,7 +306,9 @@ fun SmartDrivoApp(
         } else if (!admin && (userProfile.phone.isBlank() || userProfile.city.isBlank() || userProfile.state.isBlank())) {
             Routes.PROFILE_SETUP
         } else if (!admin && !userProfile.isPlanValid) {
-            Routes.PLAN_SELECTION
+            // MEMBERSHIP_LOCKED_PREVIEW_V1
+            // Let the user enter SmartDrivo, but keep ride features locked.
+            Routes.HOME
         } else if (!hasAllPermissions) {
             Routes.FINISH_SETUP
         } else {
@@ -336,7 +340,7 @@ fun SmartDrivoApp(
         currentRoute in mainRoutes &&
             isLoggedIn &&
             !isSecurityBlocked &&
-            (isUserAdmin || (isProfileComplete && isMembershipActive))
+            (isUserAdmin || isProfileComplete)
 
     val isDarkNavyScreen = currentRoute == Routes.WELCOME
 
@@ -353,6 +357,14 @@ fun SmartDrivoApp(
             Routes.PAYMENT_HISTORY,
             Routes.COMMUNITY
         )
+    }
+
+    // MEMBERSHIP_LOCKED_PREVIEW_V1
+    // Membership lock must never leave the assistant running in background.
+    LaunchedEffect(isMembershipActive, isUserAdmin) {
+        if (!isUserAdmin && !isMembershipActive) {
+            prefs.setAutoAcceptActive(false)
+        }
     }
 
     // FREE_TRIAL_EXPIRY_V3
@@ -401,8 +413,9 @@ fun SmartDrivoApp(
                         ?.route
 
                 if (routeNow !in paymentRoutes) {
+                    // Trial expired: stay inside SmartDrivo in locked preview mode.
                     navController.navigate(
-                        Routes.PLAN_SELECTION
+                        Routes.HOME
                     ) {
                         popUpTo(0) {
                             inclusive = true
@@ -415,11 +428,10 @@ fun SmartDrivoApp(
         }
     }
     // Gate Check Enforcer:
-    // Step 1: Authentication -> WelcomeScreen
-    // Step 2: Profile Setup (mobile, city, state) -> ProfileSetupScreen
-    // Step 3: Active membership/payment -> PlanSelectionScreen
-    // Only after all 3 steps -> HomeScreen (full app access)
-    LaunchedEffect(currentRoute, isLoggedIn, isSecurityBlocked, isProfileComplete, isMembershipActive) {
+    // Authentication + security + profile remain mandatory.
+    // Membership is different: users may enter the app shell,
+    // but ride features are covered by a membership lock overlay.
+    LaunchedEffect(currentRoute, isLoggedIn, isSecurityBlocked, isProfileComplete) {
         if (currentRoute == null) return@LaunchedEffect
 
         if (!isLoggedIn) {
@@ -437,12 +449,6 @@ fun SmartDrivoApp(
         } else if (!isProfileComplete && !isUserAdmin) {
             if (currentRoute !in profileRoutes) {
                 navController.navigate(Routes.PROFILE_SETUP) {
-                    popUpTo(0) { inclusive = true }
-                }
-            }
-        } else if (!isMembershipActive) {
-            if (currentRoute !in paymentRoutes) {
-                navController.navigate(Routes.PLAN_SELECTION) {
                     popUpTo(0) { inclusive = true }
                 }
             }
@@ -464,11 +470,28 @@ fun SmartDrivoApp(
                     ) {
                         bottomNavItems.forEach { item ->
                             val isSelected = currentRoute == item.route || (item.route == Routes.HOME && currentRoute == Routes.WELCOME)
+
+                            // MEMBERSHIP_BOTTOM_LOCK_ICONS_V1
+                            // In inactive membership preview, Home / Filters / Areas /
+                            // History stay visible but show a lock icon. More stays open.
+                            val isMembershipLockedItem =
+                                !isUserAdmin &&
+                                    !isMembershipActive &&
+                                    item.route != Routes.PROFILE
+
                             NavigationBarItem(
                                 icon = {
                                     Icon(
-                                        imageVector = item.icon,
-                                        contentDescription = item.label,
+                                        imageVector =
+                                            if (isMembershipLockedItem)
+                                                Icons.Default.Lock
+                                            else
+                                                item.icon,
+                                        contentDescription =
+                                            if (isMembershipLockedItem)
+                                                "${item.label} locked"
+                                            else
+                                                item.label,
                                         modifier = Modifier.size(24.dp)
                                     )
                                 },
@@ -540,7 +563,7 @@ fun SmartDrivoApp(
                             popUpTo(Routes.SPLASH) { inclusive = true }
                         }
                     } else if (!admin && !userProfile.isPlanValid) {
-                        navController.navigate(Routes.PLAN_SELECTION) {
+                        navController.navigate(Routes.HOME) {
                             popUpTo(Routes.SPLASH) { inclusive = true }
                         }
                     } else if (!hasAllPermissions) {
@@ -605,7 +628,7 @@ fun SmartDrivoApp(
                             popUpTo(Routes.WELCOME) { inclusive = true }
                         }
                     } else if (!isMembershipActive) {
-                        navController.navigate(Routes.PLAN_SELECTION) {
+                        navController.navigate(Routes.HOME) {
                             popUpTo(Routes.WELCOME) { inclusive = true }
                         }
                     } else {
@@ -717,7 +740,9 @@ fun SmartDrivoApp(
                                     popUpTo(Routes.WELCOME) { inclusive = true }
                                 }
                             } else {
-                                navController.navigate(Routes.PLAN_SELECTION) {
+                                // Login succeeds even without membership.
+                                // The Home screen opens in locked preview mode.
+                                navController.navigate(Routes.HOME) {
                                     popUpTo(Routes.WELCOME) { inclusive = true }
                                 }
                             }
@@ -801,7 +826,7 @@ fun SmartDrivoApp(
                             popUpTo(Routes.PROFILE_SETUP) { inclusive = true }
                         }
                     } else {
-                        navController.navigate(Routes.PLAN_SELECTION) {
+                        navController.navigate(Routes.HOME) {
                             popUpTo(Routes.PROFILE_SETUP) { inclusive = true }
                         }
                     }
@@ -826,21 +851,13 @@ fun SmartDrivoApp(
                     navController.navigate(Routes.PAYMENT)
                 },
 
-                onBack =
-                    if (
-                        userProfile.isAdmin ||
-                        userProfile.isPlanValid
-                    ) {
-                        {
-                            if (!navController.popBackStack()) {
-                                navController.navigate(Routes.PROFILE) {
-                                    launchSingleTop = true
-                                }
-                            }
+                onBack = {
+                    if (!navController.popBackStack()) {
+                        navController.navigate(Routes.HOME) {
+                            launchSingleTop = true
                         }
-                    } else {
-                        null
                     }
+                }
             )
         }
 
@@ -1031,41 +1048,81 @@ fun SmartDrivoApp(
 
         // 12. Main Home Dashboard
         composable(Routes.HOME) {
-            HomeScreen(
-                prefs = prefs,
-                repository = repository,
-                onNavigateToSettings = { navController.navigate(Routes.SETTINGS) },
-                onNavigateToHistory = { navController.navigate(Routes.ORDER_HISTORY) },
-                onNavigateToProfile = { navController.navigate(Routes.PROFILE) },
-                onNavigateToAreaManager = { navController.navigate(Routes.AREA_MANAGER) },
-                onNavigateToCommunity = { navController.navigate(Routes.COMMUNITY) }
-            )
+            Box(modifier = Modifier.fillMaxSize()) {
+                HomeScreen(
+                    prefs = prefs,
+                    repository = repository,
+                    onNavigateToSettings = { navController.navigate(Routes.SETTINGS) },
+                    onNavigateToHistory = { navController.navigate(Routes.ORDER_HISTORY) },
+                    onNavigateToProfile = { navController.navigate(Routes.PROFILE) },
+                    onNavigateToAreaManager = { navController.navigate(Routes.AREA_MANAGER) },
+                    onNavigateToCommunity = { navController.navigate(Routes.COMMUNITY) }
+                )
+
+                if (!isUserAdmin && !isMembershipActive) {
+                    MembershipLockedOverlay(
+                        onViewPlans = {
+                            navController.navigate(Routes.PLAN_SELECTION)
+                        }
+                    )
+                }
+            }
         }
 
         // 13. Area Rules Manager Screen
         composable(Routes.AREA_MANAGER) {
-            AreaManagerScreen(
-                prefs = prefs,
-                repository = repository,
-                onBack = { navController.popBackStack() }
-            )
+            Box(modifier = Modifier.fillMaxSize()) {
+                AreaManagerScreen(
+                    prefs = prefs,
+                    repository = repository,
+                    onBack = { navController.popBackStack() }
+                )
+
+                if (!isUserAdmin && !isMembershipActive) {
+                    MembershipLockedOverlay(
+                        onViewPlans = {
+                            navController.navigate(Routes.PLAN_SELECTION)
+                        }
+                    )
+                }
+            }
         }
 
         // 14. Order History Screen
         composable(Routes.ORDER_HISTORY) {
-            OrderHistoryScreen(
-                prefs = prefs,
-                onBack = { navController.popBackStack() }
-            )
+            Box(modifier = Modifier.fillMaxSize()) {
+                OrderHistoryScreen(
+                    prefs = prefs,
+                    onBack = { navController.popBackStack() }
+                )
+
+                if (!isUserAdmin && !isMembershipActive) {
+                    MembershipLockedOverlay(
+                        onViewPlans = {
+                            navController.navigate(Routes.PLAN_SELECTION)
+                        }
+                    )
+                }
+            }
         }
 
         // 15. Settings Screen
         composable(Routes.SETTINGS) {
-            SettingsScreen(
-                prefs = prefs,
-                onNavigateToAdminWeb = { navController.navigate(Routes.ADMIN_PANEL) },
-                onBack = { navController.popBackStack() }
-            )
+            Box(modifier = Modifier.fillMaxSize()) {
+                SettingsScreen(
+                    prefs = prefs,
+                    onNavigateToAdminWeb = { navController.navigate(Routes.ADMIN_PANEL) },
+                    onBack = { navController.popBackStack() }
+                )
+
+                if (!isUserAdmin && !isMembershipActive) {
+                    MembershipLockedOverlay(
+                        onViewPlans = {
+                            navController.navigate(Routes.PLAN_SELECTION)
+                        }
+                    )
+                }
+            }
         }
 
         // 16. More Screen
