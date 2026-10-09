@@ -41,7 +41,8 @@
       min-height: 100vh;
     }
     .container {
-      max-width: 1140px;
+      width: min(1500px, calc(100vw - 32px));
+      max-width: 1500px;
       margin: 0 auto;
     }
     header {
@@ -278,6 +279,64 @@
     }
     tr:hover td {
       background: rgba(255, 255, 255, 0.02);
+    }
+
+    /* ADMIN_DRIVER_TABLE_FIT_V1
+       Keep all Registered Drivers columns + Device Lock actions visible
+       on normal desktop screens, with horizontal scroll only as fallback. */
+    #drivers {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+    #drivers table {
+      width: 100%;
+      table-layout: auto;
+    }
+    #drivers th,
+    #drivers td {
+      padding: 10px 7px;
+      font-size: 12px;
+      vertical-align: top;
+      line-height: 1.25;
+    }
+    #drivers th {
+      font-size: 10px;
+      letter-spacing: 0.25px;
+      white-space: nowrap;
+    }
+    #drivers td:nth-child(1) { width: 10%; }
+    #drivers td:nth-child(2) { width: 17%; }
+    #drivers td:nth-child(3) { width: 8%; }
+    #drivers td:nth-child(4) { width: 8%; }
+    #drivers td:nth-child(5) { width: 7%; }
+    #drivers td:nth-child(6) { width: 15%; }
+    #drivers td:nth-child(7) { width: 11%; }
+    #drivers td:nth-child(8) { width: 9%; }
+    #drivers td:nth-child(9) { width: 8%; }
+    #drivers td:nth-child(10) { width: 120px; }
+
+    #drivers td:last-child .btn-sm {
+      width: 100%;
+      justify-content: center;
+      white-space: nowrap;
+      padding: 5px 7px;
+      font-size: 10px;
+    }
+
+    @media (max-width: 1100px) {
+      body {
+        padding: 12px;
+      }
+      .container {
+        width: calc(100vw - 24px);
+      }
+      #drivers {
+        padding-left: 10px;
+        padding-right: 10px;
+      }
+      #drivers table {
+        min-width: 1080px;
+      }
     }
     #toastNotification {
       position: fixed;
@@ -1041,7 +1100,7 @@
               `;
 
           actionCell = `
-            <div style="display:flex; flex-direction:column; gap:6px; min-width:132px;">
+            <div style="display:flex; flex-direction:column; gap:5px; min-width:108px;">
               ${lockButton}
               ${deviceButton}
             </div>
