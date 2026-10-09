@@ -1131,6 +1131,49 @@ class FirebaseRepository(
                             prefs.updateQrImageUrl(it)
                         }
 
+
+                    // MINIMUM_VERSION_LOCK_V1
+                    // Read once through the existing live global-settings listener
+                    // and cache locally. No Firestore/network work is added to the
+                    // Rapido/Ola/Uber real-order path.
+                    val minimumVersionRaw =
+                        doc.get(
+                            "minimumAppVersionCode"
+                        )
+
+                    val minimumVersionCode =
+                        when (
+                            minimumVersionRaw
+                        ) {
+                            is Number ->
+                                minimumVersionRaw.toInt()
+
+                            is String ->
+                                minimumVersionRaw
+                                    .toIntOrNull()
+                                    ?: 0
+
+                            else ->
+                                0
+                        }
+
+                    prefs.updateMinimumVersionPolicy(
+                        enabled =
+                            doc.getBoolean(
+                                "forceUpdateEnabled"
+                            ) ?: false,
+                        minimumVersionCode =
+                            minimumVersionCode,
+                        minimumVersionName =
+                            doc.getString(
+                                "minimumAppVersionName"
+                            ) ?: "",
+                        updateUrl =
+                            doc.getString(
+                                "forceUpdateUrl"
+                            ) ?: ""
+                    )
+
                     val wa =
                         doc.getString("whatsapp")
                             ?: "https://chat.whatsapp.com/smartdrivo"

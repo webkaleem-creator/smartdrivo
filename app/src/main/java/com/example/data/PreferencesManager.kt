@@ -195,6 +195,50 @@ class PreferencesManager(private val context: Context) {
     )
     val communityLinks: StateFlow<com.example.model.CommunityLinks> = _communityLinks.asStateFlow()
 
+
+    // MINIMUM_VERSION_LOCK_V1
+    // Cached entitlement snapshot. Updated only by the global Firestore settings
+    // listener, never from the real-order decision path.
+    private val _forceUpdateEnabled =
+        MutableStateFlow(
+            prefs.getBoolean(
+                KEY_FORCE_UPDATE_ENABLED,
+                false
+            )
+        )
+    val forceUpdateEnabled: StateFlow<Boolean> =
+        _forceUpdateEnabled.asStateFlow()
+
+    private val _minimumAppVersionCode =
+        MutableStateFlow(
+            prefs.getInt(
+                KEY_MINIMUM_APP_VERSION_CODE,
+                0
+            )
+        )
+    val minimumAppVersionCode: StateFlow<Int> =
+        _minimumAppVersionCode.asStateFlow()
+
+    private val _minimumAppVersionName =
+        MutableStateFlow(
+            prefs.getString(
+                KEY_MINIMUM_APP_VERSION_NAME,
+                ""
+            ) ?: ""
+        )
+    val minimumAppVersionName: StateFlow<String> =
+        _minimumAppVersionName.asStateFlow()
+
+    private val _forceUpdateUrl =
+        MutableStateFlow(
+            prefs.getString(
+                KEY_FORCE_UPDATE_URL,
+                ""
+            ) ?: ""
+        )
+    val forceUpdateUrl: StateFlow<String> =
+        _forceUpdateUrl.asStateFlow()
+
     private val _lastAcceptedRide = MutableStateFlow<OrderHistoryItem?>(loadLastAccepted())
     val lastAcceptedRide: StateFlow<OrderHistoryItem?> = _lastAcceptedRide.asStateFlow()
 
@@ -1369,8 +1413,61 @@ class PreferencesManager(private val context: Context) {
             )
     }
 
+
+    // MINIMUM_VERSION_LOCK_V1
+    fun updateMinimumVersionPolicy(
+        enabled: Boolean,
+        minimumVersionCode: Int,
+        minimumVersionName: String,
+        updateUrl: String
+    ) {
+        val safeCode =
+            minimumVersionCode.coerceAtLeast(0)
+
+        val safeName =
+            minimumVersionName.trim()
+
+        val safeUrl =
+            updateUrl.trim()
+
+        prefs.edit()
+            .putBoolean(
+                KEY_FORCE_UPDATE_ENABLED,
+                enabled
+            )
+            .putInt(
+                KEY_MINIMUM_APP_VERSION_CODE,
+                safeCode
+            )
+            .putString(
+                KEY_MINIMUM_APP_VERSION_NAME,
+                safeName
+            )
+            .putString(
+                KEY_FORCE_UPDATE_URL,
+                safeUrl
+            )
+            .apply()
+
+        _forceUpdateEnabled.value = enabled
+        _minimumAppVersionCode.value = safeCode
+        _minimumAppVersionName.value = safeName
+        _forceUpdateUrl.value = safeUrl
+    }
+
     companion object {
         const val DEFAULT_UPI_ID = "gpay-11189725657@okaxis"
+
+        // MINIMUM_VERSION_LOCK_V1
+        private const val KEY_FORCE_UPDATE_ENABLED =
+            "security_force_update_enabled"
+        private const val KEY_MINIMUM_APP_VERSION_CODE =
+            "security_minimum_app_version_code"
+        private const val KEY_MINIMUM_APP_VERSION_NAME =
+            "security_minimum_app_version_name"
+        private const val KEY_FORCE_UPDATE_URL =
+            "security_force_update_url"
+
 
         // Process-wide shared StateFlow for instant cross-component updates (UI auto-refresh)
         private val _sharedOrderHistory = MutableStateFlow<List<OrderHistoryItem>>(emptyList())

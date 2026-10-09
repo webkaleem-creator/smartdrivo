@@ -80,6 +80,7 @@ import com.example.ui.screens.ProfileScreen
 import com.example.ui.screens.ProfileSetupScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SecurityLockScreen
+import com.example.ui.screens.UpdateRequiredScreen
 import com.example.ui.screens.MembershipLockedOverlay
 import com.example.ui.screens.SplashScreen
 import com.example.ui.screens.WelcomeScreen
@@ -114,6 +115,7 @@ object Routes {
     const val ADMIN_PANEL = "admin_panel"
     const val FINISH_SETUP = "finish_setup"
     const val SECURITY_LOCK = "security_lock"
+    const val UPDATE_REQUIRED = "update_required"
 }
 
 private data class NavItemData(
@@ -232,6 +234,20 @@ fun SmartDrivoApp(
 
     val paymentSubmissions by
         prefs.paymentSubmissions.collectAsState()
+
+    // MINIMUM_VERSION_LOCK_V1
+    val forceUpdateEnabled by
+        prefs.forceUpdateEnabled.collectAsState()
+
+    val minimumAppVersionCode by
+        prefs.minimumAppVersionCode.collectAsState()
+
+    val minimumAppVersionName by
+        prefs.minimumAppVersionName.collectAsState()
+
+    val forceUpdateUrl by
+        prefs.forceUpdateUrl.collectAsState()
+
     val isUserAdmin = userProfile.isAdmin
     val firebaseUser = PhoneAuthManager.getAuthInstance()?.currentUser
     val isLoggedIn = prefs.isLoggedIn && (firebaseUser != null || userProfile.email.isNotBlank() || userProfile.phone.isNotBlank())
@@ -243,6 +259,16 @@ fun SmartDrivoApp(
         (isUserAdmin || userProfile.isPlanValid) &&
             userProfile.isActive &&
             !isSecurityBlocked
+
+    // MINIMUM_VERSION_LOCK_V1
+    // This is a RAM-only comparison against values already received through
+    // the existing global settings listener. No network call occurs here.
+    val isForceUpdateRequired =
+        !isUserAdmin &&
+            forceUpdateEnabled &&
+            minimumAppVersionCode > 0 &&
+            BuildConfig.VERSION_CODE <
+                minimumAppVersionCode
 
     // Verify profile with Firestore for existing users on startup
     LaunchedEffect(isLoggedIn) {
@@ -303,6 +329,14 @@ fun SmartDrivoApp(
             Routes.WELCOME
         } else if (!admin && (!userProfile.isActive || !userProfile.isDeviceAuthorized)) {
             Routes.SECURITY_LOCK
+        } else if (
+            !admin &&
+            prefs.forceUpdateEnabled.value &&
+            prefs.minimumAppVersionCode.value > 0 &&
+            BuildConfig.VERSION_CODE <
+                prefs.minimumAppVersionCode.value
+        ) {
+            Routes.UPDATE_REQUIRED
         } else if (!admin && (userProfile.phone.isBlank() || userProfile.city.isBlank() || userProfile.state.isBlank())) {
             Routes.PROFILE_SETUP
         } else if (!admin && !userProfile.isPlanValid) {
@@ -340,6 +374,7 @@ fun SmartDrivoApp(
         currentRoute in mainRoutes &&
             isLoggedIn &&
             !isSecurityBlocked &&
+            !isForceUpdateRequired &&
             (isUserAdmin || isProfileComplete)
 
     val isDarkNavyScreen = currentRoute == Routes.WELCOME
@@ -363,6 +398,17 @@ fun SmartDrivoApp(
     // Membership lock must never leave the assistant running in background.
     LaunchedEffect(isMembershipActive, isUserAdmin) {
         if (!isUserAdmin && !isMembershipActive) {
+            prefs.setAutoAcceptActive(false)
+        }
+    }
+
+    // MINIMUM_VERSION_LOCK_V1
+    // Force-update lock disables the assistant once when the cached policy
+    // becomes restrictive. It is not checked from the live ride parser.
+    LaunchedEffect(
+        isForceUpdateRequired
+    ) {
+        if (isForceUpdateRequired) {
             prefs.setAutoAcceptActive(false)
         }
     }
@@ -428,10 +474,16 @@ fun SmartDrivoApp(
         }
     }
     // Gate Check Enforcer:
-    // Authentication + security + profile remain mandatory.
+    // Authentication + security + minimum-version + profile remain mandatory.
     // Membership is different: users may enter the app shell,
     // but ride features are covered by a membership lock overlay.
-    LaunchedEffect(currentRoute, isLoggedIn, isSecurityBlocked, isProfileComplete) {
+    LaunchedEffect(
+        currentRoute,
+        isLoggedIn,
+        isSecurityBlocked,
+        isForceUpdateRequired,
+        isProfileComplete
+    ) {
         if (currentRoute == null) return@LaunchedEffect
 
         if (!isLoggedIn) {
@@ -445,6 +497,16 @@ fun SmartDrivoApp(
                 navController.navigate(Routes.SECURITY_LOCK) {
                     popUpTo(0) { inclusive = true }
                 }
+            }
+        } else if (isForceUpdateRequired) {
+            if (currentRoute != Routes.UPDATE_REQUIRED) {
+                navController.navigate(Routes.UPDATE_REQUIRED) {
+                    popUpTo(0) { inclusive = true }
+                }
+            }
+        } else if (currentRoute == Routes.UPDATE_REQUIRED) {
+            navController.navigate(Routes.HOME) {
+                popUpTo(0) { inclusive = true }
             }
         } else if (!isProfileComplete && !isUserAdmin) {
             if (currentRoute !in profileRoutes) {
@@ -558,6 +620,10 @@ fun SmartDrivoApp(
                         navController.navigate(Routes.SECURITY_LOCK) {
                             popUpTo(Routes.SPLASH) { inclusive = true }
                         }
+                    } else if (isForceUpdateRequired) {
+                        navController.navigate(Routes.UPDATE_REQUIRED) {
+                            popUpTo(Routes.SPLASH) { inclusive = true }
+                        }
                     } else if (!admin && (userProfile.phone.isBlank() || userProfile.city.isBlank() || userProfile.state.isBlank())) {
                         navController.navigate(Routes.PROFILE_SETUP) {
                             popUpTo(Routes.SPLASH) { inclusive = true }
@@ -611,6 +677,35 @@ fun SmartDrivoApp(
                     prefs.setAutoAcceptActive(false)
                     navController.navigate(Routes.WELCOME) {
                         popUpTo(0) { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        // MINIMUM_VERSION_LOCK_V1
+        composable(Routes.UPDATE_REQUIRED) {
+            UpdateRequiredScreen(
+                currentVersionName =
+                    BuildConfig.VERSION_NAME,
+                minimumVersionName =
+                    minimumAppVersionName,
+                updateUrl =
+                    forceUpdateUrl,
+                onLogout = {
+                    repository.stopOwnMembershipSync()
+                    PhoneAuthManager
+                        .getAuthInstance()
+                        ?.signOut()
+
+                    prefs.isLoggedIn = false
+                    prefs.setAutoAcceptActive(false)
+
+                    navController.navigate(
+                        Routes.WELCOME
+                    ) {
+                        popUpTo(0) {
+                            inclusive = true
+                        }
                     }
                 }
             )
