@@ -329,6 +329,179 @@ object RapidoAdapter {
         }
     }
 
+    // RAPIDO_AUTO_PRIORITY_DROP_AFTER_CLICK_V1
+    // Auto Priority is clicked FIRST. This helper runs only AFTER that click
+    // to recover the visible destination for History/overlay.
+    fun extractAutoPriorityDropAddressOnly(
+        root: AccessibilityNodeInfo?
+    ): String? {
+        if (root == null) return null
+
+        val rootPkg =
+            root.packageName
+                ?.toString()
+                .orEmpty()
+
+        if (isSmartDrivoPackage(rootPkg)) {
+            return null
+        }
+
+        val entries =
+            mutableListOf<TextNodeEntry>()
+
+        collectEntries(
+            root,
+            entries,
+            rootPkg
+        )
+
+        val validEntries =
+            entries.filter { entry ->
+                val pkg =
+                    entry.packageName.orEmpty()
+
+                !isSmartDrivoPackage(pkg) &&
+                    (
+                        pkg.isEmpty() ||
+                            isRapidoPackage(pkg) ||
+                            pkg ==
+                                "com.rapido.passenger"
+                    )
+            }
+
+        fun usableAddress(
+            raw: String?
+        ): String? {
+            val clean =
+                cleanRapidoAddress(raw)
+
+            if (clean.length < 3) {
+                return null
+            }
+
+            val lower =
+                clean.lowercase()
+
+            if (
+                lower.contains("auto priority") ||
+                lower.contains("priority order") ||
+                lower.contains("all ride filters")
+            ) {
+                return null
+            }
+
+            if (
+                isInvalidAddress(clean) ||
+                matchesBlocklist(clean)
+            ) {
+                return null
+            }
+
+            return clean
+        }
+
+        // Strongest source: destination/drop view IDs.
+        for (entry in validEntries) {
+            val id =
+                entry.viewId
+                    ?.lowercase()
+                    .orEmpty()
+
+            if (
+                id.contains("drop") ||
+                id.contains("dest") ||
+                id.contains("destination") ||
+                id.contains("tv_drop")
+            ) {
+                usableAddress(entry.text)
+                    ?.let {
+                        return it
+                    }
+            }
+        }
+
+        // Explicit "Drop:", "Destination:", "To:" labels.
+        for (i in validEntries.indices) {
+            val raw =
+                validEntries[i].text.trim()
+
+            val lower =
+                raw.lowercase()
+
+            val prefixed =
+                when {
+                    lower.startsWith("drop:") ->
+                        raw.substringAfter(":")
+
+                    lower.startsWith("destination:") ->
+                        raw.substringAfter(":")
+
+                    lower.startsWith("to:") ->
+                        raw.substringAfter(":")
+
+                    else ->
+                        null
+                }
+
+            usableAddress(prefixed)
+                ?.let {
+                    return it
+                }
+
+            if (
+                lower == "drop" ||
+                lower == "destination" ||
+                lower == "to"
+            ) {
+                val end =
+                    minOf(
+                        i + 3,
+                        validEntries.lastIndex
+                    )
+
+                if (i + 1 <= end) {
+                    for (j in (i + 1)..end) {
+                        usableAddress(
+                            validEntries[j].text
+                        )?.let {
+                            return it
+                        }
+                    }
+                }
+            }
+        }
+
+        // Destination normally follows the final km row.
+        val lastKmIndex =
+            validEntries.indexOfLast {
+                KM_REGEX.containsMatchIn(
+                    it.text
+                )
+            }
+
+        if (lastKmIndex >= 0) {
+            for (
+                i in
+                (lastKmIndex + 1)
+                    until validEntries.size
+            ) {
+                usableAddress(
+                    validEntries[i].text
+                )?.let {
+                    return it
+                }
+            }
+        }
+
+        // Conservative fallback: Rapido card usually shows pickup before drop,
+        // so take the last valid address-like line.
+        return validEntries
+            .asReversed()
+            .firstNotNullOfOrNull {
+                usableAddress(it.text)
+            }
+    }
+
     /**
      * FIX 2 - Stats showing wrong data:
      * In RapidoAdapter.kt, extract fare correctly:

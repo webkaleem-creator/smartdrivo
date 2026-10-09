@@ -1451,11 +1451,19 @@ private val processingTimeoutRunnable = Runnable {
         clickRoot: AccessibilityNodeInfo,
         startedNs: Long
     ) {
-        val candidate =
+        val baseCandidate =
             try {
-                val validation = RapidoAdapter.validateRapidoOrderPopup(clickRoot)
+                val validation =
+                    RapidoAdapter
+                        .validateRapidoOrderPopup(
+                            clickRoot
+                        )
+
                 if (validation.isValid) {
-                    captureRapidoFastSnapshot(clickRoot, validation)?.candidate
+                    captureRapidoFastSnapshot(
+                        clickRoot,
+                        validation
+                    )?.candidate
                 } else {
                     null
                 }
@@ -1466,13 +1474,71 @@ private val processingTimeoutRunnable = Runnable {
                     fare = null,
                     pickupDistKm = null,
                     dropDistKm = null,
-                    pickupAddress = "Auto Priority",
+                    pickupAddress =
+                        "Address unavailable",
                     dropAddress = null,
                     dropArea = null,
                     platform = Platform.RAPIDO,
-                    vehicleType = prefs.userProfile.value.vehicleType,
-                    detectionTimeMs = System.currentTimeMillis()
+                    vehicleType =
+                        prefs.userProfile
+                            .value
+                            .vehicleType,
+                    detectionTimeMs =
+                        System.currentTimeMillis()
                 )
+
+        // RAPIDO_AUTO_PRIORITY_DROP_AFTER_CLICK_V1
+        // Accept has ALREADY been sent before this code runs.
+        // Recover only destination data for History + overlay.
+        val candidate =
+            if (
+                baseCandidate.dropAddress
+                    .isNullOrBlank() ||
+                baseCandidate.dropAddress.equals(
+                    "Address unavailable",
+                    ignoreCase = true
+                ) ||
+                baseCandidate.dropAddress.equals(
+                    "Detected Drop Location",
+                    ignoreCase = true
+                ) ||
+                baseCandidate.dropAddress.equals(
+                    "Drop Location",
+                    ignoreCase = true
+                )
+            ) {
+                val recoveredDrop =
+                    try {
+                        RapidoAdapter
+                            .extractAutoPriorityDropAddressOnly(
+                                clickRoot
+                            )
+                            ?.trim()
+                            ?.takeIf {
+                                it.isNotBlank()
+                            }
+                    } catch (_: Exception) {
+                        null
+                    }
+
+                if (recoveredDrop != null) {
+                    Log.i(
+                        TAG,
+                        "AUTO PRIORITY drop recovered after click: $recoveredDrop"
+                    )
+
+                    baseCandidate.copy(
+                        dropAddress =
+                            recoveredDrop,
+                        dropArea =
+                            recoveredDrop
+                    )
+                } else {
+                    baseCandidate
+                }
+            } else {
+                baseCandidate
+            }
 
         val recordId = onOrderDetectedFast(candidate)
         onOrderActionAttemptFast(recordId)
@@ -1540,7 +1606,7 @@ private val processingTimeoutRunnable = Runnable {
                     candidate = candidate,
                     status = OrderStatus.ACCEPTED,
                     reasonCode = "AUTO_PRIORITY_INSTANT",
-                    reasonText = "Auto Priority â€” instant accept; all ride filters bypassed",
+                    reasonText = "Auto Priority - instant accept; all ride filters bypassed",
                     actionSucceeded = true,
                     timesClicked = attempts,
                     buttonFound = true,
