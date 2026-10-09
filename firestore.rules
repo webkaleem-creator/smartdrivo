@@ -20,25 +20,66 @@ service cloud.firestore {
       // Any authenticated user can read their own profile; Admins can read all profiles
       allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
       
-      // Creating a new user:
-      // An authenticated user can create their own document, BUT cannot set isAdmin=true or isApproved=true
+      // TRIAL_ABUSE_PROTECTION_V4
+      // New driver docs may start only as FREE_TRIAL (with an atomic device
+      // reservation) or NONE (same-device repeat trial blocked).
       allow create: if isAuthenticated() && (
-        (request.auth.uid == userId &&
-          (!request.resource.data.keys().hasAny(['isAdmin', 'isApproved']) ||
-           (request.resource.data.isAdmin == false && request.resource.data.isApproved == false))
-        ) || isAdmin()
+        isAdmin() ||
+        (
+          request.auth.uid == userId &&
+          request.resource.data.uid == userId &&
+          request.resource.data.isAdmin == false &&
+          request.resource.data.isApproved == false &&
+          request.resource.data.isActive == true &&
+          request.resource.data.freeTrialUsed == true &&
+          request.resource.data.trialDeviceKey is string &&
+          (
+            (
+              request.resource.data.plan == 'FREE_TRIAL' &&
+              request.resource.data.planPrice == 0 &&
+              request.resource.data.planExpireMillis is int &&
+              request.resource.data.planExpireMillis > 0 &&
+              request.resource.data.freeTrialStartedAt is int &&
+              request.resource.data.freeTrialStartedAt > 0 &&
+              request.resource.data.trialDeniedReason == '' &&
+              getAfter(
+                /databases/$(database)/documents/trialDevices/$(request.resource.data.trialDeviceKey)
+              ).data.firstUid == userId &&
+              getAfter(
+                /databases/$(database)/documents/trialDevices/$(request.resource.data.trialDeviceKey)
+              ).data.deviceTrialKey == request.resource.data.trialDeviceKey
+            ) ||
+            (
+              request.resource.data.plan == 'NONE' &&
+              request.resource.data.planPrice == 0 &&
+              request.resource.data.planExpireMillis == 0 &&
+              request.resource.data.freeTrialStartedAt == 0 &&
+              request.resource.data.trialDeniedReason == 'DEVICE_TRIAL_ALREADY_USED'
+            )
+          )
+        )
       );
       
       // Updating user:
-      // Regular user can update their personal details (phone, vehicleType, city, etc.),
-      // but CANNOT modify protected fields: isAdmin, isApproved, plan, planPrice, planExpireMillis, isActive
-      // Admins have unrestricted update access.
+      // Regular users cannot alter membership, trial, admin, active-state,
+      // or an existing device binding. Admins keep full control.
       allow update: if isAuthenticated() && (
         isAdmin() ||
         (
           request.auth.uid == userId &&
           !request.resource.data.diff(resource.data).affectedKeys()
-            .hasAny(['isAdmin', 'isApproved', 'plan', 'planPrice', 'planExpireMillis', 'isActive']) &&
+            .hasAny([
+              'isAdmin',
+              'isApproved',
+              'plan',
+              'planPrice',
+              'planExpireMillis',
+              'isActive',
+              'freeTrialStartedAt',
+              'freeTrialUsed',
+              'trialDeviceKey',
+              'trialDeniedReason'
+            ]) &&
           (
             !request.resource.data.diff(resource.data).affectedKeys()
               .hasAny(['boundInstallId', 'boundDevice', 'deviceBoundAt']) ||
@@ -55,6 +96,43 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
     
+    // TRIAL_ABUSE_PROTECTION_V4
+    // One immutable reservation per privacy-safe device token.
+    match /trialDevices/{deviceKey} {
+      allow get: if isAuthenticated();
+      allow list: if isAdmin();
+
+      allow create: if isAuthenticated() && (
+        isAdmin() ||
+        (
+          request.resource.data.deviceTrialKey == deviceKey &&
+          request.resource.data.firstUid == request.auth.uid &&
+          request.resource.data.createdAt is int &&
+          request.resource.data.trialExpireMillis is int &&
+          (
+            (
+              getAfter(
+                /databases/$(database)/documents/users/$(request.auth.uid)
+              ).data.plan == 'FREE_TRIAL' &&
+              getAfter(
+                /databases/$(database)/documents/users/$(request.auth.uid)
+              ).data.trialDeviceKey == deviceKey
+            ) ||
+            (
+              exists(
+                /databases/$(database)/documents/users/$(request.auth.uid)
+              ) &&
+              get(
+                /databases/$(database)/documents/users/$(request.auth.uid)
+              ).data.freeTrialUsed == true
+            )
+          )
+        )
+      );
+
+      allow update, delete: if isAdmin();
+    }
+
     // Payments collection rules
     match /payments/{paymentId} {
       // Drivers can read their own submissions; Admins can read all submissions
