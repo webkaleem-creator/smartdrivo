@@ -94,6 +94,13 @@ class FirebaseRepository(
             com.example.model.VehicleType.AUTO
         }
 
+        val isAdmin = doc.getBoolean("isAdmin") ?: false
+        val boundInstallId = doc.getString("boundInstallId").orEmpty()
+        val deviceAuthorized =
+            isAdmin ||
+                boundInstallId.isBlank() ||
+                boundInstallId == prefs.getOrCreateInstallId()
+
         return UserProfile(
             uid = doc.id,
             name = doc.getString("name") ?: "",
@@ -109,8 +116,16 @@ class FirebaseRepository(
             planPrice = doc.getLong("planPrice")?.toInt() ?: 0,
             planExpireMillis = doc.getLong("planExpireMillis") ?: 0L,
             isApproved = doc.getBoolean("isApproved") ?: false,
-            isAdmin = doc.getBoolean("isAdmin") ?: false,
+            isAdmin = isAdmin,
             isActive = doc.getBoolean("isActive") ?: true,
+            boundInstallId = boundInstallId,
+            boundDeviceName =
+                doc.getString("boundDevice")
+                    ?: doc.getString("registeredDevice")
+                    ?: "",
+            isDeviceAuthorized = deviceAuthorized,
+            deviceChangeRequested =
+                doc.getBoolean("deviceChangeRequested") ?: false,
             referralCode = doc.getString("referralCode") ?: "",
             createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
         )
@@ -196,6 +211,44 @@ class FirebaseRepository(
         ownPaymentsListener?.remove()
         ownUserListener = null
         ownPaymentsListener = null
+    }
+
+    // DEVICE_CHANGE_REQUEST_V1
+    fun requestDeviceChange(
+        onComplete: ((Boolean) -> Unit)? = null
+    ) {
+        val uid = auth?.currentUser?.uid
+        val fs = firestore
+
+        if (uid.isNullOrBlank() || fs == null) {
+            onComplete?.invoke(false)
+            return
+        }
+
+        scope.launch {
+            try {
+                fs.collection("users")
+                    .document(uid)
+                    .set(
+                        mapOf(
+                            "deviceChangeRequested" to true,
+                            "requestedDeviceId" to prefs.getOrCreateInstallId(),
+                            "requestedDeviceName" to currentDeviceName(),
+                            "requestedDeviceAt" to System.currentTimeMillis()
+                        ),
+                        SetOptions.merge()
+                    )
+                    .await()
+
+                onComplete?.invoke(true)
+            } catch (e: Exception) {
+                Log.e(
+                    "FirebaseRepo",
+                    "Device change request failed: ${e.message}"
+                )
+                onComplete?.invoke(false)
+            }
+        }
     }
 
     fun startAdminBackendSync() {
@@ -354,7 +407,11 @@ class FirebaseRepository(
                                 "registeredAndroidVersion" to currentAndroid,
                                 "registeredAppVersion" to currentAppVersion,
                                 "registeredDeviceAt" to now,
-                                "registeredDeviceSource" to "REGISTRATION"
+                                "registeredDeviceSource" to "REGISTRATION",
+                                "boundInstallId" to prefs.getOrCreateInstallId(),
+                                "boundDevice" to currentDevice,
+                                "deviceBoundAt" to now,
+                                "deviceChangeRequested" to false
                             )
                     ).await()
 
@@ -378,8 +435,21 @@ class FirebaseRepository(
                             emptyMap<String, Any>()
                         }
 
+                    val deviceBindingPatch =
+                        if (existing.getString("boundInstallId").isNullOrBlank()) {
+                            mapOf(
+                                "boundInstallId" to prefs.getOrCreateInstallId(),
+                                "boundDevice" to currentDevice,
+                                "deviceBoundAt" to now
+                            )
+                        } else {
+                            emptyMap<String, Any>()
+                        }
+
                     docRef.set(
-                        safeClientMap + registrationDevicePatch,
+                        safeClientMap +
+                            registrationDevicePatch +
+                            deviceBindingPatch,
                         SetOptions.merge()
                     ).await()
                 }
@@ -480,6 +550,17 @@ class FirebaseRepository(
                     isApproved = isApproved,
                     isAdmin = isAdmin,
                     isActive = isActive,
+                    boundInstallId = doc.getString("boundInstallId").orEmpty(),
+                    boundDeviceName =
+                        doc.getString("boundDevice")
+                            ?: doc.getString("registeredDevice")
+                            ?: "",
+                    isDeviceAuthorized =
+                        isAdmin ||
+                            doc.getString("boundInstallId").isNullOrBlank() ||
+                            doc.getString("boundInstallId") == prefs.getOrCreateInstallId(),
+                    deviceChangeRequested =
+                        doc.getBoolean("deviceChangeRequested") ?: false,
                     referralCode = referralCode,
                     createdAt = createdAt
                 )

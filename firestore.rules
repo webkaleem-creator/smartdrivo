@@ -38,7 +38,16 @@ service cloud.firestore {
         (
           request.auth.uid == userId &&
           !request.resource.data.diff(resource.data).affectedKeys()
-            .hasAny(['isAdmin', 'isApproved', 'plan', 'planPrice', 'planExpireMillis', 'isActive'])
+            .hasAny(['isAdmin', 'isApproved', 'plan', 'planPrice', 'planExpireMillis', 'isActive']) &&
+          (
+            !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['boundInstallId', 'boundDevice', 'deviceBoundAt']) ||
+            (
+              (!resource.data.keys().hasAny(['boundInstallId']) || resource.data.boundInstallId == '') &&
+              request.resource.data.boundInstallId is string &&
+              request.resource.data.boundInstallId != ''
+            )
+          )
         )
       );
       

@@ -315,6 +315,16 @@ class PreferencesManager(private val context: Context) {
         }
     }
 
+    // DEVICE_LOCK_V1
+    fun getOrCreateInstallId(): String {
+        val existing = prefs.getString(KEY_INSTALL_ID, "").orEmpty()
+        if (existing.isNotBlank()) return existing
+
+        val generated = "SD-" + UUID.randomUUID().toString()
+        prefs.edit().putString(KEY_INSTALL_ID, generated).commit()
+        return generated
+    }
+
     // --- User Profile ---
     fun saveUserProfile(profile: UserProfile) {
         prefs.edit().apply {
@@ -331,6 +341,10 @@ class PreferencesManager(private val context: Context) {
             putBoolean(KEY_IS_APPROVED, profile.isApproved)
             putBoolean(KEY_IS_ADMIN, profile.isAdmin)
             putBoolean(KEY_IS_ACTIVE, profile.isActive)
+            putString(KEY_BOUND_INSTALL_ID, profile.boundInstallId)
+            putString(KEY_BOUND_DEVICE_NAME, profile.boundDeviceName)
+            putBoolean(KEY_DEVICE_AUTHORIZED, profile.isDeviceAuthorized)
+            putBoolean(KEY_DEVICE_CHANGE_REQUESTED, profile.deviceChangeRequested)
             putString(KEY_REFERRAL, profile.referralCode)
             apply()
         }
@@ -352,6 +366,10 @@ class PreferencesManager(private val context: Context) {
         val isApproved = prefs.getBoolean(KEY_IS_APPROVED, false)
         val isAdmin = prefs.getBoolean(KEY_IS_ADMIN, false)
         val isActive = prefs.getBoolean(KEY_IS_ACTIVE, true)
+        val boundInstallId = prefs.getString(KEY_BOUND_INSTALL_ID, "") ?: ""
+        val boundDeviceName = prefs.getString(KEY_BOUND_DEVICE_NAME, "") ?: ""
+        val isDeviceAuthorized = prefs.getBoolean(KEY_DEVICE_AUTHORIZED, true)
+        val deviceChangeRequested = prefs.getBoolean(KEY_DEVICE_CHANGE_REQUESTED, false)
         val referral = prefs.getString(KEY_REFERRAL, "SMART50") ?: "SMART50"
 
         return UserProfile(
@@ -368,6 +386,10 @@ class PreferencesManager(private val context: Context) {
             isApproved = isApproved,
             isAdmin = isAdmin,
             isActive = isActive,
+            boundInstallId = boundInstallId,
+            boundDeviceName = boundDeviceName,
+            isDeviceAuthorized = isDeviceAuthorized,
+            deviceChangeRequested = deviceChangeRequested,
             referralCode = referral
         )
     }
@@ -1383,6 +1405,11 @@ class PreferencesManager(private val context: Context) {
         private const val KEY_IS_APPROVED = "user_is_approved"
         private const val KEY_IS_ADMIN = "user_is_admin"
         private const val KEY_IS_ACTIVE = "user_is_active"
+        private const val KEY_BOUND_INSTALL_ID = "security_bound_install_id"
+        private const val KEY_BOUND_DEVICE_NAME = "security_bound_device_name"
+        private const val KEY_DEVICE_AUTHORIZED = "security_device_authorized"
+        private const val KEY_DEVICE_CHANGE_REQUESTED = "security_device_change_requested"
+        private const val KEY_INSTALL_ID = "security_local_install_id_v1"
         private const val KEY_REFERRAL = "user_referral"
         private const val KEY_IS_LOGGED_IN = "user_is_logged_in"
         private const val KEY_HAS_OPENED_BEFORE = "app_has_opened_before"

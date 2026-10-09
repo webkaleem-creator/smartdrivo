@@ -78,6 +78,7 @@ import com.example.ui.screens.PlanSelectionScreen
 import com.example.ui.screens.ProfileScreen
 import com.example.ui.screens.ProfileSetupScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.SecurityLockScreen
 import com.example.ui.screens.SplashScreen
 import com.example.ui.screens.WelcomeScreen
 import com.example.ui.theme.BlueContainer
@@ -110,6 +111,7 @@ object Routes {
     const val COMMUNITY = "community"
     const val ADMIN_PANEL = "admin_panel"
     const val FINISH_SETUP = "finish_setup"
+    const val SECURITY_LOCK = "security_lock"
 }
 
 private data class NavItemData(
@@ -232,7 +234,13 @@ fun SmartDrivoApp(
     val firebaseUser = PhoneAuthManager.getAuthInstance()?.currentUser
     val isLoggedIn = prefs.isLoggedIn && (firebaseUser != null || userProfile.email.isNotBlank() || userProfile.phone.isNotBlank())
     val isProfileComplete = userProfile.phone.isNotBlank() && userProfile.city.isNotBlank() && userProfile.state.isNotBlank()
-    val isMembershipActive = (isUserAdmin || userProfile.isPlanValid) && userProfile.isActive
+    val isSecurityBlocked =
+        !isUserAdmin &&
+            (!userProfile.isActive || !userProfile.isDeviceAuthorized)
+    val isMembershipActive =
+        (isUserAdmin || userProfile.isPlanValid) &&
+            userProfile.isActive &&
+            !isSecurityBlocked
 
     // Verify profile with Firestore for existing users on startup
     LaunchedEffect(isLoggedIn) {
@@ -258,7 +266,11 @@ fun SmartDrivoApp(
                             planExpireMillis = fsProfile.planExpireMillis,
                             isApproved = fsProfile.isApproved,
                             isAdmin = fsProfile.isAdmin,
-                            isActive = fsProfile.isActive
+                            isActive = fsProfile.isActive,
+                            boundInstallId = fsProfile.boundInstallId,
+                            boundDeviceName = fsProfile.boundDeviceName,
+                            isDeviceAuthorized = fsProfile.isDeviceAuthorized,
+                            deviceChangeRequested = fsProfile.deviceChangeRequested
                         )
                         prefs.saveUserProfile(updated)
                         // DEVICE_SYNC_STARTUP_V2
@@ -287,6 +299,8 @@ fun SmartDrivoApp(
 
         if (!loggedIn) {
             Routes.WELCOME
+        } else if (!admin && (!userProfile.isActive || !userProfile.isDeviceAuthorized)) {
+            Routes.SECURITY_LOCK
         } else if (!admin && (userProfile.phone.isBlank() || userProfile.city.isBlank() || userProfile.state.isBlank())) {
             Routes.PROFILE_SETUP
         } else if (!admin && !userProfile.isPlanValid) {
@@ -318,7 +332,11 @@ fun SmartDrivoApp(
     val mainRoutes = remember {
         setOf(Routes.HOME, Routes.SETTINGS, Routes.AREA_MANAGER, Routes.ORDER_HISTORY, Routes.PROFILE)
     }
-    val showBottomBar = currentRoute in mainRoutes && isLoggedIn && (isUserAdmin || (isProfileComplete && isMembershipActive))
+    val showBottomBar =
+        currentRoute in mainRoutes &&
+            isLoggedIn &&
+            !isSecurityBlocked &&
+            (isUserAdmin || (isProfileComplete && isMembershipActive))
 
     val isDarkNavyScreen = currentRoute == Routes.WELCOME
 
@@ -401,12 +419,18 @@ fun SmartDrivoApp(
     // Step 2: Profile Setup (mobile, city, state) -> ProfileSetupScreen
     // Step 3: Active membership/payment -> PlanSelectionScreen
     // Only after all 3 steps -> HomeScreen (full app access)
-    LaunchedEffect(currentRoute, isLoggedIn, isProfileComplete, isMembershipActive) {
+    LaunchedEffect(currentRoute, isLoggedIn, isSecurityBlocked, isProfileComplete, isMembershipActive) {
         if (currentRoute == null) return@LaunchedEffect
 
         if (!isLoggedIn) {
             if (currentRoute !in authRoutes) {
                 navController.navigate(Routes.WELCOME) {
+                    popUpTo(0) { inclusive = true }
+                }
+            }
+        } else if (isSecurityBlocked) {
+            if (currentRoute != Routes.SECURITY_LOCK) {
+                navController.navigate(Routes.SECURITY_LOCK) {
                     popUpTo(0) { inclusive = true }
                 }
             }
@@ -507,6 +531,10 @@ fun SmartDrivoApp(
                         navController.navigate(Routes.WELCOME) {
                             popUpTo(Routes.SPLASH) { inclusive = true }
                         }
+                    } else if (!admin && (!userProfile.isActive || !userProfile.isDeviceAuthorized)) {
+                        navController.navigate(Routes.SECURITY_LOCK) {
+                            popUpTo(Routes.SPLASH) { inclusive = true }
+                        }
                     } else if (!admin && (userProfile.phone.isBlank() || userProfile.city.isBlank() || userProfile.state.isBlank())) {
                         navController.navigate(Routes.PROFILE_SETUP) {
                             popUpTo(Routes.SPLASH) { inclusive = true }
@@ -535,6 +563,34 @@ fun SmartDrivoApp(
                     popUpTo(Routes.GUEST) { inclusive = true }
                 }
             }
+        }
+
+        // DEVICE_LOCK_V1
+        composable(Routes.SECURITY_LOCK) {
+            SecurityLockScreen(
+                profile = userProfile,
+                onRequestDeviceChange = {
+                    repository.requestDeviceChange { success ->
+                        android.widget.Toast.makeText(
+                            appContext,
+                            if (success)
+                                "Device change request sent to SmartDrivo Admin."
+                            else
+                                "Could not send request. Check internet.",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
+                },
+                onLogout = {
+                    repository.stopOwnMembershipSync()
+                    PhoneAuthManager.getAuthInstance()?.signOut()
+                    prefs.isLoggedIn = false
+                    prefs.setAutoAcceptActive(false)
+                    navController.navigate(Routes.WELCOME) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
+            )
         }
 
         // 3. Welcome Screen (Merged Auth + Features list + Membership plans)
@@ -619,7 +675,11 @@ fun SmartDrivoApp(
                                 planExpireMillis = firestoreProfile.planExpireMillis,
                                 isApproved = firestoreProfile.isApproved,
                                 isAdmin = firestoreProfile.isAdmin,
-                                isActive = firestoreProfile.isActive
+                                isActive = firestoreProfile.isActive,
+                                boundInstallId = firestoreProfile.boundInstallId,
+                                boundDeviceName = firestoreProfile.boundDeviceName,
+                                isDeviceAuthorized = firestoreProfile.isDeviceAuthorized,
+                                deviceChangeRequested = firestoreProfile.deviceChangeRequested
                             )
                         } else {
                             val updatedEmail = if (phoneOrEmail.contains("@")) phoneOrEmail else userProfile.email
@@ -636,7 +696,15 @@ fun SmartDrivoApp(
 
                         // If empty → go to ProfileSetupScreen. If filled → continue to next gate check
                         val isProfileEmpty = merged.phone.isBlank() || merged.city.isBlank() || merged.state.isBlank()
-                        if (isProfileEmpty && !merged.isAdmin) {
+                        val securityBlocked =
+                            !merged.isAdmin &&
+                                (!merged.isActive || !merged.isDeviceAuthorized)
+
+                        if (securityBlocked) {
+                            navController.navigate(Routes.SECURITY_LOCK) {
+                                popUpTo(Routes.WELCOME) { inclusive = true }
+                            }
+                        } else if (isProfileEmpty && !merged.isAdmin) {
                             navController.navigate(Routes.PROFILE_SETUP) {
                                 popUpTo(Routes.WELCOME) { inclusive = true }
                             }

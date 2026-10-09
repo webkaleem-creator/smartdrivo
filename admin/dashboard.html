@@ -779,6 +779,37 @@
         canonical.registeredAppVersion =
           newest.registeredAppVersion || canonical.registeredAppVersion;
 
+        // DEVICE_LOCK_ADMIN_V1
+        const boundSource =
+          group.find(x => x.boundInstallId) || canonical;
+
+        const requestSource =
+          group.find(
+            x =>
+              x.deviceChangeRequested === true &&
+              x.requestedDeviceId
+          ) || canonical;
+
+        canonical.boundInstallId =
+          boundSource.boundInstallId || '';
+
+        canonical.boundDevice =
+          boundSource.boundDevice ||
+          boundSource.registeredDevice ||
+          '';
+
+        canonical.deviceChangeRequested =
+          group.some(x => x.deviceChangeRequested === true);
+
+        canonical.requestedDeviceId =
+          requestSource.requestedDeviceId || '';
+
+        canonical.requestedDeviceName =
+          requestSource.requestedDeviceName || '';
+
+        canonical.requestedDeviceAt =
+          Number(requestSource.requestedDeviceAt) || 0;
+
         return canonical;
       });
     }
@@ -806,8 +837,17 @@
             planPrice: Number(d.planPrice) || 0,
             planExpireMillis: Number(d.planExpireMillis) || 0,
             isApproved: (d.isApproved === true),
-            isActive: (d.isActive !== false), // default active unless explicitly false
+            isActive: (d.isActive !== false), // false = remote app lock
             isAdmin: (d.isAdmin === true),
+
+            // DEVICE_LOCK_ADMIN_V1
+            boundInstallId: d.boundInstallId || '',
+            boundDevice: d.boundDevice || '',
+            deviceChangeRequested: (d.deviceChangeRequested === true),
+            requestedDeviceId: d.requestedDeviceId || '',
+            requestedDeviceName: d.requestedDeviceName || '',
+            requestedDeviceAt: Number(d.requestedDeviceAt) || 0,
+
             createdAt: Number(d.createdAt) || Date.now()
           });
         });
@@ -965,7 +1005,7 @@
           vehicleColor = '#34D399';
         }
 
-        // Action Button: Protected for admin, toggle for regular users
+        // DEVICE_LOCK_ADMIN_V1
         let actionCell = '';
         if (isCurrentAdmin) {
           actionCell = `
@@ -974,19 +1014,38 @@
             </span>
           `;
         } else {
-          if (driver.isActive) {
-            actionCell = `
-              <button type="button" class="btn btn-danger btn-sm" onclick="toggleDriverActive('${driver.uid}', true, '${escapeHtml(driver.name)}')" title="Click to Deactivate driver">
-                <i class="fa-solid fa-toggle-on"></i> Deactivate
-              </button>
-            `;
-          } else {
-            actionCell = `
-              <button type="button" class="btn btn-success btn-sm" onclick="toggleDriverActive('${driver.uid}', false, '${escapeHtml(driver.name)}')" title="Click to Activate driver">
-                <i class="fa-solid fa-toggle-off"></i> Activate
-              </button>
-            `;
-          }
+          const lockButton =
+            driver.isActive
+              ? `
+                <button type="button" class="btn btn-danger btn-sm" onclick="toggleDriverActive('${driver.uid}', true, '${escapeHtml(driver.name)}')" title="Remote lock SmartDrivo">
+                  <i class="fa-solid fa-lock"></i> Lock App
+                </button>
+              `
+              : `
+                <button type="button" class="btn btn-success btn-sm" onclick="toggleDriverActive('${driver.uid}', false, '${escapeHtml(driver.name)}')" title="Remote unlock SmartDrivo">
+                  <i class="fa-solid fa-lock-open"></i> Unlock App
+                </button>
+              `;
+
+          const deviceButton =
+            driver.deviceChangeRequested && driver.requestedDeviceId
+              ? `
+                <button type="button" class="btn btn-success btn-sm" onclick="approveDeviceChange('${driver.uid}', '${escapeHtml(driver.name)}')" title="Approve requested new phone">
+                  <i class="fa-solid fa-mobile-screen-button"></i> Approve Device
+                </button>
+              `
+              : `
+                <button type="button" class="btn btn-sm" onclick="resetDeviceBinding('${driver.uid}', '${escapeHtml(driver.name)}')" title="Fallback: clear current device binding">
+                  <i class="fa-solid fa-rotate"></i> Reset Device
+                </button>
+              `;
+
+          actionCell = `
+            <div style="display:flex; flex-direction:column; gap:6px; min-width:132px;">
+              ${lockButton}
+              ${deviceButton}
+            </div>
+          `;
         }
 
         html += `
@@ -1014,13 +1073,32 @@
                   ].filter(Boolean).join(' | ')
                 )}
               </div>
+
+              <div style="font-size:10px; margin-top:5px; color:${driver.boundInstallId ? '#34D399' : '#F59E0B'};">
+                ${driver.boundInstallId
+                  ? `Device Lock: ${escapeHtml(driver.boundDevice || 'Bound')}`
+                  : 'Device Lock: Waiting to bind'
+                }
+              </div>
+
+              ${driver.deviceChangeRequested
+                ? `<div style="font-size:10px; color:#60A5FA; margin-top:3px;">
+                     Change request: ${escapeHtml(driver.requestedDeviceName || 'New phone')}
+                   </div>`
+                : ''
+              }
             </td>
             <td><strong>${escapeHtml(driver.plan === 'FREE_TRIAL' ? '1-Day Free Trial' : driver.plan)}</strong> <span style="font-size: 11px; color: var(--text-dim);">${driver.planPrice ? `(₹${driver.planPrice})` : ''}</span></td>
             <td>${formatExpiry(driver.planExpireMillis, driver.isAdmin)}</td>
             <td>
               ${driver.isActive ?
                 '<span class="badge badge-approved"><i class="fa-solid fa-circle-check"></i> Active</span>' :
-                '<span class="badge badge-rejected"><i class="fa-solid fa-circle-xmark"></i> Inactive</span>'
+                '<span class="badge badge-rejected"><i class="fa-solid fa-lock"></i> Locked</span>'
+              }
+
+              ${driver.deviceChangeRequested
+                ? '<div style="margin-top:5px;"><span class="badge" style="background:rgba(37,99,235,.18);color:#60A5FA;">Device Change Request</span></div>'
+                : ''
               }
             </td>
             <td>${actionCell}</td>
@@ -1048,31 +1126,187 @@
       }
     }
 
-    // 4. TOGGLE DRIVER STATUS (REAL FIRESTORE WRITE)
+    // 4. DEVICE LOCK / REMOTE LOCK CONTROLS
     async function toggleDriverActive(uid, currentlyActive, driverName) {
-      // Safeguard against admin deactivation
-      const target = liveDrivers.find(d => d.uid === uid);
-      if (target && target.isAdmin) {
-        alert("Protection Guard: Administrator accounts cannot be deactivated!");
+      const target = liveDrivers.find(
+        d =>
+          d.uid === uid ||
+          (
+            Array.isArray(d.sourceUids) &&
+            d.sourceUids.includes(uid)
+          )
+      );
+
+      if (
+        target &&
+        (
+          target.isAdmin ||
+          target.uid === currentAdminUid ||
+          (
+            Array.isArray(target.sourceUids) &&
+            target.sourceUids.includes(currentAdminUid)
+          )
+        )
+      ) {
+        alert("Protection Guard: Administrator accounts cannot be locked!");
         return;
       }
 
       const targetStatus = !currentlyActive;
-      const action = targetStatus ? 'activate' : 'deactivate';
-      if (!confirm(`Are you sure you want to ${action} ${driverName || 'this driver'}?`)) return;
+      const action = targetStatus ? 'unlock' : 'lock';
+
+      if (!confirm(`Are you sure you want to ${action} SmartDrivo for ${driverName || 'this driver'}?`)) return;
 
       try {
-        logMessage(`Writing to Firestore: /users/${uid} isActive -> ${targetStatus}...`);
-        await db.collection('users').doc(uid).update({
-          isActive: targetStatus,
-          updatedAt: Date.now()
+        const targetUids =
+          target &&
+          Array.isArray(target.sourceUids) &&
+          target.sourceUids.length > 0
+            ? [...new Set(target.sourceUids)]
+            : [uid];
+
+        const batch = db.batch();
+
+        targetUids.forEach(targetUid => {
+          batch.update(
+            db.collection('users').doc(targetUid),
+            {
+              isActive: targetStatus,
+              updatedAt: Date.now()
+            }
+          );
         });
-        showToast(`Driver successfully ${targetStatus ? 'activated' : 'deactivated'} in Firestore.`, 'success');
-        logMessage(`Successfully updated status for driver ${driverName} (${uid}).`);
+
+        await batch.commit();
+
+        showToast(
+          `SmartDrivo ${targetStatus ? 'unlocked' : 'locked'} for ${driverName || 'driver'}.`,
+          'success'
+        );
       } catch (err) {
-        console.error("Firestore status toggle failed:", err);
-        logMessage(`Error updating driver status: ${err.message}`);
-        showToast(`Error updating driver: ${err.message}`, 'error');
+        console.error("Firestore lock toggle failed:", err);
+        showToast(`Error updating driver lock: ${err.message}`, 'error');
+      }
+    }
+
+    async function approveDeviceChange(uid, driverName) {
+      const target = liveDrivers.find(
+        d =>
+          d.uid === uid ||
+          (
+            Array.isArray(d.sourceUids) &&
+            d.sourceUids.includes(uid)
+          )
+      );
+
+      if (!target || !target.requestedDeviceId) {
+        showToast("No pending device change request found.", "warning");
+        return;
+      }
+
+      if (target.isAdmin) {
+        alert("Administrator device binding is protected.");
+        return;
+      }
+
+      const deviceName =
+        target.requestedDeviceName || "New Android device";
+
+      if (!confirm(`Approve ${deviceName} for ${driverName || 'this driver'}? The previous phone will be locked out.`)) {
+        return;
+      }
+
+      try {
+        const targetUids =
+          Array.isArray(target.sourceUids) &&
+          target.sourceUids.length > 0
+            ? [...new Set(target.sourceUids)]
+            : [uid];
+
+        const batch = db.batch();
+
+        targetUids.forEach(targetUid => {
+          batch.update(
+            db.collection('users').doc(targetUid),
+            {
+              boundInstallId: target.requestedDeviceId,
+              boundDevice: deviceName,
+              deviceBoundAt: Date.now(),
+              deviceChangeRequested: false,
+              requestedDeviceId: "",
+              requestedDeviceName: "",
+              requestedDeviceAt: 0,
+              updatedAt: Date.now()
+            }
+          );
+        });
+
+        await batch.commit();
+
+        showToast(
+          `New device approved for ${driverName || 'driver'}.`,
+          'success'
+        );
+      } catch (err) {
+        console.error("Approve device failed:", err);
+        showToast(`Could not approve device: ${err.message}`, 'error');
+      }
+    }
+
+    async function resetDeviceBinding(uid, driverName) {
+      const target = liveDrivers.find(
+        d =>
+          d.uid === uid ||
+          (
+            Array.isArray(d.sourceUids) &&
+            d.sourceUids.includes(uid)
+          )
+      );
+
+      if (target && target.isAdmin) {
+        alert("Administrator device binding is protected.");
+        return;
+      }
+
+      if (!confirm(`Reset device lock for ${driverName || 'this driver'}? Use this only when the driver cannot send a device-change request.`)) {
+        return;
+      }
+
+      try {
+        const targetUids =
+          target &&
+          Array.isArray(target.sourceUids) &&
+          target.sourceUids.length > 0
+            ? [...new Set(target.sourceUids)]
+            : [uid];
+
+        const batch = db.batch();
+
+        targetUids.forEach(targetUid => {
+          batch.update(
+            db.collection('users').doc(targetUid),
+            {
+              boundInstallId: "",
+              boundDevice: "",
+              deviceBoundAt: 0,
+              deviceChangeRequested: false,
+              requestedDeviceId: "",
+              requestedDeviceName: "",
+              requestedDeviceAt: 0,
+              updatedAt: Date.now()
+            }
+          );
+        });
+
+        await batch.commit();
+
+        showToast(
+          `Device binding reset for ${driverName || 'driver'}.`,
+          'success'
+        );
+      } catch (err) {
+        console.error("Reset device failed:", err);
+        showToast(`Could not reset device: ${err.message}`, 'error');
       }
     }
 
