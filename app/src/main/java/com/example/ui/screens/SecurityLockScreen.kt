@@ -9,9 +9,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -53,7 +58,9 @@ fun SecurityLockScreen(
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            colors = CardDefaults.cardColors(
+                containerColor = Color.White
+            )
         ) {
             Column(
                 modifier = Modifier
@@ -62,8 +69,18 @@ fun SecurityLockScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Text(text = "🔒", fontSize = 48.sp)
-                Spacer(modifier = Modifier.height(12.dp))
+                // SECURITY_VECTOR_LOCK_ICON_V2
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = "SmartDrivo security lock",
+                    tint = Color(0xFF2563EB),
+                    modifier = Modifier.size(54.dp)
+                )
+
+                Spacer(
+                    modifier = Modifier.height(12.dp)
+                )
+
                 Text(
                     text = title,
                     color = TextDarkPrimary,
@@ -71,7 +88,11 @@ fun SecurityLockScreen(
                     fontWeight = FontWeight.ExtraBold,
                     textAlign = TextAlign.Center
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+
+                Spacer(
+                    modifier = Modifier.height(8.dp)
+                )
+
                 Text(
                     text = message,
                     color = TextDarkSecondary,
@@ -80,8 +101,14 @@ fun SecurityLockScreen(
                     textAlign = TextAlign.Center
                 )
 
-                if (!adminLocked && profile.boundDeviceName.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(14.dp))
+                if (
+                    !adminLocked &&
+                    profile.boundDeviceName.isNotBlank()
+                ) {
+                    Spacer(
+                        modifier = Modifier.height(14.dp)
+                    )
+
                     Text(
                         text = "Registered device: ${profile.boundDeviceName}",
                         color = TextDarkSecondary,
@@ -92,18 +119,20 @@ fun SecurityLockScreen(
                 }
 
                 if (!adminLocked) {
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(
+                        modifier = Modifier.height(18.dp)
+                    )
 
                     if (profile.deviceChangeRequested) {
                         Text(
-                            text = "✓ Device change request sent. Waiting for admin approval.",
+                            text = "Device change request sent. Waiting for admin approval.",
                             color = Color(0xFF059669),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center
                         )
                     } else {
-                        androidx.compose.material3.Button(
+                        Button(
                             onClick = onRequestDeviceChange,
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(14.dp)
@@ -116,7 +145,9 @@ fun SecurityLockScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(
+                    modifier = Modifier.height(18.dp)
+                )
 
                 OutlinedButton(
                     onClick = onLogout,
