@@ -21,6 +21,7 @@ import com.example.model.PaymentSubmission
 import com.example.model.Platform
 import com.example.model.UserProfile
 import com.example.model.VehicleType
+import com.example.security.SignatureIntegrity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -238,6 +239,26 @@ class PreferencesManager(private val context: Context) {
         )
     val forceUpdateUrl: StateFlow<String> =
         _forceUpdateUrl.asStateFlow()
+
+    // APK_SIGNATURE_TAMPER_LOCK_V1
+    // Certificate verification happens once when PreferencesManager is created.
+    // The result is then a RAM snapshot for UI/service checks.
+    private val initialApkSignatureResult =
+        SignatureIntegrity.verify(context)
+
+    private val _apkSignatureValid =
+        MutableStateFlow(
+            initialApkSignatureResult.isValid
+        )
+
+    val apkSignatureValid:
+        StateFlow<Boolean> =
+        _apkSignatureValid.asStateFlow()
+
+    val apkSignatureSha256: String =
+        initialApkSignatureResult
+            .actualSha256
+            .joinToString(",")
 
     private val _lastAcceptedRide = MutableStateFlow<OrderHistoryItem?>(loadLastAccepted())
     val lastAcceptedRide: StateFlow<OrderHistoryItem?> = _lastAcceptedRide.asStateFlow()

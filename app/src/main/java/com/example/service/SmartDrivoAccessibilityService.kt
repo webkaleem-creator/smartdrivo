@@ -64,6 +64,12 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    // APK_SIGNATURE_TAMPER_LOCK_V1
+    // One volatile RAM snapshot. This avoids any certificate/package scan in
+    // the live Rapido/Uber/Ola event path.
+    @Volatile
+    private var apkIntegrityAllowed = true
+
     // ==========================================================
     // UBER_WINDOW_POLLER_V3
     //
@@ -493,10 +499,26 @@ private val processingTimeoutRunnable = Runnable {
     override fun onServiceConnected() {
         super.onServiceConnected()
         prefs = PreferencesManager.getInstance(applicationContext)
+
+        // APK_SIGNATURE_TAMPER_LOCK_V1
+        apkIntegrityAllowed =
+            prefs.apkSignatureValid.value
+
         repository = FirebaseRepository(applicationContext, prefs)
         isServiceRunning = true
-        startUberWindowPolling()
-        Log.i(TAG, "SmartDrivo Accessibility Service Connected")
+
+        if (apkIntegrityAllowed) {
+            startUberWindowPolling()
+        } else {
+            prefs.setAutoAcceptActive(false)
+            pauseAllLiveOrderWork()
+        }
+
+        Log.i(
+            TAG,
+            "SmartDrivo Accessibility Service Connected | " +
+                "apkIntegrityAllowed=$apkIntegrityAllowed"
+        )
 
         try {
             val filter = IntentFilter("com.example.TOGGLE_CHANGED")
@@ -539,7 +561,10 @@ private val processingTimeoutRunnable = Runnable {
                 // Auto Accept is the MASTER runtime switch.
         serviceScope.launch {
             prefs.appSettings.collectLatest { settings ->
-                if (settings.isAutoAcceptActive) {
+                if (
+                    settings.isAutoAcceptActive &&
+                    apkIntegrityAllowed
+                ) {
                     showActiveServiceNotification()
                     startUberWindowPolling()
                 } else {
@@ -1575,6 +1600,13 @@ private val processingTimeoutRunnable = Runnable {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
+
+        // APK_SIGNATURE_TAMPER_LOCK_V1
+        // Single volatile Boolean read only. No hashing, PackageManager lookup,
+        // Firebase call, or other security work happens on a live order event.
+        if (!apkIntegrityAllowed) {
+            return
+        }
 
         // MASTER OFF: do not read ride-app accessibility events.
         if (!preferencesManager.isAutoAcceptEnabled) {

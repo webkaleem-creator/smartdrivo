@@ -81,6 +81,7 @@ import com.example.ui.screens.ProfileSetupScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SecurityLockScreen
 import com.example.ui.screens.UpdateRequiredScreen
+import com.example.ui.screens.TamperLockScreen
 import com.example.ui.screens.MembershipLockedOverlay
 import com.example.ui.screens.SplashScreen
 import com.example.ui.screens.WelcomeScreen
@@ -116,6 +117,7 @@ object Routes {
     const val FINISH_SETUP = "finish_setup"
     const val SECURITY_LOCK = "security_lock"
     const val UPDATE_REQUIRED = "update_required"
+    const val TAMPER_LOCK = "tamper_lock"
 }
 
 private data class NavItemData(
@@ -189,6 +191,15 @@ class MainActivity : ComponentActivity() {
 
     private fun checkAndApplyAutoAcceptOnResume() {
         try {
+            if (
+                ::preferencesManager.isInitialized &&
+                !preferencesManager.apkSignatureValid.value
+            ) {
+                preferencesManager.isPendingAutoAcceptActivation = false
+                preferencesManager.setAutoAcceptActive(false)
+                return
+            }
+
             if (::preferencesManager.isInitialized && preferencesManager.isPendingAutoAcceptActivation) {
                 val hasAccessibility = PermissionHelper.isAccessibilityPermissionGranted(applicationContext)
                 val hasOverlay = PermissionHelper.isOverlayPermissionGranted(applicationContext)
@@ -247,6 +258,10 @@ fun SmartDrivoApp(
 
     val forceUpdateUrl by
         prefs.forceUpdateUrl.collectAsState()
+
+    // APK_SIGNATURE_TAMPER_LOCK_V1
+    val apkSignatureValid by
+        prefs.apkSignatureValid.collectAsState()
 
     val isUserAdmin = userProfile.isAdmin
     val firebaseUser = PhoneAuthManager.getAuthInstance()?.currentUser
@@ -325,7 +340,9 @@ fun SmartDrivoApp(
         val admin = userProfile.isAdmin
         val hasAllPermissions = checkAllPermissionsGranted()
 
-        if (!loggedIn) {
+        if (!prefs.apkSignatureValid.value) {
+            Routes.TAMPER_LOCK
+        } else if (!loggedIn) {
             Routes.WELCOME
         } else if (!admin && (!userProfile.isActive || !userProfile.isDeviceAuthorized)) {
             Routes.SECURITY_LOCK
@@ -374,6 +391,7 @@ fun SmartDrivoApp(
         currentRoute in mainRoutes &&
             isLoggedIn &&
             !isSecurityBlocked &&
+            apkSignatureValid &&
             !isForceUpdateRequired &&
             (isUserAdmin || isProfileComplete)
 
@@ -409,6 +427,17 @@ fun SmartDrivoApp(
         isForceUpdateRequired
     ) {
         if (isForceUpdateRequired) {
+            prefs.setAutoAcceptActive(false)
+        }
+    }
+
+    // APK_SIGNATURE_TAMPER_LOCK_V1
+    // Local certificate result is already in RAM. No network/package scan is
+    // performed in the live order parser.
+    LaunchedEffect(
+        apkSignatureValid
+    ) {
+        if (!apkSignatureValid) {
             prefs.setAutoAcceptActive(false)
         }
     }
@@ -474,11 +503,11 @@ fun SmartDrivoApp(
         }
     }
     // Gate Check Enforcer:
-    // Authentication + security + minimum-version + profile remain mandatory.
-    // Membership is different: users may enter the app shell,
-    // but ride features are covered by a membership lock overlay.
+    // APK signature + authentication + security + minimum-version + profile
+    // remain mandatory. Membership uses the separate locked preview.
     LaunchedEffect(
         currentRoute,
+        apkSignatureValid,
         isLoggedIn,
         isSecurityBlocked,
         isForceUpdateRequired,
@@ -486,7 +515,20 @@ fun SmartDrivoApp(
     ) {
         if (currentRoute == null) return@LaunchedEffect
 
-        if (!isLoggedIn) {
+        if (!apkSignatureValid) {
+            if (currentRoute != Routes.TAMPER_LOCK) {
+                navController.navigate(Routes.TAMPER_LOCK) {
+                    popUpTo(0) { inclusive = true }
+                }
+            }
+        } else if (currentRoute == Routes.TAMPER_LOCK) {
+            navController.navigate(
+                if (isLoggedIn) Routes.HOME
+                else Routes.WELCOME
+            ) {
+                popUpTo(0) { inclusive = true }
+            }
+        } else if (!isLoggedIn) {
             if (currentRoute !in authRoutes) {
                 navController.navigate(Routes.WELCOME) {
                     popUpTo(0) { inclusive = true }
@@ -612,7 +654,11 @@ fun SmartDrivoApp(
                     val admin = userProfile.isAdmin
                     val hasAllPermissions = checkAllPermissionsGranted()
                     prefs.hasOpenedBefore = true
-                    if (!loggedIn) {
+                    if (!apkSignatureValid) {
+                        navController.navigate(Routes.TAMPER_LOCK) {
+                            popUpTo(Routes.SPLASH) { inclusive = true }
+                        }
+                    } else if (!loggedIn) {
                         navController.navigate(Routes.WELCOME) {
                             popUpTo(Routes.SPLASH) { inclusive = true }
                         }
@@ -652,6 +698,16 @@ fun SmartDrivoApp(
                     popUpTo(Routes.GUEST) { inclusive = true }
                 }
             }
+        }
+
+        // APK_SIGNATURE_TAMPER_LOCK_V1
+        composable(Routes.TAMPER_LOCK) {
+            TamperLockScreen(
+                officialDownloadUrl =
+                    forceUpdateUrl.ifBlank {
+                        "https://t.me/smartdrivo"
+                    }
+            )
         }
 
         // DEVICE_LOCK_V1
