@@ -1372,28 +1372,52 @@ private val processingTimeoutRunnable = Runnable {
         ).containsMatchIn(joined)
     }
 
+    // RAPIDO_AUTO_PRIORITY_SINGLE_PASS_V1
     // RAPIDO_AUTO_PRIORITY_PRECLICK_DROP_V2
-    // Reuses the same lightweight pre-click scan slot that was already used
-    // to re-check Auto Priority on clickRoot. No extra tree traversal is added.
-    private data class RapidoAutoPriorityPreClickScan(
+    // Legacy drop-history behavior preserved inside the new single pass.
+    // One pre-click tree traversal captures:
+    // 1) Auto Priority marker
+    // 2) strict Accept node
+    // 3) full drop-address snapshot for History
+    //
+    // No fare/filter evaluation is added here. Auto Priority still bypasses
+    // all ride filters, and the normal Rapido path is untouched.
+    private data class RapidoAutoPrioritySinglePassScan(
         val hasPriority: Boolean,
-        val dropAddress: String?
+        val acceptNode: AccessibilityNodeInfo?,
+        val dropAddress: String?,
+        val visitedNodes: Int
     )
 
-    private fun scanRapidoAutoPriorityPreClick(
+    private fun scanRapidoAutoPrioritySinglePass(
         root: AccessibilityNodeInfo?
-    ): RapidoAutoPriorityPreClickScan {
+    ): RapidoAutoPrioritySinglePassScan {
         if (root == null) {
-            return RapidoAutoPriorityPreClickScan(
+            return RapidoAutoPrioritySinglePassScan(
                 hasPriority = false,
-                dropAddress = null
+                acceptNode = null,
+                dropAddress = null,
+                visitedNodes = 0
             )
         }
 
         val pieces =
-            ArrayList<String>(32)
+            ArrayList<String>(40)
+
+        val queue =
+            ArrayDeque<AccessibilityNodeInfo>()
+
+        queue.add(root)
 
         var visited = 0
+        var hasPriorityFast = false
+        var acceptNode:
+            AccessibilityNodeInfo? = null
+
+        var explicitDrop:
+            String? = null
+
+        var previousNormalized = ""
 
         fun addPiece(
             raw: String?,
@@ -1409,9 +1433,39 @@ private val processingTimeoutRunnable = Runnable {
 
             pieces.add(clean)
 
+            val normalized =
+                clean.replace(
+                    Regex("""\s+"""),
+                    " "
+                )
+                    .trim()
+                    .lowercase(
+                        Locale.ROOT
+                    )
+
+            if (
+                normalized.contains(
+                    Regex(
+                        """(?:^|\s)auto\s+priority(?:\s|$)""",
+                        RegexOption.IGNORE_CASE
+                    )
+                ) ||
+                (
+                    previousNormalized == "auto" &&
+                    normalized == "priority"
+                )
+            ) {
+                hasPriorityFast = true
+            }
+
+            previousNormalized =
+                normalized
+
             val id =
                 viewId
-                    ?.lowercase()
+                    ?.lowercase(
+                        Locale.ROOT
+                    )
                     .orEmpty()
 
             if (
@@ -1420,21 +1474,35 @@ private val processingTimeoutRunnable = Runnable {
                 id.contains("destination") ||
                 id.contains("tv_drop")
             ) {
-                pieces.add(
+                val tagged =
                     "Drop: $clean"
-                )
+
+                pieces.add(tagged)
+
+                if (explicitDrop == null) {
+                    explicitDrop =
+                        try {
+                            RapidoAdapter
+                                .extractAutoPriorityDropAddressFromTexts(
+                                    listOf(tagged)
+                                )
+                                ?.trim()
+                                ?.takeIf {
+                                    it.isNotBlank()
+                                }
+                        } catch (_: Exception) {
+                            null
+                        }
+                }
             }
         }
 
-        fun scan(
-            node: AccessibilityNodeInfo?
+        while (
+            queue.isNotEmpty() &&
+            visited < 300
         ) {
-            if (
-                node == null ||
-                visited >= 120
-            ) {
-                return
-            }
+            val node =
+                queue.removeFirst()
 
             visited++
 
@@ -1454,36 +1522,86 @@ private val processingTimeoutRunnable = Runnable {
                     viewId
                 )
 
+                if (
+                    acceptNode == null &&
+                    isStrictAcceptNode(node)
+                ) {
+                    acceptNode =
+                        node
+                }
+
+                val strictContainer =
+                    acceptNode == null &&
+                        node.isClickable &&
+                        isStrictButtonContainer(
+                            node
+                        )
+
                 for (
                     i in
                     0 until node.childCount
                 ) {
-                    if (visited >= 120) {
-                        break
+                    val child =
+                        node.getChild(i)
+                            ?: continue
+
+                    if (
+                        strictContainer &&
+                        acceptNode == null
+                    ) {
+                        val cText =
+                            child.text
+                                ?.toString()
+                                ?.trim()
+                                .orEmpty()
+
+                        val cDesc =
+                            child.contentDescription
+                                ?.toString()
+                                ?.trim()
+                                .orEmpty()
+
+                        val hasAccept =
+                            cText.contains("Accept") ||
+                                cText.contains("ACCEPT") ||
+                                cDesc.contains("Accept") ||
+                                cDesc.contains("ACCEPT")
+
+                        if (hasAccept) {
+                            acceptNode =
+                                node
+                        }
                     }
 
-                    scan(
-                        node.getChild(i)
-                    )
+                    queue.add(child)
+                }
+
+                // Strongest/fastest case: all three required values are already
+                // known from reliable nodes. Stop before walking the rest.
+                if (
+                    hasPriorityFast &&
+                    acceptNode != null &&
+                    explicitDrop != null
+                ) {
+                    break
                 }
             } catch (_: Exception) {
             }
         }
 
-        scan(root)
-
         val hasPriority =
-            pieces.any {
-                it.replace(
-                    Regex("""\s+"""),
-                    " "
-                )
-                    .trim()
-                    .equals(
-                        "Auto Priority",
-                        ignoreCase = true
+            hasPriorityFast ||
+                pieces.any {
+                    it.replace(
+                        Regex("""\s+"""),
+                        " "
                     )
-            } ||
+                        .trim()
+                        .equals(
+                            "Auto Priority",
+                            ignoreCase = true
+                        )
+                } ||
                 Regex(
                     """(?i)(?:^|\s)auto\s+priority(?:\s|$)"""
                 ).containsMatchIn(
@@ -1498,41 +1616,78 @@ private val processingTimeoutRunnable = Runnable {
 
         val dropAddress =
             if (hasPriority) {
-                try {
-                    RapidoAdapter
-                        .extractAutoPriorityDropAddressFromTexts(
-                            pieces
-                        )
-                        ?.trim()
-                        ?.takeIf {
-                            it.isNotBlank()
-                        }
-                } catch (_: Exception) {
-                    null
-                }
+                explicitDrop
+                    ?: try {
+                        RapidoAdapter
+                            .extractAutoPriorityDropAddressFromTexts(
+                                pieces
+                            )
+                            ?.trim()
+                            ?.takeIf {
+                                it.isNotBlank()
+                            }
+                    } catch (_: Exception) {
+                        null
+                    }
             } else {
                 null
             }
 
-        return RapidoAutoPriorityPreClickScan(
+        return RapidoAutoPrioritySinglePassScan(
             hasPriority =
                 hasPriority,
+            acceptNode =
+                acceptNode,
             dropAddress =
-                dropAddress
+                dropAddress,
+            visitedNodes =
+                visited
         )
     }
 
+
     private fun clickRapidoAutoPriorityStrictAccept(
-        root: AccessibilityNodeInfo
+        root: AccessibilityNodeInfo,
+        prevalidatedAcceptNode:
+            AccessibilityNodeInfo? = null
     ): Boolean {
         val rootPkg = root.packageName?.toString().orEmpty()
         if (!isRapidoPackage(rootPkg)) return false
 
-        val acceptNode = findStrictRapidoAcceptNode(root) ?: return false
-        val acceptPkg = acceptNode.packageName?.toString().orEmpty()
+        // RAPIDO_AUTO_PRIORITY_SINGLE_PASS_V1
+        // Reuse the node already found by the single pre-click scan.
+        // Fallback search is retained only for defensive compatibility.
+        val acceptNode =
+            prevalidatedAcceptNode
+                ?: findStrictRapidoAcceptNode(
+                    root
+                )
+                ?: return false
 
-        if (!isRapidoPackage(acceptPkg) && !isRapidoPackage(rootPkg)) return false
-        if (isOrderCardOrDetailsNode(acceptNode)) return false
+        val acceptPkg =
+            acceptNode.packageName
+                ?.toString()
+                .orEmpty()
+
+        if (
+            !isRapidoPackage(acceptPkg) &&
+            !isRapidoPackage(rootPkg)
+        ) {
+            return false
+        }
+
+        if (isOrderCardOrDetailsNode(acceptNode)) {
+            return false
+        }
+
+        if (
+            !isStrictAcceptNode(acceptNode) &&
+            !isStrictButtonContainer(
+                acceptNode
+            )
+        ) {
+            return false
+        }
 
         try {
             if (acceptNode.isClickable && acceptNode.isEnabled && acceptNode.isVisibleToUser) {
@@ -1598,59 +1753,110 @@ private val processingTimeoutRunnable = Runnable {
         if (eventSource == null) return false
         if (!preferencesManager.isAutoAcceptEnabled) return false
 
-        val sourcePkg = eventSource.packageName?.toString().orEmpty()
-        if (!isRapidoPackage(sourcePkg)) return false
+        val sourcePkg =
+            eventSource.packageName
+                ?.toString()
+                .orEmpty()
+
+        if (!isRapidoPackage(sourcePkg)) {
+            return false
+        }
 
         // RAM-only account/platform gates; no ride values are read here.
-        val settings = prefs.appSettings.value
-        val profile = prefs.userProfile.value
+        val settings =
+            prefs.appSettings.value
+
+        val profile =
+            prefs.userProfile.value
 
         if (!settings.rapidoEnabled) return false
         if (!profile.isPlanValid && !profile.isAdmin) return false
 
-        val topRoot = getTopRootNode(eventSource) ?: eventSource
-        val hasPriority =
-            containsRapidoAutoPriorityFast(eventSource) ||
-                (topRoot !== eventSource && containsRapidoAutoPriorityFast(topRoot))
+        // RAPIDO_AUTO_PRIORITY_SINGLE_PASS_V1
+        // First try the exact changed subtree. In the common case this one pass
+        // gives us Auto Priority + Accept node + full drop snapshot.
+        val fastPathStartedNs =
+            System.nanoTime()
 
-        if (!hasPriority) return false
-
-        // Consume every Auto Priority event: never fall through to normal filters.
-        lastValidRapidoPopupAt = System.currentTimeMillis()
-
-        val now = System.currentTimeMillis()
-        if (rapidoAutoPriorityFastBusy || now - rapidoAutoPriorityLastClickAt < 450L) {
-            return true
-        }
-
-        val clickRoot =
-            if (
-                findStrictRapidoAcceptNode(
-                    eventSource
-                ) != null
-            ) {
+        val sourceScan =
+            scanRapidoAutoPrioritySinglePass(
                 eventSource
-            } else {
-                topRoot
-            }
-
-        // RAPIDO_AUTO_PRIORITY_PRECLICK_DROP_V2
-        // This REPLACES the old final containsAutoPriority scan. It does not
-        // add another accessibility-tree pass before the Accept click.
-        val preClickScan =
-            scanRapidoAutoPriorityPreClick(
-                clickRoot
             )
 
-        if (!preClickScan.hasPriority) {
+        val topRoot =
+            getTopRootNode(
+                eventSource
+            ) ?: eventSource
+
+        var clickRoot =
+            eventSource
+
+        var finalScan =
+            sourceScan
+
+        // Only promote to the top root when the changed subtree did not contain
+        // enough information to click safely. This replaces the old repeated
+        // contains/find/scan/find sequence.
+        if (
+            (
+                !sourceScan.hasPriority ||
+                    sourceScan.acceptNode == null
+            ) &&
+            topRoot !== eventSource
+        ) {
+            val topScan =
+                scanRapidoAutoPrioritySinglePass(
+                    topRoot
+                )
+
+            if (
+                sourceScan.hasPriority ||
+                topScan.hasPriority
+            ) {
+                clickRoot =
+                    topRoot
+
+                finalScan =
+                    RapidoAutoPrioritySinglePassScan(
+                        hasPriority =
+                            sourceScan.hasPriority ||
+                                topScan.hasPriority,
+                        acceptNode =
+                            topScan.acceptNode
+                                ?: sourceScan.acceptNode,
+                        dropAddress =
+                            topScan.dropAddress
+                                ?: sourceScan.dropAddress,
+                        visitedNodes =
+                            sourceScan.visitedNodes +
+                                topScan.visitedNodes
+                    )
+            }
+        }
+
+        if (!finalScan.hasPriority) {
+            return false
+        }
+
+        // Consume every Auto Priority event: never fall through to normal filters.
+        lastValidRapidoPopupAt =
+            System.currentTimeMillis()
+
+        val now =
+            System.currentTimeMillis()
+
+        if (
+            rapidoAutoPriorityFastBusy ||
+            now - rapidoAutoPriorityLastClickAt <
+                450L
+        ) {
             return true
         }
 
-        if (
-            findStrictRapidoAcceptNode(
-                clickRoot
-            ) == null
-        ) {
+        val acceptNode =
+            finalScan.acceptNode
+
+        if (acceptNode == null) {
             Log.d(
                 TAG,
                 "AUTO PRIORITY detected; waiting only for strict Accept node"
@@ -1659,40 +1865,78 @@ private val processingTimeoutRunnable = Runnable {
         }
 
         val preClickDropAddress =
-            preClickScan.dropAddress
+            finalScan.dropAddress
 
-        rapidoAutoPriorityFastBusy = true
-        rapidoAutoPriorityLastClickAt = now
+        rapidoAutoPriorityFastBusy =
+            true
 
-        val startedNs = System.nanoTime()
-        val sent = clickRapidoAutoPriorityStrictAccept(clickRoot)
+        rapidoAutoPriorityLastClickAt =
+            now
+
+        val clickStartedNs =
+            System.nanoTime()
+
+        val sent =
+            clickRapidoAutoPriorityStrictAccept(
+                root =
+                    clickRoot,
+                prevalidatedAcceptNode =
+                    acceptNode
+            )
 
         if (!sent) {
-            rapidoAutoPriorityFastBusy = false
-            Log.w(TAG, "AUTO PRIORITY detected but strict Accept action was not dispatched")
+            rapidoAutoPriorityFastBusy =
+                false
+
+            Log.w(
+                TAG,
+                "AUTO PRIORITY detected but strict Accept action was not dispatched"
+            )
             return true
         }
 
+        // Logging happens AFTER the click so formatting cannot delay first tap.
+        val preClickMs =
+            (
+                clickStartedNs -
+                    fastPathStartedNs
+            ) / 1_000_000.0
+
+        val clickMs =
+            (
+                System.nanoTime() -
+                    clickStartedNs
+            ) / 1_000_000.0
+
         Log.i(
             TAG,
-            "RAPIDO AUTO PRIORITY SUPER FAST: click dispatched in " +
+            "RAPIDO AUTO PRIORITY SINGLE PASS: " +
+                "preClick=" +
                 String.format(
                     Locale.ENGLISH,
                     "%.2f ms",
-                    (System.nanoTime() - startedNs) / 1_000_000.0
+                    preClickMs
                 ) +
+                " | click=" +
+                String.format(
+                    Locale.ENGLISH,
+                    "%.2f ms",
+                    clickMs
+                ) +
+                " | nodes=${finalScan.visitedNodes}" +
                 " | ALL FILTERS BYPASSED"
         )
 
         // AFTER first click: History/overlay + verification.
-        // Drop address was snapshotted before click from the same existing
-        // lightweight scan because the Rapido offer can disappear immediately.
-        serviceScope.launch(Dispatchers.IO) {
+        // Full drop address remains available from the pre-click snapshot.
+        serviceScope.launch(
+            Dispatchers.IO
+        ) {
             finalizeRapidoAutoPriorityAfterClick(
                 clickRoot =
                     clickRoot,
                 startedNs =
-                    startedNs,
+                    clickStartedNs,
                 preClickDropAddress =
                     preClickDropAddress
             )
@@ -1700,6 +1944,7 @@ private val processingTimeoutRunnable = Runnable {
 
         return true
     }
+
 
     private suspend fun finalizeRapidoAutoPriorityAfterClick(
         clickRoot: AccessibilityNodeInfo,
