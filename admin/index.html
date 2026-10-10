@@ -652,6 +652,11 @@
     let currentAdminEmail = sessionStorage.getItem('smartdrivo_admin_email') || '';
     let liveDrivers = [];
     let livePayments = [];
+
+    // SECURITY_STATUS_ADMIN_V1
+    // Live permanent device-block metadata, keyed by privacy-safe device hash.
+    let liveBlockedDevices = new Map();
+
     let activePaymentFilter = 'PENDING'; // 'PENDING' or 'ALL'
 
     // Tab Navigation
@@ -725,6 +730,123 @@
       } catch (e) {
         return 'N/A';
       }
+    }
+
+    // SECURITY_STATUS_ADMIN_V1
+    function formatRelativeLastSeen(ts) {
+      const value = Number(ts) || 0;
+      if (!value) return 'Not reported yet';
+
+      const age = Math.max(0, Date.now() - value);
+      const minute = 60 * 1000;
+      const hour = 60 * minute;
+      const day = 24 * hour;
+
+      if (age < minute) return 'Just now';
+      if (age < hour) return `${Math.floor(age / minute)} min ago`;
+      if (age < day) return `${Math.floor(age / hour)} hr ago`;
+      if (age < 7 * day) return `${Math.floor(age / day)} day ago`;
+
+      return formatTime(value);
+    }
+
+    function applyBlockedDeviceSecurityState(driver) {
+      const key =
+        driver.securityDeviceKey ||
+        driver.trialDeviceKey ||
+        '';
+
+      const blocked =
+        key
+          ? liveBlockedDevices.get(key)
+          : null;
+
+      return {
+        ...driver,
+        deviceBlacklisted: !!blocked,
+        deviceBlacklistReason:
+          blocked && blocked.reason
+            ? blocked.reason
+            : ''
+      };
+    }
+
+    function getDriverSecurityStatus(driver) {
+      if (driver.isAdmin) {
+        return {
+          label: 'Protected Admin',
+          icon: 'fa-shield-halved',
+          color: '#60A5FA',
+          background: 'rgba(37,99,235,.18)',
+          reason: 'Administrator security bypass'
+        };
+      }
+
+      if (driver.isBlocked) {
+        return {
+          label: 'Account Blocked',
+          icon: 'fa-user-slash',
+          color: '#FCA5A5',
+          background: 'rgba(220,38,38,.18)',
+          reason:
+            driver.blockReason ||
+            'Blocked by SmartDrivo Admin'
+        };
+      }
+
+      if (driver.deviceBlacklisted) {
+        return {
+          label: 'Device Blocked',
+          icon: 'fa-ban',
+          color: '#FCA5A5',
+          background: 'rgba(220,38,38,.18)',
+          reason:
+            driver.deviceBlacklistReason ||
+            'Device blacklisted by SmartDrivo Admin'
+        };
+      }
+
+      if (!driver.isActive) {
+        return {
+          label: 'App Locked',
+          icon: 'fa-lock',
+          color: '#FBBF24',
+          background: 'rgba(245,158,11,.16)',
+          reason: 'Remote app lock is active'
+        };
+      }
+
+      if (driver.deviceChangeRequested) {
+        return {
+          label: 'Device Change Pending',
+          icon: 'fa-mobile-screen-button',
+          color: '#60A5FA',
+          background: 'rgba(37,99,235,.16)',
+          reason:
+            `Waiting for approval: ${
+              driver.requestedDeviceName ||
+              'new phone'
+            }`
+        };
+      }
+
+      if (driver.activeSessionId) {
+        return {
+          label: 'Secure Session Active',
+          icon: 'fa-circle-check',
+          color: '#34D399',
+          background: 'rgba(16,185,129,.15)',
+          reason: 'Account and session currently allowed'
+        };
+      }
+
+      return {
+        label: 'Active',
+        icon: 'fa-circle-check',
+        color: '#34D399',
+        background: 'rgba(16,185,129,.15)',
+        reason: 'No security lock reported'
+      };
     }
 
     function formatExpiry(expiryMillis, isAdmin) {
@@ -937,6 +1059,23 @@
         canonical.deviceBlacklisted =
           group.some(x => x.deviceBlacklisted === true);
 
+        // SECURITY_STATUS_ADMIN_V1
+        const activeSessionSource =
+          sorted.find(x => x.activeSessionId) ||
+          canonical;
+
+        canonical.activeSessionId =
+          activeSessionSource.activeSessionId || '';
+
+        canonical.activeSessionDevice =
+          activeSessionSource.activeSessionDevice || '';
+
+        canonical.activeSessionStartedAt =
+          Number(activeSessionSource.activeSessionStartedAt) || 0;
+
+        canonical.activeSessionAppVersion =
+          activeSessionSource.activeSessionAppVersion || '';
+
         return canonical;
       });
     }
@@ -960,6 +1099,15 @@
             registeredAppVersion: d.registeredAppVersion || d.lastAppVersion || '',
             lastDevice: d.lastDevice || d.registeredDevice || '',
             lastSeenAt: Number(d.lastSeenAt) || 0,
+
+            // SECURITY_STATUS_ADMIN_V1
+            activeSessionId: d.activeSessionId || '',
+            activeSessionDevice: d.activeSessionDevice || '',
+            activeSessionStartedAt:
+              Number(d.activeSessionStartedAt) || 0,
+            activeSessionAppVersion:
+              d.activeSessionAppVersion || '',
+
             plan: d.plan || 'NONE',
             planPrice: Number(d.planPrice) || 0,
             planExpireMillis: Number(d.planExpireMillis) || 0,
@@ -989,7 +1137,9 @@
           });
         });
 
-        liveDrivers = collapseDuplicateDrivers(rawDrivers);
+        liveDrivers =
+          collapseDuplicateDrivers(rawDrivers)
+            .map(applyBlockedDeviceSecurityState);
 
         const hiddenDuplicateCount =
           Math.max(0, rawDrivers.length - liveDrivers.length);
@@ -1022,6 +1172,47 @@
         console.error("Firestore users listener error:", error);
         logMessage(`Firestore /users listener error: ${error.message}`);
         showToast("Error streaming drivers: " + error.message, "error");
+      });
+
+      // SECURITY_STATUS_ADMIN_V1
+      // Live permanent device blacklist status/reason for Security Status.
+      db.collection('blockedDevices').onSnapshot((snapshot) => {
+        const next = new Map();
+
+        snapshot.forEach((doc) => {
+          const d = doc.data() || {};
+
+          if (d.active !== false) {
+            next.set(
+              doc.id,
+              {
+                reason:
+                  d.reason ||
+                  'Device blacklisted by SmartDrivo Admin',
+                blockedAt:
+                  Number(d.blockedAt) || 0
+              }
+            );
+          }
+        });
+
+        liveBlockedDevices = next;
+
+        liveDrivers =
+          liveDrivers.map(
+            applyBlockedDeviceSecurityState
+          );
+
+        renderDriversTable();
+
+        logMessage(
+          `Security Status: ${next.size} active device blacklist record(s) loaded.`
+        );
+      }, (error) => {
+        console.warn(
+          "Blocked devices listener notice:",
+          error.message
+        );
       });
 
       // B. Listen to /payments collection
@@ -1136,8 +1327,34 @@
         const city = (d.city || '').toLowerCase();
         const state = (d.state || '').toLowerCase();
         const vehicle = (d.vehicleType || '').toLowerCase();
-        const device = (d.registeredDevice || d.lastDevice || '').toLowerCase();
-        return name.includes(query) || phone.includes(query) || email.includes(query) || city.includes(query) || state.includes(query) || vehicle.includes(query) || device.includes(query);
+        const device = (
+          d.activeSessionDevice ||
+          d.registeredDevice ||
+          d.lastDevice ||
+          ''
+        ).toLowerCase();
+        const appVersion = (
+          d.activeSessionAppVersion ||
+          d.registeredAppVersion ||
+          ''
+        ).toLowerCase();
+        const blockReason = (
+          d.blockReason ||
+          d.deviceBlacklistReason ||
+          ''
+        ).toLowerCase();
+
+        return (
+          name.includes(query) ||
+          phone.includes(query) ||
+          email.includes(query) ||
+          city.includes(query) ||
+          state.includes(query) ||
+          vehicle.includes(query) ||
+          device.includes(query) ||
+          appVersion.includes(query) ||
+          blockReason.includes(query)
+        );
       });
 
       if (filtered.length === 0) {
@@ -1243,6 +1460,21 @@ actionCell = `
           `;
         }
 
+        // SECURITY_STATUS_ADMIN_V1
+        const securityStatus =
+          getDriverSecurityStatus(driver);
+
+        const activeDevice =
+          driver.activeSessionDevice ||
+          driver.registeredDevice ||
+          driver.lastDevice ||
+          'Not captured';
+
+        const activeAppVersion =
+          driver.activeSessionAppVersion ||
+          driver.registeredAppVersion ||
+          'Unknown';
+
         html += `
           <tr>
             <td>
@@ -1282,18 +1514,54 @@ actionCell = `
                    </div>`
                 : ''
               }
+
+              <!-- SECURITY_STATUS_ADMIN_V1 -->
+              <div style="margin-top:8px; padding-top:7px; border-top:1px solid rgba(148,163,184,.16);">
+                <div style="font-size:10px; color:#CBD5E1;">
+                  <strong>Active Device:</strong>
+                  ${escapeHtml(activeDevice)}
+                </div>
+                <div style="font-size:10px; color:#CBD5E1; margin-top:2px;">
+                  <strong>App:</strong>
+                  ${escapeHtml(activeAppVersion)}
+                </div>
+                <div
+                  style="font-size:10px; color:#94A3B8; margin-top:2px;"
+                  title="${escapeHtml(formatTime(driver.lastSeenAt))}"
+                >
+                  <strong>Last Seen:</strong>
+                  ${escapeHtml(formatRelativeLastSeen(driver.lastSeenAt))}
+                </div>
+                <div style="font-size:10px; color:#94A3B8; margin-top:2px;">
+                  <strong>Session:</strong>
+                  ${
+                    driver.activeSessionId
+                      ? `Active since ${escapeHtml(formatTime(driver.activeSessionStartedAt))}`
+                      : 'Not claimed yet'
+                  }
+                </div>
+              </div>
             </td>
             <td><strong>${escapeHtml(driver.plan === 'FREE_TRIAL' ? '1-Day Free Trial' : driver.plan)}</strong> <span style="font-size: 11px; color: var(--text-dim);">${driver.planPrice ? `(₹${driver.planPrice})` : ''}</span></td>
             <td>${formatExpiry(driver.planExpireMillis, driver.isAdmin)}</td>
             <td>
-              ${driver.isBlocked
-                ? '<span class="badge badge-rejected"><i class="fa-solid fa-ban"></i> Blocked</span>'
-                : (
-                    driver.isActive
-                      ? '<span class="badge badge-approved"><i class="fa-solid fa-circle-check"></i> Active</span>'
-                      : '<span class="badge badge-rejected"><i class="fa-solid fa-lock"></i> Locked</span>'
-                  )
-              }
+              <!-- SECURITY_STATUS_ADMIN_V1 -->
+              <span
+                class="badge"
+                style="
+                  background:${securityStatus.background};
+                  color:${securityStatus.color};
+                  border:1px solid ${securityStatus.color}33;
+                "
+              >
+                <i class="fa-solid ${securityStatus.icon}"></i>
+                ${escapeHtml(securityStatus.label)}
+              </span>
+
+              <div style="font-size:10px; color:#CBD5E1; margin-top:6px; max-width:190px; line-height:1.35;">
+                <strong>Reason:</strong>
+                ${escapeHtml(securityStatus.reason)}
+              </div>
 
               ${driver.deviceChangeRequested
                 ? '<div style="margin-top:5px;"><span class="badge" style="background:rgba(37,99,235,.18);color:#60A5FA;">Device Change Request</span></div>'
