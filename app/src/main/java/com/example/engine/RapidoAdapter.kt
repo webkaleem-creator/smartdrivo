@@ -332,6 +332,169 @@ object RapidoAdapter {
     // RAPIDO_AUTO_PRIORITY_DROP_AFTER_CLICK_V1
     // Auto Priority is clicked FIRST. This helper runs only AFTER that click
     // to recover the visible destination for History/overlay.
+    // RAPIDO_AUTO_PRIORITY_PRECLICK_DROP_V2
+    // Pure text helper used by the fast Auto Priority pre-click snapshot.
+    // It does not traverse Accessibility nodes itself.
+    fun extractAutoPriorityDropAddressFromTexts(
+        texts: List<String>
+    ): String? {
+        if (texts.isEmpty()) {
+            return null
+        }
+
+        fun usableAddress(
+            raw: String?
+        ): String? {
+            val clean =
+                cleanRapidoAddress(raw)
+
+            if (clean.length < 3) {
+                return null
+            }
+
+            val lower =
+                clean.lowercase()
+
+            if (
+                lower == "drop" ||
+                lower == "destination" ||
+                lower == "to" ||
+                lower == "pickup" ||
+                lower == "nearby" ||
+                lower == "accept" ||
+                lower == "auto" ||
+                lower == "services" ||
+                lower.contains(
+                    "auto priority"
+                ) ||
+                lower.contains(
+                    "priority order"
+                ) ||
+                lower.contains(
+                    "all ride filters"
+                ) ||
+                lower.contains(
+                    "checking order status"
+                ) ||
+                lower.contains(
+                    "thanks for accepting"
+                )
+            ) {
+                return null
+            }
+
+            if (
+                KM_REGEX.containsMatchIn(
+                    clean
+                ) ||
+                RUPEE_AMOUNT_REGEX
+                    .matcher(clean)
+                    .find()
+            ) {
+                return null
+            }
+
+            if (
+                isInvalidAddress(clean) ||
+                matchesBlocklist(clean)
+            ) {
+                return null
+            }
+
+            return clean
+        }
+
+        // Strongest fast-snapshot source. The service prefixes text from
+        // destination/drop view IDs with "Drop:" during the same tree scan.
+        for (raw in texts) {
+            val trimmed =
+                raw.trim()
+
+            val lower =
+                trimmed.lowercase()
+
+            if (
+                lower.startsWith(
+                    "drop:"
+                ) ||
+                lower.startsWith(
+                    "destination:"
+                )
+            ) {
+                usableAddress(
+                    trimmed.substringAfter(
+                        ":"
+                    )
+                )?.let {
+                    return it
+                }
+            }
+        }
+
+        // Explicit label followed by its value.
+        for (i in texts.indices) {
+            val lower =
+                texts[i]
+                    .trim()
+                    .lowercase()
+
+            if (
+                lower == "drop" ||
+                lower == "destination" ||
+                lower == "to"
+            ) {
+                val end =
+                    minOf(
+                        i + 3,
+                        texts.lastIndex
+                    )
+
+                if (i + 1 <= end) {
+                    for (
+                        j in
+                        (i + 1)..end
+                    ) {
+                        usableAddress(
+                            texts[j]
+                        )?.let {
+                            return it
+                        }
+                    }
+                }
+            }
+        }
+
+        // Rapido normally shows pickup distance, pickup text, trip distance,
+        // then destination. Search after the final visible km row.
+        val lastKmIndex =
+            texts.indexOfLast {
+                KM_REGEX.containsMatchIn(
+                    it
+                )
+            }
+
+        if (lastKmIndex >= 0) {
+            for (
+                i in
+                (lastKmIndex + 1)
+                    until texts.size
+            ) {
+                usableAddress(
+                    texts[i]
+                )?.let {
+                    return it
+                }
+            }
+        }
+
+        // Last conservative fallback: pickup is normally above destination.
+        return texts
+            .asReversed()
+            .firstNotNullOfOrNull {
+                usableAddress(it)
+            }
+    }
+
     fun extractAutoPriorityDropAddressOnly(
         root: AccessibilityNodeInfo?
     ): String? {

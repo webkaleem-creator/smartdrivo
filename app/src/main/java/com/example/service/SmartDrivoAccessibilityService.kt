@@ -1305,6 +1305,156 @@ private val processingTimeoutRunnable = Runnable {
         ).containsMatchIn(joined)
     }
 
+    // RAPIDO_AUTO_PRIORITY_PRECLICK_DROP_V2
+    // Reuses the same lightweight pre-click scan slot that was already used
+    // to re-check Auto Priority on clickRoot. No extra tree traversal is added.
+    private data class RapidoAutoPriorityPreClickScan(
+        val hasPriority: Boolean,
+        val dropAddress: String?
+    )
+
+    private fun scanRapidoAutoPriorityPreClick(
+        root: AccessibilityNodeInfo?
+    ): RapidoAutoPriorityPreClickScan {
+        if (root == null) {
+            return RapidoAutoPriorityPreClickScan(
+                hasPriority = false,
+                dropAddress = null
+            )
+        }
+
+        val pieces =
+            ArrayList<String>(32)
+
+        var visited = 0
+
+        fun addPiece(
+            raw: String?,
+            viewId: String?
+        ) {
+            val clean =
+                raw
+                    ?.trim()
+                    ?.takeIf {
+                        it.isNotEmpty()
+                    }
+                    ?: return
+
+            pieces.add(clean)
+
+            val id =
+                viewId
+                    ?.lowercase()
+                    .orEmpty()
+
+            if (
+                id.contains("drop") ||
+                id.contains("dest") ||
+                id.contains("destination") ||
+                id.contains("tv_drop")
+            ) {
+                pieces.add(
+                    "Drop: $clean"
+                )
+            }
+        }
+
+        fun scan(
+            node: AccessibilityNodeInfo?
+        ) {
+            if (
+                node == null ||
+                visited >= 120
+            ) {
+                return
+            }
+
+            visited++
+
+            try {
+                val viewId =
+                    node.viewIdResourceName
+
+                addPiece(
+                    node.text
+                        ?.toString(),
+                    viewId
+                )
+
+                addPiece(
+                    node.contentDescription
+                        ?.toString(),
+                    viewId
+                )
+
+                for (
+                    i in
+                    0 until node.childCount
+                ) {
+                    if (visited >= 120) {
+                        break
+                    }
+
+                    scan(
+                        node.getChild(i)
+                    )
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        scan(root)
+
+        val hasPriority =
+            pieces.any {
+                it.replace(
+                    Regex("""\s+"""),
+                    " "
+                )
+                    .trim()
+                    .equals(
+                        "Auto Priority",
+                        ignoreCase = true
+                    )
+            } ||
+                Regex(
+                    """(?i)(?:^|\s)auto\s+priority(?:\s|$)"""
+                ).containsMatchIn(
+                    pieces
+                        .joinToString(" ")
+                        .replace(
+                            Regex("""\s+"""),
+                            " "
+                        )
+                        .trim()
+                )
+
+        val dropAddress =
+            if (hasPriority) {
+                try {
+                    RapidoAdapter
+                        .extractAutoPriorityDropAddressFromTexts(
+                            pieces
+                        )
+                        ?.trim()
+                        ?.takeIf {
+                            it.isNotBlank()
+                        }
+                } catch (_: Exception) {
+                    null
+                }
+            } else {
+                null
+            }
+
+        return RapidoAutoPriorityPreClickScan(
+            hasPriority =
+                hasPriority,
+            dropAddress =
+                dropAddress
+        )
+    }
+
     private fun clickRapidoAutoPriorityStrictAccept(
         root: AccessibilityNodeInfo
     ): Boolean {
@@ -1407,14 +1557,42 @@ private val processingTimeoutRunnable = Runnable {
         }
 
         val clickRoot =
-            if (findStrictRapidoAcceptNode(eventSource) != null) eventSource else topRoot
+            if (
+                findStrictRapidoAcceptNode(
+                    eventSource
+                ) != null
+            ) {
+                eventSource
+            } else {
+                topRoot
+            }
 
-        if (!containsRapidoAutoPriorityFast(clickRoot)) return true
+        // RAPIDO_AUTO_PRIORITY_PRECLICK_DROP_V2
+        // This REPLACES the old final containsAutoPriority scan. It does not
+        // add another accessibility-tree pass before the Accept click.
+        val preClickScan =
+            scanRapidoAutoPriorityPreClick(
+                clickRoot
+            )
 
-        if (findStrictRapidoAcceptNode(clickRoot) == null) {
-            Log.d(TAG, "AUTO PRIORITY detected; waiting only for strict Accept node")
+        if (!preClickScan.hasPriority) {
             return true
         }
+
+        if (
+            findStrictRapidoAcceptNode(
+                clickRoot
+            ) == null
+        ) {
+            Log.d(
+                TAG,
+                "AUTO PRIORITY detected; waiting only for strict Accept node"
+            )
+            return true
+        }
+
+        val preClickDropAddress =
+            preClickScan.dropAddress
 
         rapidoAutoPriorityFastBusy = true
         rapidoAutoPriorityLastClickAt = now
@@ -1439,9 +1617,18 @@ private val processingTimeoutRunnable = Runnable {
                 " | ALL FILTERS BYPASSED"
         )
 
-        // AFTER first click only: parse for History/overlay + verify result.
+        // AFTER first click: History/overlay + verification.
+        // Drop address was snapshotted before click from the same existing
+        // lightweight scan because the Rapido offer can disappear immediately.
         serviceScope.launch(Dispatchers.IO) {
-            finalizeRapidoAutoPriorityAfterClick(clickRoot, startedNs)
+            finalizeRapidoAutoPriorityAfterClick(
+                clickRoot =
+                    clickRoot,
+                startedNs =
+                    startedNs,
+                preClickDropAddress =
+                    preClickDropAddress
+            )
         }
 
         return true
@@ -1449,7 +1636,8 @@ private val processingTimeoutRunnable = Runnable {
 
     private suspend fun finalizeRapidoAutoPriorityAfterClick(
         clickRoot: AccessibilityNodeInfo,
-        startedNs: Long
+        startedNs: Long,
+        preClickDropAddress: String?
     ) {
         val baseCandidate =
             try {
@@ -1508,23 +1696,28 @@ private val processingTimeoutRunnable = Runnable {
                 )
             ) {
                 val recoveredDrop =
-                    try {
-                        RapidoAdapter
-                            .extractAutoPriorityDropAddressOnly(
-                                clickRoot
-                            )
-                            ?.trim()
-                            ?.takeIf {
-                                it.isNotBlank()
-                            }
-                    } catch (_: Exception) {
-                        null
-                    }
+                    preClickDropAddress
+                        ?.trim()
+                        ?.takeIf {
+                            it.isNotBlank()
+                        }
+                        ?: try {
+                            RapidoAdapter
+                                .extractAutoPriorityDropAddressOnly(
+                                    clickRoot
+                                )
+                                ?.trim()
+                                ?.takeIf {
+                                    it.isNotBlank()
+                                }
+                        } catch (_: Exception) {
+                            null
+                        }
 
                 if (recoveredDrop != null) {
                     Log.i(
                         TAG,
-                        "AUTO PRIORITY drop recovered after click: $recoveredDrop"
+                        "AUTO PRIORITY drop recovered from pre-click snapshot/fallback: $recoveredDrop"
                     )
 
                     baseCandidate.copy(
