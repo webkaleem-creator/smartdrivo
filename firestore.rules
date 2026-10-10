@@ -78,7 +78,10 @@ service cloud.firestore {
               'freeTrialStartedAt',
               'freeTrialUsed',
               'trialDeviceKey',
-              'trialDeniedReason'
+              'trialDeniedReason',
+              'isBlocked',
+              'blockReason',
+              'blockedAt'
             ]) &&
           (
             !request.resource.data.diff(resource.data).affectedKeys()
@@ -87,6 +90,15 @@ service cloud.firestore {
               (!resource.data.keys().hasAny(['boundInstallId']) || resource.data.boundInstallId == '') &&
               request.resource.data.boundInstallId is string &&
               request.resource.data.boundInstallId != ''
+            )
+          ) &&
+          (
+            !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['securityDeviceKey']) ||
+            (
+              (!resource.data.keys().hasAny(['securityDeviceKey']) || resource.data.securityDeviceKey == '') &&
+              request.resource.data.securityDeviceKey is string &&
+              request.resource.data.securityDeviceKey != ''
             )
           )
         )
@@ -131,6 +143,14 @@ service cloud.firestore {
       );
 
       allow update, delete: if isAdmin();
+    }
+
+    // BLOCKED_USER_DEVICE_BLACKLIST_V1
+    // Permanent device blacklist. Drivers can read the single hash document
+    // for their current device; only admins can list or mutate the blacklist.
+    match /blockedDevices/{deviceKey} {
+      allow get: if isAuthenticated();
+      allow list, create, update, delete: if isAdmin();
     }
 
     // Payments collection rules

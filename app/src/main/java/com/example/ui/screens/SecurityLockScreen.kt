@@ -37,16 +37,49 @@ fun SecurityLockScreen(
     onRequestDeviceChange: () -> Unit,
     onLogout: () -> Unit
 ) {
-    val adminLocked = !profile.isActive
+    // BLOCKED_USER_DEVICE_BLACKLIST_V1
+    val accountBlocked =
+        profile.isBlocked
+
+    val deviceBlacklisted =
+        profile.isDeviceBlacklisted
+
+    val adminLocked =
+        !profile.isActive
+
     val title =
-        if (adminLocked) "SmartDrivo Locked"
-        else "Device Not Authorized"
+        when {
+            accountBlocked ->
+                "Account Blocked"
+
+            deviceBlacklisted ->
+                "Device Blocked"
+
+            adminLocked ->
+                "SmartDrivo Locked"
+
+            else ->
+                "Device Not Authorized"
+        }
 
     val message =
-        if (adminLocked)
-            "This account has been locked by SmartDrivo Admin. Auto Accept and assistant functions are disabled."
-        else
-            "This SmartDrivo account is already linked to another phone. Contact SmartDrivo Admin to approve this device."
+        when {
+            accountBlocked ->
+                profile.blockReason
+                    .takeIf { it.isNotBlank() }
+                    ?: "This SmartDrivo account has been permanently blocked by SmartDrivo Admin."
+
+            deviceBlacklisted ->
+                profile.deviceBlacklistReason
+                    .takeIf { it.isNotBlank() }
+                    ?: "This phone has been blocked from using SmartDrivo."
+
+            adminLocked ->
+                "This account has been locked by SmartDrivo Admin. Auto Accept and assistant functions are disabled."
+
+            else ->
+                "This SmartDrivo account is already linked to another phone. Contact SmartDrivo Admin to approve this device."
+        }
 
     Box(
         modifier = Modifier
@@ -102,6 +135,8 @@ fun SecurityLockScreen(
                 )
 
                 if (
+                    !accountBlocked &&
+                    !deviceBlacklisted &&
                     !adminLocked &&
                     profile.boundDeviceName.isNotBlank()
                 ) {
@@ -118,7 +153,11 @@ fun SecurityLockScreen(
                     )
                 }
 
-                if (!adminLocked) {
+                if (
+                    !accountBlocked &&
+                    !deviceBlacklisted &&
+                    !adminLocked
+                ) {
                     Spacer(
                         modifier = Modifier.height(18.dp)
                     )

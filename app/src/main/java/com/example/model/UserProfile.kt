@@ -18,6 +18,13 @@ data class UserProfile(
     val isAdmin: Boolean = false,
     val isActive: Boolean = true,
 
+    // BLOCKED_USER_DEVICE_BLACKLIST_V1
+    // Permanent account/device blocks are separate from temporary Admin Lock.
+    val isBlocked: Boolean = false,
+    val blockReason: String = "",
+    val isDeviceBlacklisted: Boolean = false,
+    val deviceBlacklistReason: String = "",
+
     // DEVICE_LOCK_V1
     // Privacy-safe per-install binding. No IMEI / serial / MAC / Android ID.
     val boundInstallId: String = "",
@@ -39,6 +46,8 @@ data class UserProfile(
     val isFreeTrialActive: Boolean
         get() =
             isActive &&
+                !isBlocked &&
+                !isDeviceBlacklisted &&
                 isDeviceAuthorized &&
                 isFreeTrial &&
                 planExpireMillis >
@@ -47,6 +56,8 @@ data class UserProfile(
     val isPlanValid: Boolean
         get() =
             isActive &&
+                !isBlocked &&
+                !isDeviceBlacklisted &&
                 isDeviceAuthorized &&
                 planExpireMillis >
                     System.currentTimeMillis() &&

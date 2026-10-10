@@ -267,9 +267,15 @@ fun SmartDrivoApp(
     val firebaseUser = PhoneAuthManager.getAuthInstance()?.currentUser
     val isLoggedIn = prefs.isLoggedIn && (firebaseUser != null || userProfile.email.isNotBlank() || userProfile.phone.isNotBlank())
     val isProfileComplete = userProfile.phone.isNotBlank() && userProfile.city.isNotBlank() && userProfile.state.isNotBlank()
+    // BLOCKED_USER_DEVICE_BLACKLIST_V1
     val isSecurityBlocked =
         !isUserAdmin &&
-            (!userProfile.isActive || !userProfile.isDeviceAuthorized)
+            (
+                userProfile.isBlocked ||
+                    userProfile.isDeviceBlacklisted ||
+                    !userProfile.isActive ||
+                    !userProfile.isDeviceAuthorized
+            )
     val isMembershipActive =
         (isUserAdmin || userProfile.isPlanValid) &&
             userProfile.isActive &&
@@ -310,6 +316,12 @@ fun SmartDrivoApp(
                             isApproved = fsProfile.isApproved,
                             isAdmin = fsProfile.isAdmin,
                             isActive = fsProfile.isActive,
+                            isBlocked = fsProfile.isBlocked,
+                            blockReason = fsProfile.blockReason,
+                            isDeviceBlacklisted =
+                                fsProfile.isDeviceBlacklisted,
+                            deviceBlacklistReason =
+                                fsProfile.deviceBlacklistReason,
                             boundInstallId = fsProfile.boundInstallId,
                             boundDeviceName = fsProfile.boundDeviceName,
                             isDeviceAuthorized = fsProfile.isDeviceAuthorized,
@@ -344,7 +356,15 @@ fun SmartDrivoApp(
             Routes.TAMPER_LOCK
         } else if (!loggedIn) {
             Routes.WELCOME
-        } else if (!admin && (!userProfile.isActive || !userProfile.isDeviceAuthorized)) {
+        } else if (
+            !admin &&
+            (
+                userProfile.isBlocked ||
+                    userProfile.isDeviceBlacklisted ||
+                    !userProfile.isActive ||
+                    !userProfile.isDeviceAuthorized
+            )
+        ) {
             Routes.SECURITY_LOCK
         } else if (
             !admin &&
@@ -662,7 +682,15 @@ fun SmartDrivoApp(
                         navController.navigate(Routes.WELCOME) {
                             popUpTo(Routes.SPLASH) { inclusive = true }
                         }
-                    } else if (!admin && (!userProfile.isActive || !userProfile.isDeviceAuthorized)) {
+                    } else if (
+                        !admin &&
+                        (
+                            userProfile.isBlocked ||
+                                userProfile.isDeviceBlacklisted ||
+                                !userProfile.isActive ||
+                                !userProfile.isDeviceAuthorized
+                        )
+                    ) {
                         navController.navigate(Routes.SECURITY_LOCK) {
                             popUpTo(Routes.SPLASH) { inclusive = true }
                         }
@@ -850,6 +878,12 @@ fun SmartDrivoApp(
                                 isApproved = firestoreProfile.isApproved,
                                 isAdmin = firestoreProfile.isAdmin,
                                 isActive = firestoreProfile.isActive,
+                                isBlocked = firestoreProfile.isBlocked,
+                                blockReason = firestoreProfile.blockReason,
+                                isDeviceBlacklisted =
+                                    firestoreProfile.isDeviceBlacklisted,
+                                deviceBlacklistReason =
+                                    firestoreProfile.deviceBlacklistReason,
                                 boundInstallId = firestoreProfile.boundInstallId,
                                 boundDeviceName = firestoreProfile.boundDeviceName,
                                 isDeviceAuthorized = firestoreProfile.isDeviceAuthorized,
@@ -872,7 +906,12 @@ fun SmartDrivoApp(
                         val isProfileEmpty = merged.phone.isBlank() || merged.city.isBlank() || merged.state.isBlank()
                         val securityBlocked =
                             !merged.isAdmin &&
-                                (!merged.isActive || !merged.isDeviceAuthorized)
+                                (
+                                    merged.isBlocked ||
+                                        merged.isDeviceBlacklisted ||
+                                        !merged.isActive ||
+                                        !merged.isDeviceAuthorized
+                                )
 
                         if (securityBlocked) {
                             navController.navigate(Routes.SECURITY_LOCK) {

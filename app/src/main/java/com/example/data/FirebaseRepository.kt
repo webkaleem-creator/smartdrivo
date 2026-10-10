@@ -35,6 +35,9 @@ class FirebaseRepository(
     private var auth: FirebaseAuth? = null
     private var ownUserListener: ListenerRegistration? = null
     private var ownPaymentsListener: ListenerRegistration? = null
+
+    // BLOCKED_USER_DEVICE_BLACKLIST_V1
+    private var ownBlockedDeviceListener: ListenerRegistration? = null
     private var adminUsersListener: ListenerRegistration? = null
     private var adminPaymentsListener: ListenerRegistration? = null
 
@@ -90,6 +93,12 @@ class FirebaseRepository(
     // TRIAL_ABUSE_PROTECTION_V4
     // Raw ANDROID_ID is never uploaded or stored.
     // Only a one-way SHA-256 token is used for one-trial-per-device control.
+    // BLOCKED_USER_DEVICE_BLACKLIST_V1
+    // Device blacklist reuses the same privacy-safe one-way device token.
+    // Raw ANDROID_ID is never stored or uploaded.
+    private fun currentSecurityDeviceKey(): String =
+        currentTrialDeviceKey()
+
     private fun currentTrialDeviceKey(): String {
         val androidId =
             try {
@@ -167,6 +176,10 @@ class FirebaseRepository(
             isApproved = doc.getBoolean("isApproved") ?: false,
             isAdmin = isAdmin,
             isActive = doc.getBoolean("isActive") ?: true,
+            isBlocked =
+                doc.getBoolean("isBlocked") ?: false,
+            blockReason =
+                doc.getString("blockReason").orEmpty(),
             boundInstallId = boundInstallId,
             boundDeviceName =
                 doc.getString("boundDevice")
@@ -209,6 +222,57 @@ class FirebaseRepository(
 
         ownUserListener?.remove()
         ownPaymentsListener?.remove()
+        ownBlockedDeviceListener?.remove()
+
+        // BLOCKED_USER_DEVICE_BLACKLIST_V1
+        // Device blacklist is checked through a live Firestore document listener.
+        // This runs outside the live order path.
+        val securityDeviceKey =
+            currentSecurityDeviceKey()
+
+        ownBlockedDeviceListener =
+            fs.collection("blockedDevices")
+                .document(securityDeviceKey)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w(
+                            "FirebaseRepo",
+                            "Blocked-device listener error: ${error.message}"
+                        )
+                        return@addSnapshotListener
+                    }
+
+                    val blocked =
+                        snapshot != null &&
+                            snapshot.exists() &&
+                            snapshot.getBoolean("active") != false
+
+                    val reason =
+                        if (blocked)
+                            snapshot?.getString("reason")
+                                ?.takeIf { it.isNotBlank() }
+                                ?: "This device has been blocked by SmartDrivo Admin."
+                        else
+                            ""
+
+                    val latest =
+                        prefs.userProfile.value
+
+                    val updated =
+                        latest.copy(
+                            isDeviceBlacklisted = blocked,
+                            deviceBlacklistReason = reason
+                        )
+
+                    prefs.saveUserProfile(updated)
+
+                    if (
+                        blocked &&
+                        !updated.isAdmin
+                    ) {
+                        prefs.setAutoAcceptActive(false)
+                    }
+                }
 
         ownUserListener = fs.collection("users").document(uid)
             .addSnapshotListener { snapshot, error ->
@@ -258,8 +322,10 @@ class FirebaseRepository(
     fun stopOwnMembershipSync() {
         ownUserListener?.remove()
         ownPaymentsListener?.remove()
+        ownBlockedDeviceListener?.remove()
         ownUserListener = null
         ownPaymentsListener = null
+        ownBlockedDeviceListener = null
     }
 
     // DEVICE_CHANGE_REQUEST_V1
@@ -411,7 +477,12 @@ class FirebaseRepository(
                         "lastDevice" to currentDevice,
                         "lastAndroidVersion" to currentAndroid,
                         "lastAppVersion" to currentAppVersion,
-                        "lastSeenAt" to now
+                        "lastSeenAt" to now,
+
+                        // BLOCKED_USER_DEVICE_BLACKLIST_V1
+                        // Public hash token only; raw Android ID is never stored.
+                        "securityDeviceKey" to
+                            currentSecurityDeviceKey()
                     )
 
                 if (!existing.exists()) {
@@ -734,6 +805,8 @@ class FirebaseRepository(
                         "isApproved" to profile.isApproved,
                         "isAdmin" to profile.isAdmin,
                         "isActive" to profile.isActive,
+                        "isBlocked" to profile.isBlocked,
+                        "blockReason" to profile.blockReason,
                         "updatedAt" to System.currentTimeMillis()
                     ),
                     SetOptions.merge()
@@ -771,6 +844,34 @@ class FirebaseRepository(
                 val isApproved = doc.getBoolean("isApproved") ?: false
                 val isAdmin = doc.getBoolean("isAdmin") ?: false
                 val isActive = doc.getBoolean("isActive") ?: true
+
+                // BLOCKED_USER_DEVICE_BLACKLIST_V1
+                val isBlocked =
+                    doc.getBoolean("isBlocked") ?: false
+                val blockReason =
+                    doc.getString("blockReason").orEmpty()
+
+                val blockedDeviceDoc =
+                    fs.collection("blockedDevices")
+                        .document(
+                            currentSecurityDeviceKey()
+                        )
+                        .get()
+                        .await()
+
+                val isDeviceBlacklisted =
+                    blockedDeviceDoc.exists() &&
+                        blockedDeviceDoc.getBoolean("active") != false
+
+                val deviceBlacklistReason =
+                    if (isDeviceBlacklisted)
+                        blockedDeviceDoc
+                            .getString("reason")
+                            ?.takeIf { it.isNotBlank() }
+                            ?: "This device has been blocked by SmartDrivo Admin."
+                    else
+                        ""
+
                 val referralCode = doc.getString("referralCode") ?: ""
                 val createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
                 val vehicleTypeStr = doc.getString("vehicleType") ?: "AUTO"
@@ -793,6 +894,12 @@ class FirebaseRepository(
                     isApproved = isApproved,
                     isAdmin = isAdmin,
                     isActive = isActive,
+                    isBlocked = isBlocked,
+                    blockReason = blockReason,
+                    isDeviceBlacklisted =
+                        isDeviceBlacklisted,
+                    deviceBlacklistReason =
+                        deviceBlacklistReason,
                     boundInstallId = doc.getString("boundInstallId").orEmpty(),
                     boundDeviceName =
                         doc.getString("boundDevice")
