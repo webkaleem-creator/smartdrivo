@@ -70,6 +70,50 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     @Volatile
     private var apkIntegrityAllowed = true
 
+    // OFFLINE_GRACE_LOCK_V1
+    // RAM-only lease state. The live order path never performs a network call.
+    @Volatile
+    private var offlineSecurityAllowed = true
+
+    private val offlineSecurityCheckRunnable =
+        object : Runnable {
+            override fun run() {
+                try {
+                    if (::prefs.isInitialized) {
+                        val profile =
+                            prefs.userProfile.value
+
+                        offlineSecurityAllowed =
+                            profile.isAdmin ||
+                                prefs.isOfflineGraceValid(
+                                    profile.uid
+                                )
+
+                        if (
+                            !offlineSecurityAllowed &&
+                            !profile.isAdmin
+                        ) {
+                            prefs.setAutoAcceptActive(
+                                false
+                            )
+
+                            pauseAllLiveOrderWork()
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(
+                        TAG,
+                        "Offline grace check failed: ${e.message}"
+                    )
+                } finally {
+                    handler.postDelayed(
+                        this,
+                        15_000L
+                    )
+                }
+            }
+        }
+
     // ==========================================================
     // UBER_WINDOW_POLLER_V3
     //
@@ -500,6 +544,28 @@ private val processingTimeoutRunnable = Runnable {
         super.onServiceConnected()
         prefs = PreferencesManager.getInstance(applicationContext)
 
+        // OFFLINE_GRACE_LOCK_V1
+        val connectedProfile =
+            prefs.userProfile.value
+
+        prefs.seedOfflineGraceForExistingUserIfNeeded(
+            connectedProfile.uid
+        )
+
+        offlineSecurityAllowed =
+            connectedProfile.isAdmin ||
+                prefs.isOfflineGraceValid(
+                    connectedProfile.uid
+                )
+
+        handler.removeCallbacks(
+            offlineSecurityCheckRunnable
+        )
+
+        handler.post(
+            offlineSecurityCheckRunnable
+        )
+
         // APK_SIGNATURE_TAMPER_LOCK_V1
         apkIntegrityAllowed =
             prefs.apkSignatureValid.value
@@ -563,7 +629,8 @@ private val processingTimeoutRunnable = Runnable {
             prefs.appSettings.collectLatest { settings ->
                 if (
                     settings.isAutoAcceptActive &&
-                    apkIntegrityAllowed
+                    apkIntegrityAllowed &&
+                    offlineSecurityAllowed
                 ) {
                     showActiveServiceNotification()
                     startUberWindowPolling()
@@ -9660,6 +9727,9 @@ val isOrderStillVisible =
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(
+            offlineSecurityCheckRunnable
+        )
         stopUberWindowPolling()
         isServiceRunning = false
         serviceScope.cancel()

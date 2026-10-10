@@ -34,6 +34,7 @@ import com.example.ui.theme.TextDarkSecondary
 @Composable
 fun SecurityLockScreen(
     profile: UserProfile,
+    offlineVerificationExpired: Boolean = false,
     onRequestDeviceChange: () -> Unit,
     onLogout: () -> Unit
 ) {
@@ -58,6 +59,9 @@ fun SecurityLockScreen(
             adminLocked ->
                 "SmartDrivo Locked"
 
+            offlineVerificationExpired ->
+                "Internet Verification Required"
+
             else ->
                 "Device Not Authorized"
         }
@@ -76,6 +80,9 @@ fun SecurityLockScreen(
 
             adminLocked ->
                 "This account has been locked by SmartDrivo Admin. Auto Accept and assistant functions are disabled."
+
+            offlineVerificationExpired ->
+                "SmartDrivo could not verify this account within the offline grace period. Connect to the internet. Access will restore automatically after server verification."
 
             else ->
                 "This SmartDrivo account is already linked to another phone. Contact SmartDrivo Admin to approve this device."
@@ -138,6 +145,7 @@ fun SecurityLockScreen(
                     !accountBlocked &&
                     !deviceBlacklisted &&
                     !adminLocked &&
+                    !offlineVerificationExpired &&
                     profile.boundDeviceName.isNotBlank()
                 ) {
                     Spacer(
@@ -156,7 +164,8 @@ fun SecurityLockScreen(
                 if (
                     !accountBlocked &&
                     !deviceBlacklisted &&
-                    !adminLocked
+                    !adminLocked &&
+                    !offlineVerificationExpired
                 ) {
                     Spacer(
                         modifier = Modifier.height(18.dp)

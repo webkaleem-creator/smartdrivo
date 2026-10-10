@@ -45,6 +45,19 @@ class PreferencesManager(private val context: Context) {
     private val _appSettings = MutableStateFlow(loadAppSettingsRaw())
     val appSettings: StateFlow<AppSettings> = _appSettings.asStateFlow()
 
+    // OFFLINE_GRACE_LOCK_V1
+    private val _lastSecurityVerificationAt =
+        MutableStateFlow(
+            prefs.getLong(
+                KEY_LAST_SECURITY_VERIFIED_AT,
+                0L
+            )
+        )
+
+    val lastSecurityVerificationAt:
+        StateFlow<Long> =
+        _lastSecurityVerificationAt.asStateFlow()
+
     private val _goToAreas = MutableStateFlow(loadGoToAreaGroups())
     val goToAreas: StateFlow<List<AreaGroup>> = _goToAreas.asStateFlow()
 
@@ -390,6 +403,151 @@ class PreferencesManager(private val context: Context) {
         return generated
     }
 
+    // OFFLINE_GRACE_LOCK_V1
+    // A successful server verification refreshes this local entitlement lease.
+    // No network call is performed by these methods.
+    fun markSecurityVerifiedNow(
+        userId: String
+    ) {
+        val cleanUid =
+            userId.trim()
+
+        if (cleanUid.isBlank()) {
+            return
+        }
+
+        val now =
+            System.currentTimeMillis()
+
+        prefs.edit()
+            .putString(
+                KEY_LAST_SECURITY_VERIFIED_UID,
+                cleanUid
+            )
+            .putLong(
+                KEY_LAST_SECURITY_VERIFIED_AT,
+                now
+            )
+            .apply()
+
+        _lastSecurityVerificationAt.value =
+            now
+    }
+
+    // One-time migration for users who were already signed in before this
+    // feature existed. It grants one normal grace window, but never renews
+    // an expired lease locally.
+    fun seedOfflineGraceForExistingUserIfNeeded(
+        userId: String
+    ) {
+        val cleanUid =
+            userId.trim()
+
+        if (
+            !isLoggedIn ||
+            cleanUid.isBlank()
+        ) {
+            return
+        }
+
+        val storedAt =
+            prefs.getLong(
+                KEY_LAST_SECURITY_VERIFIED_AT,
+                0L
+            )
+
+        val storedUid =
+            prefs.getString(
+                KEY_LAST_SECURITY_VERIFIED_UID,
+                ""
+            ).orEmpty()
+
+        if (
+            storedAt <= 0L &&
+            storedUid.isBlank()
+        ) {
+            markSecurityVerifiedNow(
+                cleanUid
+            )
+        }
+    }
+
+    fun isOfflineGraceValid(
+        userId: String,
+        now: Long =
+            System.currentTimeMillis()
+    ): Boolean {
+        val cleanUid =
+            userId.trim()
+
+        if (cleanUid.isBlank()) {
+            return false
+        }
+
+        val verifiedUid =
+            prefs.getString(
+                KEY_LAST_SECURITY_VERIFIED_UID,
+                ""
+            ).orEmpty()
+
+        val verifiedAt =
+            prefs.getLong(
+                KEY_LAST_SECURITY_VERIFIED_AT,
+                0L
+            )
+
+        if (
+            verifiedAt <= 0L ||
+            verifiedUid != cleanUid
+        ) {
+            return false
+        }
+
+        // Large backwards clock jumps must not extend the lease forever.
+        if (
+            now <
+                verifiedAt -
+                    5L * 60L * 1000L
+        ) {
+            return false
+        }
+
+        val age =
+            (now - verifiedAt)
+                .coerceAtLeast(0L)
+
+        return age <=
+            OFFLINE_SECURITY_GRACE_MS
+    }
+
+    fun offlineGraceRemainingMs(
+        userId: String,
+        now: Long =
+            System.currentTimeMillis()
+    ): Long {
+        if (
+            !isOfflineGraceValid(
+                userId,
+                now
+            )
+        ) {
+            return 0L
+        }
+
+        val verifiedAt =
+            prefs.getLong(
+                KEY_LAST_SECURITY_VERIFIED_AT,
+                0L
+            )
+
+        return (
+            OFFLINE_SECURITY_GRACE_MS -
+                (now - verifiedAt)
+                    .coerceAtLeast(0L)
+            )
+            .coerceAtLeast(0L)
+    }
+
     // --- User Profile ---
     fun saveUserProfile(profile: UserProfile) {
         prefs.edit().apply {
@@ -406,6 +564,21 @@ class PreferencesManager(private val context: Context) {
             putBoolean(KEY_IS_APPROVED, profile.isApproved)
             putBoolean(KEY_IS_ADMIN, profile.isAdmin)
             putBoolean(KEY_IS_ACTIVE, profile.isActive)
+
+            // OFFLINE_GRACE_LOCK_V3
+            // Persist the last verified block state so force-stop/restart while
+            // offline cannot forget an already-known account/device block.
+            putBoolean(KEY_IS_BLOCKED, profile.isBlocked)
+            putString(KEY_BLOCK_REASON, profile.blockReason)
+            putBoolean(
+                KEY_DEVICE_BLACKLISTED,
+                profile.isDeviceBlacklisted
+            )
+            putString(
+                KEY_DEVICE_BLACKLIST_REASON,
+                profile.deviceBlacklistReason
+            )
+
             putString(KEY_BOUND_INSTALL_ID, profile.boundInstallId)
             putString(KEY_BOUND_DEVICE_NAME, profile.boundDeviceName)
             putBoolean(KEY_DEVICE_AUTHORIZED, profile.isDeviceAuthorized)
@@ -431,6 +604,29 @@ class PreferencesManager(private val context: Context) {
         val isApproved = prefs.getBoolean(KEY_IS_APPROVED, false)
         val isAdmin = prefs.getBoolean(KEY_IS_ADMIN, false)
         val isActive = prefs.getBoolean(KEY_IS_ACTIVE, true)
+
+        // OFFLINE_GRACE_LOCK_V3
+        val isBlocked =
+            prefs.getBoolean(
+                KEY_IS_BLOCKED,
+                false
+            )
+        val blockReason =
+            prefs.getString(
+                KEY_BLOCK_REASON,
+                ""
+            ).orEmpty()
+        val isDeviceBlacklisted =
+            prefs.getBoolean(
+                KEY_DEVICE_BLACKLISTED,
+                false
+            )
+        val deviceBlacklistReason =
+            prefs.getString(
+                KEY_DEVICE_BLACKLIST_REASON,
+                ""
+            ).orEmpty()
+
         val boundInstallId = prefs.getString(KEY_BOUND_INSTALL_ID, "") ?: ""
         val boundDeviceName = prefs.getString(KEY_BOUND_DEVICE_NAME, "") ?: ""
         val isDeviceAuthorized = prefs.getBoolean(KEY_DEVICE_AUTHORIZED, true)
@@ -451,6 +647,12 @@ class PreferencesManager(private val context: Context) {
             isApproved = isApproved,
             isAdmin = isAdmin,
             isActive = isActive,
+            isBlocked = isBlocked,
+            blockReason = blockReason,
+            isDeviceBlacklisted =
+                isDeviceBlacklisted,
+            deviceBlacklistReason =
+                deviceBlacklistReason,
             boundInstallId = boundInstallId,
             boundDeviceName = boundDeviceName,
             isDeviceAuthorized = isDeviceAuthorized,
@@ -1479,6 +1681,18 @@ class PreferencesManager(private val context: Context) {
     companion object {
         const val DEFAULT_UPI_ID = "gpay-11189725657@okaxis"
 
+        // OFFLINE_GRACE_LOCK_V1
+        // Six hours: enough for temporary backend/network interruption while
+        // still requiring periodic server verification.
+        const val OFFLINE_SECURITY_GRACE_MS =
+            6L * 60L * 60L * 1000L
+
+        private const val KEY_LAST_SECURITY_VERIFIED_AT =
+            "security_last_verified_at_v1"
+
+        private const val KEY_LAST_SECURITY_VERIFIED_UID =
+            "security_last_verified_uid_v1"
+
         // MINIMUM_VERSION_LOCK_V1
         private const val KEY_FORCE_UPDATE_ENABLED =
             "security_force_update_enabled"
@@ -1523,6 +1737,17 @@ class PreferencesManager(private val context: Context) {
         private const val KEY_IS_APPROVED = "user_is_approved"
         private const val KEY_IS_ADMIN = "user_is_admin"
         private const val KEY_IS_ACTIVE = "user_is_active"
+
+        // OFFLINE_GRACE_LOCK_V3
+        private const val KEY_IS_BLOCKED =
+            "security_account_blocked_v1"
+        private const val KEY_BLOCK_REASON =
+            "security_account_block_reason_v1"
+        private const val KEY_DEVICE_BLACKLISTED =
+            "security_device_blacklisted_v1"
+        private const val KEY_DEVICE_BLACKLIST_REASON =
+            "security_device_blacklist_reason_v1"
+
         private const val KEY_BOUND_INSTALL_ID = "security_bound_install_id"
         private const val KEY_BOUND_DEVICE_NAME = "security_bound_device_name"
         private const val KEY_DEVICE_AUTHORIZED = "security_device_authorized"

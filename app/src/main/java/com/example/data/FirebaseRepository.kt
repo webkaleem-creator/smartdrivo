@@ -38,6 +38,26 @@ class FirebaseRepository(
 
     // BLOCKED_USER_DEVICE_BLACKLIST_V1
     private var ownBlockedDeviceListener: ListenerRegistration? = null
+
+    // OFFLINE_GRACE_LOCK_V1
+    // The offline lease refreshes only after BOTH the user entitlement and
+    // current-device blacklist checks have succeeded.
+    private var ownSecurityUserVerified = false
+    private var ownSecurityDeviceVerified = false
+
+    private fun maybeMarkOwnSecurityVerified(
+        uid: String
+    ) {
+        if (
+            ownSecurityUserVerified &&
+            ownSecurityDeviceVerified
+        ) {
+            prefs.markSecurityVerifiedNow(
+                uid
+            )
+        }
+    }
+
     private var adminUsersListener: ListenerRegistration? = null
     private var adminPaymentsListener: ListenerRegistration? = null
 
@@ -224,6 +244,10 @@ class FirebaseRepository(
         ownPaymentsListener?.remove()
         ownBlockedDeviceListener?.remove()
 
+        // OFFLINE_GRACE_LOCK_V1
+        ownSecurityUserVerified = false
+        ownSecurityDeviceVerified = false
+
         // BLOCKED_USER_DEVICE_BLACKLIST_V1
         // Device blacklist is checked through a live Firestore document listener.
         // This runs outside the live order path.
@@ -266,6 +290,20 @@ class FirebaseRepository(
 
                     prefs.saveUserProfile(updated)
 
+                    // OFFLINE_GRACE_LOCK_V3
+                    // Firestore may emit cached snapshots while fully offline.
+                    // Cached data is useful for UI, but it must never renew the
+                    // server-verification lease.
+                    if (
+                        snapshot != null &&
+                        !snapshot.metadata.isFromCache
+                    ) {
+                        ownSecurityDeviceVerified = true
+                        maybeMarkOwnSecurityVerified(
+                            uid
+                        )
+                    }
+
                     if (
                         blocked &&
                         !updated.isAdmin
@@ -295,6 +333,17 @@ class FirebaseRepository(
                     )
 
                     prefs.saveUserProfile(merged)
+
+                    // OFFLINE_GRACE_LOCK_V3
+                    // Only a server-backed snapshot can renew the lease.
+                    if (
+                        !snapshot.metadata.isFromCache
+                    ) {
+                        ownSecurityUserVerified = true
+                        maybeMarkOwnSecurityVerified(
+                            uid
+                        )
+                    }
 
                     if (!merged.isPlanValid && !merged.isAdmin) {
                         prefs.setAutoAcceptActive(false)
@@ -871,6 +920,18 @@ class FirebaseRepository(
                             ?: "This device has been blocked by SmartDrivo Admin."
                     else
                         ""
+
+                // OFFLINE_GRACE_LOCK_V3
+                // DocumentReference.get() may fall back to Firestore cache
+                // while offline. Cache reads must not extend the grace lease.
+                if (
+                    !doc.metadata.isFromCache &&
+                    !blockedDeviceDoc.metadata.isFromCache
+                ) {
+                    prefs.markSecurityVerifiedNow(
+                        doc.id.ifEmpty { uid }
+                    )
+                }
 
                 val referralCode = doc.getString("referralCode") ?: ""
                 val createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()

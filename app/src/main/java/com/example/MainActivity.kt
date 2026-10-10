@@ -246,6 +246,10 @@ fun SmartDrivoApp(
     val paymentSubmissions by
         prefs.paymentSubmissions.collectAsState()
 
+    // OFFLINE_GRACE_LOCK_V1
+    val lastSecurityVerificationAt by
+        prefs.lastSecurityVerificationAt.collectAsState()
+
     // MINIMUM_VERSION_LOCK_V1
     val forceUpdateEnabled by
         prefs.forceUpdateEnabled.collectAsState()
@@ -267,6 +271,33 @@ fun SmartDrivoApp(
     val firebaseUser = PhoneAuthManager.getAuthInstance()?.currentUser
     val isLoggedIn = prefs.isLoggedIn && (firebaseUser != null || userProfile.email.isNotBlank() || userProfile.phone.isNotBlank())
     val isProfileComplete = userProfile.phone.isNotBlank() && userProfile.city.isNotBlank() && userProfile.state.isNotBlank()
+
+    // OFFLINE_GRACE_LOCK_V1
+    val securityVerificationUid =
+        firebaseUser?.uid
+            ?.takeIf { it.isNotBlank() }
+            ?: userProfile.uid
+
+    var offlineGraceClock by
+        remember {
+            mutableStateOf(
+                System.currentTimeMillis()
+            )
+        }
+
+    val hasOfflineGraceLease =
+        lastSecurityVerificationAt > 0L
+
+    val isOfflineVerificationExpired =
+        !isUserAdmin &&
+            isLoggedIn &&
+            securityVerificationUid.isNotBlank() &&
+            hasOfflineGraceLease &&
+            !prefs.isOfflineGraceValid(
+                securityVerificationUid,
+                offlineGraceClock
+            )
+
     // BLOCKED_USER_DEVICE_BLACKLIST_V1
     val isSecurityBlocked =
         !isUserAdmin &&
@@ -274,7 +305,8 @@ fun SmartDrivoApp(
                 userProfile.isBlocked ||
                     userProfile.isDeviceBlacklisted ||
                     !userProfile.isActive ||
-                    !userProfile.isDeviceAuthorized
+                    !userProfile.isDeviceAuthorized ||
+                    isOfflineVerificationExpired
             )
     val isMembershipActive =
         (isUserAdmin || userProfile.isPlanValid) &&
@@ -290,6 +322,31 @@ fun SmartDrivoApp(
             minimumAppVersionCode > 0 &&
             BuildConfig.VERSION_CODE <
                 minimumAppVersionCode
+
+    // OFFLINE_GRACE_LOCK_V1
+    // Existing signed-in installs receive one migration grace window.
+    // The clock refreshes locally only for UI expiry; no network call occurs.
+    LaunchedEffect(
+        isLoggedIn,
+        securityVerificationUid,
+        isUserAdmin
+    ) {
+        if (
+            isLoggedIn &&
+            !isUserAdmin &&
+            securityVerificationUid.isNotBlank()
+        ) {
+            prefs.seedOfflineGraceForExistingUserIfNeeded(
+                securityVerificationUid
+            )
+
+            while (true) {
+                delay(30_000L)
+                offlineGraceClock =
+                    System.currentTimeMillis()
+            }
+        }
+    }
 
     // Verify profile with Firestore for existing users on startup
     LaunchedEffect(isLoggedIn) {
@@ -357,13 +414,7 @@ fun SmartDrivoApp(
         } else if (!loggedIn) {
             Routes.WELCOME
         } else if (
-            !admin &&
-            (
-                userProfile.isBlocked ||
-                    userProfile.isDeviceBlacklisted ||
-                    !userProfile.isActive ||
-                    !userProfile.isDeviceAuthorized
-            )
+            isSecurityBlocked
         ) {
             Routes.SECURITY_LOCK
         } else if (
@@ -576,6 +627,19 @@ fun SmartDrivoApp(
                     popUpTo(0) { inclusive = true }
                 }
             }
+        } else if (
+            currentRoute ==
+                Routes.SECURITY_LOCK
+        ) {
+            // OFFLINE_GRACE_LOCK_V1
+            // Reconnect + successful verification unlocks automatically.
+            navController.navigate(
+                Routes.HOME
+            ) {
+                popUpTo(0) {
+                    inclusive = true
+                }
+            }
         }
     }
 
@@ -683,13 +747,7 @@ fun SmartDrivoApp(
                             popUpTo(Routes.SPLASH) { inclusive = true }
                         }
                     } else if (
-                        !admin &&
-                        (
-                            userProfile.isBlocked ||
-                                userProfile.isDeviceBlacklisted ||
-                                !userProfile.isActive ||
-                                !userProfile.isDeviceAuthorized
-                        )
+                        isSecurityBlocked
                     ) {
                         navController.navigate(Routes.SECURITY_LOCK) {
                             popUpTo(Routes.SPLASH) { inclusive = true }
@@ -742,6 +800,8 @@ fun SmartDrivoApp(
         composable(Routes.SECURITY_LOCK) {
             SecurityLockScreen(
                 profile = userProfile,
+                offlineVerificationExpired =
+                    isOfflineVerificationExpired,
                 onRequestDeviceChange = {
                     repository.requestDeviceChange { success ->
                         android.widget.Toast.makeText(
