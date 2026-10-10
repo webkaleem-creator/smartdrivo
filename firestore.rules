@@ -100,6 +100,25 @@ service cloud.firestore {
               request.resource.data.securityDeviceKey is string &&
               request.resource.data.securityDeviceKey != ''
             )
+          ) &&
+          // LOGIN_SESSION_LOCK_V1
+          // Drivers may replace only their own active app-session metadata.
+          // Admin accounts remain exempt in the Android client.
+          (
+            !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny([
+                'activeSessionId',
+                'activeSessionDevice',
+                'activeSessionStartedAt',
+                'activeSessionAppVersion'
+              ]) ||
+            (
+              request.resource.data.activeSessionId is string &&
+              request.resource.data.activeSessionId != '' &&
+              request.resource.data.activeSessionDevice is string &&
+              request.resource.data.activeSessionStartedAt is int &&
+              request.resource.data.activeSessionAppVersion is string
+            )
           )
         )
       );

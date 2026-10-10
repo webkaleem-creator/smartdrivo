@@ -250,6 +250,13 @@ fun SmartDrivoApp(
     val lastSecurityVerificationAt by
         prefs.lastSecurityVerificationAt.collectAsState()
 
+    // LOGIN_SESSION_LOCK_V1
+    val loginSessionInvalidated by
+        prefs.loginSessionInvalidated.collectAsState()
+
+    val loginSessionReason by
+        prefs.loginSessionReason.collectAsState()
+
     // MINIMUM_VERSION_LOCK_V1
     val forceUpdateEnabled by
         prefs.forceUpdateEnabled.collectAsState()
@@ -306,7 +313,8 @@ fun SmartDrivoApp(
                     userProfile.isDeviceBlacklisted ||
                     !userProfile.isActive ||
                     !userProfile.isDeviceAuthorized ||
-                    isOfflineVerificationExpired
+                    isOfflineVerificationExpired ||
+                    loginSessionInvalidated
             )
     val isMembershipActive =
         (isUserAdmin || userProfile.isPlanValid) &&
@@ -802,6 +810,10 @@ fun SmartDrivoApp(
                 profile = userProfile,
                 offlineVerificationExpired =
                     isOfflineVerificationExpired,
+                sessionInvalidated =
+                    loginSessionInvalidated,
+                sessionReason =
+                    loginSessionReason,
                 onRequestDeviceChange = {
                     repository.requestDeviceChange { success ->
                         android.widget.Toast.makeText(
@@ -817,6 +829,7 @@ fun SmartDrivoApp(
                 onLogout = {
                     repository.stopOwnMembershipSync()
                     PhoneAuthManager.getAuthInstance()?.signOut()
+                    prefs.clearLoginSessionState()
                     prefs.isLoggedIn = false
                     prefs.setAutoAcceptActive(false)
                     navController.navigate(Routes.WELCOME) {
@@ -841,6 +854,7 @@ fun SmartDrivoApp(
                         .getAuthInstance()
                         ?.signOut()
 
+                    prefs.clearLoginSessionState()
                     prefs.isLoggedIn = false
                     prefs.setAutoAcceptActive(false)
 
@@ -1385,8 +1399,11 @@ fun SmartDrivoApp(
                 onNavigateToCommunity = { navController.navigate(Routes.COMMUNITY) },
                 onNavigateToAdminPanel = { navController.navigate(Routes.ADMIN_PANEL) },
                 onLogout = {
+                    repository.stopOwnMembershipSync()
                     PhoneAuthManager.signOut()
+                    prefs.clearLoginSessionState()
                     prefs.isLoggedIn = false
+                    prefs.setAutoAcceptActive(false)
                     prefs.saveUserProfile(userProfile.copy(name = "", email = "", phone = ""))
                     navController.navigate(Routes.WELCOME) {
                         popUpTo(Routes.HOME) { inclusive = true }

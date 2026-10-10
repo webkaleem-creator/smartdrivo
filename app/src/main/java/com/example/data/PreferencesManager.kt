@@ -58,6 +58,38 @@ class PreferencesManager(private val context: Context) {
         StateFlow<Long> =
         _lastSecurityVerificationAt.asStateFlow()
 
+    // LOGIN_SESSION_LOCK_V1
+    private val _loginSessionInvalidated =
+        MutableStateFlow(
+            prefs.getBoolean(
+                KEY_LOGIN_SESSION_INVALIDATED,
+                false
+            )
+        )
+
+    val loginSessionInvalidated:
+        StateFlow<Boolean> =
+        _loginSessionInvalidated.asStateFlow()
+
+    private val _loginSessionReason =
+        MutableStateFlow(
+            prefs.getString(
+                KEY_LOGIN_SESSION_REASON,
+                ""
+            ).orEmpty()
+        )
+
+    val loginSessionReason:
+        StateFlow<String> =
+        _loginSessionReason.asStateFlow()
+
+    val currentLoginSessionId: String
+        get() =
+            prefs.getString(
+                KEY_LOGIN_SESSION_ID,
+                ""
+            ).orEmpty()
+
     private val _goToAreas = MutableStateFlow(loadGoToAreaGroups())
     val goToAreas: StateFlow<List<AreaGroup>> = _goToAreas.asStateFlow()
 
@@ -546,6 +578,132 @@ class PreferencesManager(private val context: Context) {
                     .coerceAtLeast(0L)
             )
             .coerceAtLeast(0L)
+    }
+
+    // LOGIN_SESSION_LOCK_V1
+    // One account may have only one current SmartDrivo app session.
+    // The UUID is random and contains no device identifier.
+    @Synchronized
+    fun getOrCreateLoginSessionIdForClaim(): String {
+        val existing =
+            prefs.getString(
+                KEY_LOGIN_SESSION_ID,
+                ""
+            ).orEmpty()
+
+        if (existing.isNotBlank()) {
+            return existing
+        }
+
+        val created =
+            "SDS-" +
+                UUID.randomUUID()
+                    .toString()
+
+        prefs.edit()
+            .putString(
+                KEY_LOGIN_SESSION_ID,
+                created
+            )
+            .putBoolean(
+                KEY_LOGIN_SESSION_INVALIDATED,
+                false
+            )
+            .putString(
+                KEY_LOGIN_SESSION_REASON,
+                ""
+            )
+            .commit()
+
+        _loginSessionInvalidated.value =
+            false
+        _loginSessionReason.value =
+            ""
+
+        return created
+    }
+
+    fun markLoginSessionActive(
+        sessionId: String
+    ) {
+        val clean =
+            sessionId.trim()
+
+        if (clean.isBlank()) {
+            return
+        }
+
+        prefs.edit()
+            .putString(
+                KEY_LOGIN_SESSION_ID,
+                clean
+            )
+            .putBoolean(
+                KEY_LOGIN_SESSION_INVALIDATED,
+                false
+            )
+            .putString(
+                KEY_LOGIN_SESSION_REASON,
+                ""
+            )
+            .apply()
+
+        _loginSessionInvalidated.value =
+            false
+        _loginSessionReason.value =
+            ""
+    }
+
+    fun invalidateLoginSession(
+        reason: String
+    ) {
+        val safeReason =
+            reason.trim()
+                .ifBlank {
+                    "This SmartDrivo account was signed in on another device."
+                }
+
+        prefs.edit()
+            .putBoolean(
+                KEY_LOGIN_SESSION_INVALIDATED,
+                true
+            )
+            .putString(
+                KEY_LOGIN_SESSION_REASON,
+                safeReason
+            )
+            .apply()
+
+        _loginSessionInvalidated.value =
+            true
+        _loginSessionReason.value =
+            safeReason
+    }
+
+    fun clearLoginSessionState() {
+        prefs.edit()
+            .remove(
+                KEY_LOGIN_SESSION_ID
+            )
+            .putBoolean(
+                KEY_LOGIN_SESSION_INVALIDATED,
+                false
+            )
+            .putString(
+                KEY_LOGIN_SESSION_REASON,
+                ""
+            )
+            .apply()
+
+        _loginSessionInvalidated.value =
+            false
+        _loginSessionReason.value =
+            ""
+    }
+
+    // Admin accounts are intentionally exempt from the one-session driver lock.
+    fun clearLoginSessionForAdmin() {
+        clearLoginSessionState()
     }
 
     // --- User Profile ---
@@ -1692,6 +1850,14 @@ class PreferencesManager(private val context: Context) {
 
         private const val KEY_LAST_SECURITY_VERIFIED_UID =
             "security_last_verified_uid_v1"
+
+        // LOGIN_SESSION_LOCK_V1
+        private const val KEY_LOGIN_SESSION_ID =
+            "security_login_session_id_v1"
+        private const val KEY_LOGIN_SESSION_INVALIDATED =
+            "security_login_session_invalidated_v1"
+        private const val KEY_LOGIN_SESSION_REASON =
+            "security_login_session_reason_v1"
 
         // MINIMUM_VERSION_LOCK_V1
         private const val KEY_FORCE_UPDATE_ENABLED =

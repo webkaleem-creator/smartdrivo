@@ -35,6 +35,8 @@ import com.example.ui.theme.TextDarkSecondary
 fun SecurityLockScreen(
     profile: UserProfile,
     offlineVerificationExpired: Boolean = false,
+    sessionInvalidated: Boolean = false,
+    sessionReason: String = "",
     onRequestDeviceChange: () -> Unit,
     onLogout: () -> Unit
 ) {
@@ -59,6 +61,9 @@ fun SecurityLockScreen(
             adminLocked ->
                 "SmartDrivo Locked"
 
+            sessionInvalidated ->
+                "Session Ended"
+
             offlineVerificationExpired ->
                 "Internet Verification Required"
 
@@ -80,6 +85,13 @@ fun SecurityLockScreen(
 
             adminLocked ->
                 "This account has been locked by SmartDrivo Admin. Auto Accept and assistant functions are disabled."
+
+            sessionInvalidated ->
+                sessionReason
+                    .takeIf {
+                        it.isNotBlank()
+                    }
+                    ?: "This SmartDrivo account was signed in on another device. Log in again to continue on this phone."
 
             offlineVerificationExpired ->
                 "SmartDrivo could not verify this account within the offline grace period. Connect to the internet. Access will restore automatically after server verification."
@@ -145,6 +157,7 @@ fun SecurityLockScreen(
                     !accountBlocked &&
                     !deviceBlacklisted &&
                     !adminLocked &&
+                    !sessionInvalidated &&
                     !offlineVerificationExpired &&
                     profile.boundDeviceName.isNotBlank()
                 ) {
@@ -165,6 +178,7 @@ fun SecurityLockScreen(
                     !accountBlocked &&
                     !deviceBlacklisted &&
                     !adminLocked &&
+                    !sessionInvalidated &&
                     !offlineVerificationExpired
                 ) {
                     Spacer(
@@ -203,7 +217,11 @@ fun SecurityLockScreen(
                     shape = RoundedCornerShape(14.dp)
                 ) {
                     Text(
-                        text = "Log Out",
+                        text =
+                            if (sessionInvalidated)
+                                "Log In Again"
+                            else
+                                "Log Out",
                         fontWeight = FontWeight.Bold
                     )
                 }

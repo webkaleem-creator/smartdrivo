@@ -45,6 +45,11 @@ class FirebaseRepository(
     private var ownSecurityUserVerified = false
     private var ownSecurityDeviceVerified = false
 
+    // LOGIN_SESSION_LOCK_V1
+    @Volatile
+    private var loginSessionClaimInProgress =
+        false
+
     private fun maybeMarkOwnSecurityVerified(
         uid: String
     ) {
@@ -55,6 +60,77 @@ class FirebaseRepository(
             prefs.markSecurityVerifiedNow(
                 uid
             )
+        }
+    }
+
+    // LOGIN_SESSION_LOCK_V1
+    // Claims the current Firebase-authenticated account session.
+    // This runs only during login/startup migration, never in a ride event.
+    private fun claimOwnLoginSession(
+        uid: String
+    ) {
+        val fs =
+            firestore
+                ?: return
+
+        if (
+            uid.isBlank() ||
+            loginSessionClaimInProgress
+        ) {
+            return
+        }
+
+        val sessionId =
+            prefs
+                .getOrCreateLoginSessionIdForClaim()
+
+        loginSessionClaimInProgress =
+            true
+
+        scope.launch {
+            try {
+                fs.collection("users")
+                    .document(uid)
+                    .set(
+                        mapOf(
+                            "activeSessionId" to
+                                sessionId,
+                            "activeSessionDevice" to
+                                currentDeviceName(),
+                            "activeSessionStartedAt" to
+                                System.currentTimeMillis(),
+                            "activeSessionAppVersion" to
+                                currentAppVersionName()
+                        ),
+                        SetOptions.merge()
+                    )
+                    .await()
+
+                prefs.markLoginSessionActive(
+                    sessionId
+                )
+
+                Log.i(
+                    "FirebaseRepo",
+                    "LOGIN SESSION V1: current session claimed"
+                )
+            } catch (e: Exception) {
+                Log.w(
+                    "FirebaseRepo",
+                    "LOGIN SESSION V1 claim failed: ${e.message}"
+                )
+
+                prefs.invalidateLoginSession(
+                    "SmartDrivo could not verify this login session. Check internet and log in again."
+                )
+
+                prefs.setAutoAcceptActive(
+                    false
+                )
+            } finally {
+                loginSessionClaimInProgress =
+                    false
+            }
         }
     }
 
@@ -333,6 +409,51 @@ class FirebaseRepository(
                     )
 
                     prefs.saveUserProfile(merged)
+
+                    // LOGIN_SESSION_LOCK_V1
+                    // Admin is exempt. Drivers keep one authoritative session.
+                    if (remote.isAdmin) {
+                        prefs.clearLoginSessionForAdmin()
+                    } else {
+                        val remoteSessionId =
+                            snapshot.getString(
+                                "activeSessionId"
+                            ).orEmpty()
+
+                        val localSessionId =
+                            prefs.currentLoginSessionId
+
+                        if (
+                            !loginSessionClaimInProgress &&
+                            localSessionId.isNotBlank() &&
+                            remoteSessionId.isNotBlank() &&
+                            remoteSessionId !=
+                                localSessionId
+                        ) {
+                            prefs.invalidateLoginSession(
+                                "This SmartDrivo account was signed in on another device."
+                            )
+
+                            prefs.setAutoAcceptActive(
+                                false
+                            )
+
+                            Log.w(
+                                "FirebaseRepo",
+                                "LOGIN SESSION V1: old session invalidated"
+                            )
+                        } else if (
+                            !loginSessionClaimInProgress &&
+                            localSessionId.isBlank() &&
+                            !snapshot.metadata.isFromCache
+                        ) {
+                            // One-time migration for already logged-in users,
+                            // and every fresh login after local logout.
+                            claimOwnLoginSession(
+                                uid
+                            )
+                        }
+                    }
 
                     // OFFLINE_GRACE_LOCK_V3
                     // Only a server-backed snapshot can renew the lease.
