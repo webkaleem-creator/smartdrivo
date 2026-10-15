@@ -687,29 +687,73 @@ fun PlanSelectionScreen(
 
 @Composable
 private fun MembershipBenefitsSection() {
+    // MEMBERSHIP_FEATURES_V6_15
+    val benefits = listOf(
+        "Fast Auto Accept" to
+            "Quickly handles eligible Rapido orders using your saved settings.",
+
+        "Global Filter" to
+            "Set Minimum Fare and Maximum Pickup or Drop Distance. Choose Fare, Distance or Both.",
+
+        "Order Filter Unlimited" to
+            "Save multiple independent filters with minimum fare and pickup/drop limits.",
+
+        "+Amount Filter Unlimited" to
+            "Prioritize matching extra-amount offers with your area restrictions.",
+
+        "Go-To Area" to
+            "Choose preferred drop areas and configure individual fare and distance limits.",
+
+        "No-Go Area" to
+            "Block unwanted drop destinations using your saved area rules.",
+
+        "Fastest Mode / Speed Only" to
+            "Use pickup-distance focused order selection.",
+
+        "Auto Reject No Condition Match" to
+            "Automatically skip non-matching offers when Auto Reject is enabled.",
+
+        "Bundle Order Support" to
+            "Manage supported bundle orders using your configured rules.",
+
+        "Short Order Reason Popups" to
+            "See compact status popups with order details and matching reasons.",
+
+        "Detailed Order History" to
+            "Review accepted, ignored and rejected orders with saved ride details.",
+
+        "Accept Speed Tracking" to
+            "View available order-accept speed information in History.",
+
+        "Smart Dashboard" to
+            "Check today's performance and access Smart Assistance controls.",
+
+        "Membership & Renewal" to
+            "View your active plan, remaining days and available renewal options.",
+
+        "Telegram Customer Support" to
+            "Get SmartDrivo assistance through the Telegram support channel."
+    )
+
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
         Text(
-            text = "WHAT YOU GET AFTER ACTIVATION",
-            fontSize = 14.sp,
+            text = "SmartDrivo Features & Benefits",
+            fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
-            color = Color(0xFF2196F3)
+            color = Color(0xFF0F172A)
         )
 
-        Spacer(
-            modifier = Modifier.height(4.dp)
-        )
+        Spacer(modifier = Modifier.height(5.dp))
 
         Text(
-            text = "Activate any membership plan to unlock full SmartDrivo access.",
-            fontSize = 11.5.sp,
+            text = "15 features included with SmartDrivo membership",
+            fontSize = 12.sp,
             color = Color(0xFF64748B)
         )
 
-        Spacer(
-            modifier = Modifier.height(10.dp)
-        )
+        Spacer(modifier = Modifier.height(9.dp))
 
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -721,44 +765,36 @@ private fun MembershipBenefitsSection() {
             Column(
                 modifier = Modifier.padding(
                     horizontal = 14.dp,
-                    vertical = 12.dp
+                    vertical = 14.dp
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                MembershipBenefitRow(
-                    title = "Fast Auto Accept",
-                    description = "Quickly accepts matching ride offers using your saved settings."
+                Text(
+                    text = "15 SMARTDRIVO FEATURES",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF2196F3)
                 )
 
-                MembershipBenefitRow(
-                    title = "Fare & Distance Filters",
-                    description = "Use minimum fare, maximum pickup, maximum drop and Filter 2 rules."
-                )
-
-                MembershipBenefitRow(
-                    title = "GO TO & NO GO Areas",
-                    description = "Choose preferred destination areas and block unwanted destination areas."
-                )
-
-                MembershipBenefitRow(
-                    title = "Auto Reject No Match",
-                    description = "When enabled, offers that do not match active conditions can be skipped automatically."
-                )
-
-                MembershipBenefitRow(
-                    title = "Bundle Order Support",
-                    description = "Control supported bundle offers together with your normal filters."
-                )
-
-                MembershipBenefitRow(
-                    title = "Ride History & Accept Speed",
-                    description = "See accepted, ignored and rejected ride records with useful order details."
-                )
+                benefits.forEach { (title, description) ->
+                    MembershipBenefitRow(
+                        title = title,
+                        description = description
+                    )
+                }
             }
         }
+
+        Spacer(modifier = Modifier.height(9.dp))
+
+        Text(
+            text = "Rapido support is currently available. Ola and Uber testing is pending.",
+            fontSize = 10.5.sp,
+            color = Color(0xFF64748B),
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
     }
 }
-
 @Composable
 private fun MembershipBenefitRow(
     title: String,
