@@ -742,16 +742,6 @@
           userData = userDoc.data();
           isAdmin = (userData.isAdmin === true);
           isActive = (userData.isActive === true || (userData.isActive !== false && userData.isAdmin === true));
-        } else {
-          // Fallback by email query
-          if (user.email) {
-            const snap = await db.collection('users').where('email', '==', user.email).limit(1).get();
-            if (!snap.empty) {
-              userData = snap.docs[0].data();
-              isAdmin = (userData.isAdmin === true);
-              isActive = (userData.isActive === true || (userData.isActive !== false && userData.isAdmin === true));
-            }
-          }
         }
 
         if (!isAdmin || !isActive) {
@@ -920,6 +910,35 @@
         return canonical;
       });
     }
+    // SECURITY_V2B_ADMIN_RISK_FLAGS
+    // Mobile numbers are self-reported, NOT OTP verified.
+    // Never treat matching numbers as proof of account ownership.
+    function markDriverRegistrationRisks(rows) {
+      const phoneCounts = new Map();
+
+      rows.forEach(driver => {
+        const phone = normalizeDriverPhone(driver.phone);
+        if (/^[6-9][0-9]{9}$/.test(phone)) {
+          phoneCounts.set(
+            phone,
+            (phoneCounts.get(phone) || 0) + 1
+          );
+        }
+      });
+
+      return rows.map(driver => {
+        const phone = normalizeDriverPhone(driver.phone);
+        const validPhone = /^[6-9][0-9]{9}$/.test(phone);
+
+        return {
+          ...driver,
+          phoneInvalid: !validPhone,
+          emailMissing: !normalizeDriverEmail(driver.email),
+          duplicatePhoneAccounts:
+            validPhone ? (phoneCounts.get(phone) || 0) : 0
+        };
+      });
+    }
     function startRealtimeListeners() {
       // A. Listen to /users collection
       db.collection('users').onSnapshot((snapshot) => {
@@ -978,7 +997,7 @@
           });
         });
 
-        liveDrivers = collapseDuplicateDrivers(rawDrivers);
+        liveDrivers = markDriverRegistrationRisks(collapseDuplicateDrivers(rawDrivers));
 
         const hiddenDuplicateCount =
           Math.max(0, rawDrivers.length - liveDrivers.length);
@@ -1150,12 +1169,20 @@
           <td>
             <strong>${escapeHtml(driver.name)}</strong>
             ${driver.isAdmin ? '<span class="badge">ADMIN</span>' : ''}
+            ${driver.duplicateCount > 1 ? `<span style="color:#F59E0B;font-size:10px;"> Legacy records: ${Number(driver.duplicateCount)}</span>` : ''}
+            <div style="font-size:10px;color:#64748B;">
+              UID: ${escapeHtml(driver.uid)}
+            </div>
           </td>
           <td>
             <strong>${escapeHtml(driver.phone || 'No Phone')}</strong>
             <div style="font-size:11px; color:var(--text-dim);">
-              ${escapeHtml(driver.email || '')}
+              ${escapeHtml(driver.email || 'No Email')}
             </div>
+            ${driver.duplicatePhoneAccounts > 1 ? `<div style="color:#F59E0B;font-size:11px;font-weight:bold;">Duplicate number in ${Number(driver.duplicatePhoneAccounts)} accounts</div>` : ''}
+            ${driver.phoneInvalid ? '<div style="color:#EF4444;font-size:11px;">Missing / invalid mobile number</div>' : ''}
+            ${driver.emailMissing ? '<div style="color:#EF4444;font-size:11px;">Missing stored email</div>' : ''}
+            <div style="color:#64748B;font-size:10px;">Mobile not OTP-verified</div>
           </td>
           <td>${escapeHtml(driver.city)}</td>
           <td>${escapeHtml(driver.state)}</td>

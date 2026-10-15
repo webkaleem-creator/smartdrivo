@@ -392,8 +392,11 @@ fun ProfileSetupScreen(
                         cleanName.isEmpty() -> {
                             errorText = "Please enter your full name"
                         }
-                        cleanPhone.length != 10 -> {
-                            errorText = "Please enter a valid 10-digit mobile number"
+                        !cleanPhone.matches(Regex("^[6-9][0-9]{9}$")) -> {
+                            errorText = "Enter a valid Indian mobile number starting with 6, 7, 8 or 9"
+                        }
+                        cleanPhone.toSet().size == 1 -> {
+                            errorText = "Repeated-digit mobile numbers are not allowed"
                         }
                         cleanCity.isEmpty() -> {
                             errorText = "Please enter your city (e.g. Hyderabad)"
