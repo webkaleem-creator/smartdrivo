@@ -858,10 +858,7 @@ class PreferencesManager(private val context: Context) {
             putBoolean(KEY_AUTO_ACCEPT, settings.isAutoAcceptActive)
             putBoolean(KEY_AUTO_REJECT_BAD_FARES, settings.isAutoRejectBadFaresEnabled)
             putBoolean(KEY_FASTEST_MODE, settings.isFastestModeEnabled)
-            putBoolean(
-                KEY_PRIMARY_FILTER_ENABLED,
-                settings.isPrimaryFilterEnabled
-            )
+            putBoolean(KEY_PRIMARY_FILTER_ENABLED, true)
             putBoolean(
                 "setting_order_reason_popups",
                 settings.showOrderReasonPopups
@@ -934,7 +931,7 @@ class PreferencesManager(private val context: Context) {
         }
         _isGoToEnabled.value = settings.isGoToEnabled
         _isNoGoEnabled.value = settings.isNoGoEnabled
-        _appSettings.value = settings
+        _appSettings.value = settings.copy(isPrimaryFilterEnabled = true)
     }
 
     private fun getSafeFloat(key: String, defaultValue: Float): Float {
@@ -1046,11 +1043,7 @@ class PreferencesManager(private val context: Context) {
             isAutoAcceptActive = prefs.getBoolean(KEY_AUTO_ACCEPT, true),
             isAutoRejectBadFaresEnabled = prefs.getBoolean(KEY_AUTO_REJECT_BAD_FARES, false),
             isFastestModeEnabled = prefs.getBoolean(KEY_FASTEST_MODE, false),
-            isPrimaryFilterEnabled =
-                prefs.getBoolean(
-                    KEY_PRIMARY_FILTER_ENABLED,
-                    true
-                ),
+            isPrimaryFilterEnabled = true,
             showOrderReasonPopups =
                 prefs.getBoolean(
                     "setting_order_reason_popups",

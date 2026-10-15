@@ -1183,50 +1183,12 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                 )
                             }
 
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = if (settings.isPrimaryFilterEnabled)
-                                        "ON"
-                                    else
-                                        "OFF",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (settings.isPrimaryFilterEnabled)
-                                        BluePrimary
-                                    else
-                                        TextDarkSecondary
-                                )
-
-                                Spacer(Modifier.width(5.dp))
-
-                                Switch(
-                                    checked = settings.isPrimaryFilterEnabled,
-                                    onCheckedChange = { enabled ->
-                                        prefs.saveAppSettings(
-                                            settings.copy(
-                                                isPrimaryFilterEnabled = enabled
-                                            )
-                                        )
-
-                                        coroutineScope.launch {
-                                            snackbarHostState.showSnackbar(
-                                                if (enabled)
-                                                    "Global Filter ON"
-                                                else
-                                                    "Global Filter OFF"
-                                            )
-                                        }
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = BluePrimary,
-                                        uncheckedThumbColor = Color.White,
-                                        uncheckedTrackColor = Color(0xFFBDBDBD)
-                                    )
-                                )
-                            }
+                            Text(
+                                text = "ON",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = BluePrimary
+                            )
                         }
                         // Fare / Distance / Both selector
                         Row(
