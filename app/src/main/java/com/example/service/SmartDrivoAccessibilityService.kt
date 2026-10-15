@@ -7812,6 +7812,93 @@ private val processingTimeoutRunnable = Runnable {
                 }
 
             if (legacyPlusMatch || additionalRule != null) {
+                // SMARTDRIVO_TASK1_PLUS_NOGO_V1
+                // +Amount priority must never bypass an enabled No-Go area.
+                // No new screen scan, database query, or network call.
+                if (prefs.isNoGoEnabled) {
+                    val enabledNoGoGroups =
+                        prefs.noGoAreas.value.filter { it.isEnabled }
+
+                    val hasNoGoWords = enabledNoGoGroups.any { group ->
+                        group.keywords.any { word ->
+                            word.isNotBlank() &&
+                                !word.trim().equals(
+                                    group.name,
+                                    ignoreCase = true
+                                )
+                        }
+                    }
+
+                    if (hasNoGoWords) {
+                        val dropText =
+                            "${candidate.dropAddress.orEmpty()} ${candidate.dropArea.orEmpty()}".trim()
+
+                        val destinationKnown =
+                            listOf(candidate.dropAddress, candidate.dropArea)
+                                .any {
+                                    !it.isNullOrBlank() &&
+                                        !it.equals(
+                                            "Address unavailable",
+                                            ignoreCase = true
+                                        )
+                                }
+
+                        var noGoBlockReason: String? =
+                            if (!destinationKnown) {
+                                "No-Go Area: destination unavailable"
+                            } else {
+                                null
+                            }
+
+                        if (destinationKnown) {
+                            for (group in enabledNoGoGroups) {
+                                for (rawWord in group.keywords) {
+                                    val word = rawWord.trim()
+
+                                    if (
+                                        word.isBlank() ||
+                                        word.equals(
+                                            group.name,
+                                            ignoreCase = true
+                                        )
+                                    ) continue
+
+                                    val exactWord = Regex(
+                                        "(?<![\\p{L}\\p{N}])" +
+                                            Regex.escape(word) +
+                                            "(?![\\p{L}\\p{N}])",
+                                        RegexOption.IGNORE_CASE
+                                    )
+
+                                    if (exactWord.containsMatchIn(dropText)) {
+                                        noGoBlockReason =
+                                            "No-Go Area: destination matches '$word' in '${group.name}'"
+                                        break
+                                    }
+                                }
+
+                                if (noGoBlockReason != null) break
+                            }
+                        }
+
+                        if (noGoBlockReason != null) {
+                            Log.i(
+                                TAG,
+                                "RAPIDO +AMOUNT NO-GO BLOCKED: $noGoBlockReason"
+                            )
+
+                            handleRapidoFilterFailure(
+                                root = root,
+                                candidate = candidate,
+                                recordId = recordId,
+                                reason = noGoBlockReason,
+                                defaultStatus = OrderStatus.IGNORED
+                            )
+                            return
+                        }
+                    }
+                }
+
                 val selectedMinimum = additionalRule?.minimum ?: settings.plusAmountMin
                 val selectedPickup = additionalRule?.maxPickupKm ?: settings.plusAmountMaxPickupDistanceKm
                 val selectedDrop = additionalRule?.maxDropKm ?: settings.plusAmountMaxDropDistanceKm
