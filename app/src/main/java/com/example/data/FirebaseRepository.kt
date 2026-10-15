@@ -72,13 +72,7 @@ class FirebaseRepository(
         }
     }
 
-    fun getCurrentUid(): String {
-        return auth?.currentUser?.uid ?: prefs.userProfile.value.uid.ifEmpty {
-            val generated = UUID.randomUUID().toString()
-            prefs.saveUserProfile(prefs.userProfile.value.copy(uid = generated))
-            generated
-        }
-    }
+    fun getCurrentUid(): String = auth?.currentUser?.uid.orEmpty()
 
     // ADMIN_DEVICE_INFO_V4
     // Privacy-safe metadata only.
@@ -236,8 +230,7 @@ class FirebaseRepository(
         val uid = auth?.currentUser?.uid ?: return
         val fs = firestore ?: return
 
-        // Clear old device-session invalidation on startup.
-        prefs.clearLoginSessionState()
+        // Session ID is preserved during normal app restarts.
 
         ownUserListener?.remove()
         ownPaymentsListener?.remove()
@@ -372,10 +365,7 @@ class FirebaseRepository(
                 val authenticatedUid =
                     auth?.currentUser?.uid.orEmpty()
 
-                val uid =
-                    authenticatedUid.ifBlank {
-                        profile.uid
-                    }
+                val uid = authenticatedUid
 
                 if (uid.isBlank()) {
                     onComplete?.invoke(false)
@@ -747,12 +737,6 @@ class FirebaseRepository(
         val fs = firestore ?: return null
         return try {
             var doc = if (uid.isNotBlank()) fs.collection("users").document(uid).get().await() else null
-            if ((doc == null || !doc.exists()) && email.isNotBlank()) {
-                val query = fs.collection("users").whereEqualTo("email", email).limit(1).get().await()
-                if (!query.isEmpty) {
-                    doc = query.documents.first()
-                }
-            }
             if (doc != null && doc.exists()) {
                 val phone = doc.getString("phone")
                     ?: doc.getString("mobile")

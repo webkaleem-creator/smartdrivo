@@ -210,15 +210,8 @@ fun WelcomeScreen(
     }
 
     // Helper login success handler
+    // SECURITY_V2A_WELCOME
     val handleSuccessfulLogin: (String) -> Unit = { identifier ->
-        prefs.isLoggedIn = true
-        prefs.hasOpenedBefore = true
-        val updated = if (identifier.contains("@")) {
-            userProfile.copy(email = identifier)
-        } else {
-            userProfile.copy(phone = identifier)
-        }
-        prefs.saveUserProfile(updated)
         onLoginSuccess(identifier)
     }
 

@@ -58,6 +58,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.auth.PhoneAuthManager
+import com.example.auth.SingleSessionGuard
 import com.example.data.FirebaseRepository
 import com.example.data.PreferencesManager
 import com.google.firebase.FirebaseApp
@@ -235,6 +236,7 @@ fun SmartDrivoApp(
     val currentRoute = navBackStackEntry?.destination?.route
 
     val userProfile by prefs.userProfile.collectAsState()
+    val loginFlag by prefs.isLoggedInFlow.collectAsState()
 
     val membershipPlans by
         prefs.membershipPlans.collectAsState()
@@ -271,7 +273,7 @@ fun SmartDrivoApp(
 
     val isUserAdmin = userProfile.isAdmin
     val firebaseUser = PhoneAuthManager.getAuthInstance()?.currentUser
-    val isLoggedIn = prefs.isLoggedIn && (firebaseUser != null || userProfile.email.isNotBlank() || userProfile.phone.isNotBlank())
+    val isLoggedIn = loginFlag && firebaseUser != null && firebaseUser.uid == userProfile.uid
     val isProfileComplete = userProfile.phone.isNotBlank() && userProfile.city.isNotBlank() && userProfile.state.isNotBlank()
 
     // OFFLINE_GRACE_LOCK_V1
@@ -342,6 +344,39 @@ fun SmartDrivoApp(
         }
     }
 
+    // SECURITY_V2A_STARTUP
+    LaunchedEffect(isLoggedIn) {
+        if (isLoggedIn) {
+            if (prefs.currentLoginSessionId.isBlank()) {
+                prefs.setAutoAcceptActive(false)
+            }
+
+            val sessionReady = SingleSessionGuard.restoreExisting(prefs)
+
+            if (!sessionReady) {
+                prefs.setAutoAcceptActive(false)
+                repository.stopOwnMembershipSync()
+                prefs.isLoggedIn = false
+                PhoneAuthManager.signOut()
+                prefs.clearLoginSessionState()
+                return@LaunchedEffect
+            }
+
+            SingleSessionGuard.watch(prefs) {
+                prefs.setAutoAcceptActive(false)
+                repository.stopOwnMembershipSync()
+                prefs.isLoggedIn = false
+                PhoneAuthManager.signOut()
+                prefs.clearLoginSessionState()
+                navController.navigate(Routes.WELCOME) {
+                    popUpTo(0) { inclusive = true }
+                    launchSingleTop = true
+                }
+            }
+        } else {
+            SingleSessionGuard.stop()
+        }
+    }
     // Verify profile with Firestore for existing users on startup
     LaunchedEffect(isLoggedIn) {
         if (isLoggedIn) {
@@ -399,7 +434,7 @@ fun SmartDrivoApp(
 
     val initialRoute = remember {
         val fUser = PhoneAuthManager.getAuthInstance()?.currentUser
-        val loggedIn = prefs.isLoggedIn && (fUser != null || userProfile.email.isNotBlank() || userProfile.phone.isNotBlank())
+        val loggedIn = loginFlag && fUser != null && fUser.uid == userProfile.uid
         val admin = userProfile.isAdmin
         val hasAllPermissions = checkAllPermissionsGranted()
 
@@ -750,7 +785,7 @@ fun SmartDrivoApp(
             SplashScreen(
                 onTimeout = {
                     val fUser = PhoneAuthManager.getAuthInstance()?.currentUser
-                    val loggedIn = prefs.isLoggedIn && (fUser != null || userProfile.phone.isNotEmpty() || userProfile.email.isNotEmpty())
+                    val loggedIn = prefs.isLoggedIn && fUser != null && fUser.uid == prefs.userProfile.value.uid
                     val admin = userProfile.isAdmin
                     val hasAllPermissions = checkAllPermissionsGranted()
                     prefs.hasOpenedBefore = true
@@ -926,77 +961,100 @@ fun SmartDrivoApp(
                             ).show()
                         }
                     }
-                },                onLoginSuccess = { phoneOrEmail ->
-                    prefs.isLoggedIn = true
-                    prefs.hasOpenedBefore = true
-                    val email = if (phoneOrEmail.contains("@")) phoneOrEmail else userProfile.email
-                    val currentUid = repository.getCurrentUid().ifEmpty { userProfile.uid }
+                },                onLoginSuccess = { _ ->
+                    // SECURITY_V2A_LOGIN
+                    val account = PhoneAuthManager.getAuthInstance()?.currentUser
+                    val uid = account?.uid.orEmpty()
+                    val email = account?.email.orEmpty()
+                    val isGoogle = account?.providerData?.any {
+                        it.providerId == "google.com"
+                    } == true
 
-                    repository.checkUserProfileFromFirestore(currentUid, email) { firestoreProfile ->
-                        val merged = if (firestoreProfile != null) {
-                            userProfile.copy(
-                                uid = firestoreProfile.uid.ifEmpty { currentUid },
-                                name = firestoreProfile.name.ifEmpty { userProfile.name },
-                                email = if (email.isNotBlank()) email else firestoreProfile.email,
-                                phone = firestoreProfile.phone.ifEmpty { if (!phoneOrEmail.contains("@")) phoneOrEmail else userProfile.phone },
-                                city = firestoreProfile.city,
-                                state = firestoreProfile.state,
-                                vehicleType = firestoreProfile.vehicleType,
-                                plan = firestoreProfile.plan,
-                                planPrice = firestoreProfile.planPrice,
-                                planExpireMillis = firestoreProfile.planExpireMillis,
-                                isApproved = firestoreProfile.isApproved,
-                                isAdmin = firestoreProfile.isAdmin,
-                                isActive = firestoreProfile.isActive,
-                                isBlocked = firestoreProfile.isBlocked,
-                                blockReason = firestoreProfile.blockReason,
-                                isDeviceBlacklisted =
-                                    firestoreProfile.isDeviceBlacklisted,
-                                deviceBlacklistReason =
-                                    firestoreProfile.deviceBlacklistReason,
-                                boundInstallId = firestoreProfile.boundInstallId,
-                                boundDeviceName = firestoreProfile.boundDeviceName,
-                                isDeviceAuthorized = firestoreProfile.isDeviceAuthorized,
-                                deviceChangeRequested = firestoreProfile.deviceChangeRequested
-                            )
-                        } else {
-                            val updatedEmail = if (phoneOrEmail.contains("@")) phoneOrEmail else userProfile.email
-                            val updatedPhone = if (!phoneOrEmail.contains("@")) phoneOrEmail else userProfile.phone
-                            userProfile.copy(uid = currentUid, email = updatedEmail, phone = updatedPhone, isAdmin = false)
-                        }
-                        prefs.saveUserProfile(merged)
-                        // DEVICE_SYNC_LOGIN_V2
-                        // Sync current phone metadata immediately after login.
-                        repository.saveUserProfile(merged)
-                        if (!merged.isPlanValid && !merged.isAdmin) {
-                            prefs.setAutoAcceptActive(false)
-                        }
+                    if (uid.isBlank() || email.isBlank() || !isGoogle) {
+                        prefs.isLoggedIn = false
+                        prefs.setAutoAcceptActive(false)
+                        android.widget.Toast.makeText(
+                            appContext, "Google login required",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        prefs.isLoggedIn = false
+                        prefs.setAutoAcceptActive(false)
+                        repository.stopOwnMembershipSync()
+                        SingleSessionGuard.stop()
+                        prefs.clearLoginSessionState()
 
-                        // If empty → go to ProfileSetupScreen. If filled → continue to next gate check
-                        val isProfileEmpty = merged.phone.isBlank() || merged.city.isBlank() || merged.state.isBlank()
-                        val securityBlocked = false
+                        val fresh = com.example.model.UserProfile(
+                            uid = uid,
+                            email = email
+                        )
+                        prefs.saveUserProfile(fresh)
 
-                        if (securityBlocked) {
-                            navController.navigate(Routes.SECURITY_LOCK) {
-                                popUpTo(Routes.WELCOME) { inclusive = true }
-                            }
-                        } else if (isProfileEmpty && !merged.isAdmin) {
-                            navController.navigate(Routes.PROFILE_SETUP) {
-                                popUpTo(Routes.WELCOME) { inclusive = true }
-                            }
-                        } else {
-                            val isMembershipValid = merged.isAdmin || merged.isPlanValid
-                            if (isMembershipValid) {
-                                val hasAllPermissions = checkAllPermissionsGranted()
-                                val dest = if (hasAllPermissions) Routes.HOME else Routes.FINISH_SETUP
-                                navController.navigate(dest) {
-                                    popUpTo(Routes.WELCOME) { inclusive = true }
-                                }
-                            } else {
-                                // Login succeeds even without membership.
-                                // The Home screen opens in locked preview mode.
-                                navController.navigate(Routes.HOME) {
-                                    popUpTo(Routes.WELCOME) { inclusive = true }
+                        repository.checkUserProfileFromFirestore(
+                            uid, ""
+                        ) { remote ->
+                            if (PhoneAuthManager.getAuthInstance()
+                                    ?.currentUser?.uid == uid) {
+
+                                val profile = if (
+                                    remote != null && remote.uid == uid
+                                ) remote.copy(email = email) else fresh
+
+                                prefs.saveUserProfile(profile)
+
+                                repository.saveUserProfile(profile) { synced ->
+                                    android.os.Handler(
+                                        android.os.Looper.getMainLooper()
+                                    ).post {
+                                        if (!synced) {
+                                            prefs.setAutoAcceptActive(false)
+                                            android.widget.Toast.makeText(
+                                                appContext,
+                                                "Account sync failed. Try again.",
+                                                android.widget.Toast.LENGTH_LONG
+                                            ).show()
+                                        } else if (
+                                            PhoneAuthManager.getAuthInstance()
+                                                ?.currentUser?.uid == uid
+                                        ) {
+                                            SingleSessionGuard.claimFresh(prefs) { claimed ->
+                                                if (!claimed) {
+                                                    prefs.setAutoAcceptActive(false)
+                                                    android.widget.Toast.makeText(
+                                                        appContext,
+                                                        "Session claim failed. Check internet.",
+                                                        android.widget.Toast.LENGTH_LONG
+                                                    ).show()
+                                                } else {
+                                                    prefs.isLoggedIn = true
+                                                    prefs.hasOpenedBefore = true
+
+                                                    val saved = prefs.userProfile.value
+                                                    val needsSetup =
+                                                        saved.phone.isBlank() ||
+                                                        saved.city.isBlank() ||
+                                                        saved.state.isBlank()
+
+                                                    val target = when {
+                                                        needsSetup && !saved.isAdmin ->
+                                                            Routes.PROFILE_SETUP
+                                                        !saved.isAdmin && !saved.isPlanValid ->
+                                                            Routes.HOME
+                                                        checkAllPermissionsGranted() ->
+                                                            Routes.HOME
+                                                        else -> Routes.FINISH_SETUP
+                                                    }
+
+                                                    navController.navigate(target) {
+                                                        popUpTo(Routes.WELCOME) {
+                                                            inclusive = true
+                                                        }
+                                                        launchSingleTop = true
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1015,72 +1073,56 @@ fun SmartDrivoApp(
                 initialVehicle = userProfile.vehicleType,
                 onSaveProfile = { name, mobileNumber, city, state, vehicleType ->
                     val cleanPhone = if (mobileNumber.startsWith("+")) mobileNumber else "+91$mobileNumber"
-                    // FREE_TRIAL_PROFILE_SETUP_V3
-                    val now =
-                        System.currentTimeMillis()
+                    // SECURITY_V2A_SERVER_TRIAL_ONLY
+                    val updated = prefs.userProfile.value.copy(
+                        name = name,
+                        phone = cleanPhone,
+                        city = city,
+                        state = state,
+                        vehicleType = vehicleType
+                    )
 
-                    val shouldStartFreeTrial =
-                        !userProfile.isAdmin &&
-                            !userProfile.isApproved &&
-                            !userProfile.isPlanValid &&
-                            (
-                                userProfile.plan.isBlank() ||
-                                    userProfile.plan.equals(
-                                        "NONE",
-                                        ignoreCase = true
-                                    ) ||
-                                    userProfile.plan.equals(
-                                        "7DAYS",
-                                        ignoreCase = true
-                                    )
-                            )
+                    val uid = PhoneAuthManager
+                        .getAuthInstance()?.currentUser?.uid.orEmpty()
 
-                    val updated =
-                        userProfile.copy(
-                            name = name,
-                            phone = cleanPhone,
-                            city = city,
-                            state = state,
-                            vehicleType = vehicleType,
-                            plan =
-                                if (shouldStartFreeTrial)
-                                    "FREE_TRIAL"
-                                else
-                                    userProfile.plan,
-                            planPrice =
-                                if (shouldStartFreeTrial)
-                                    0
-                                else
-                                    userProfile.planPrice,
-                            planExpireMillis =
-                                if (shouldStartFreeTrial)
-                                    now +
-                                        (
-                                            24L *
-                                                60L *
-                                                60L *
-                                                1000L
-                                        )
-                                else
-                                    userProfile.planExpireMillis,
-                            isApproved =
-                                if (shouldStartFreeTrial)
-                                    false
-                                else
-                                    userProfile.isApproved,
-                            isActive = true
-                        )
-                    prefs.saveUserProfile(updated)
-                    repository.saveUserProfile(updated)
-                    if (updated.isAdmin || updated.isPlanValid) {
-                        val hasAllPermissions = checkAllPermissionsGranted()
-                        val dest = if (hasAllPermissions) Routes.HOME else Routes.FINISH_SETUP
-                        navController.navigate(dest) {
-                            popUpTo(Routes.PROFILE_SETUP) { inclusive = true }
-                        }
+                    if (uid.isBlank() || updated.uid != uid) {
+                        android.widget.Toast.makeText(
+                            appContext,
+                            "Google session expired. Login again.",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
                     } else {
-                        navController.navigate(Routes.HOME) {
-                            popUpTo(Routes.PROFILE_SETUP) { inclusive = true }
+                        repository.saveUserProfile(updated) { synced ->
+                            android.os.Handler(
+                                android.os.Looper.getMainLooper()
+                            ).post {
+                                if (
+                                    PhoneAuthManager.getAuthInstance()
+                                        ?.currentUser?.uid == uid
+                                ) {
+                                    if (!synced) {
+                                        android.widget.Toast.makeText(
+                                            appContext,
+                                            "Profile sync failed. Retry.",
+                                            android.widget.Toast.LENGTH_LONG
+                                        ).show()
+                                    } else {
+                                        val saved = prefs.userProfile.value
+                                        val target = when {
+                                            !saved.isAdmin && !saved.isPlanValid ->
+                                                Routes.HOME
+                                            checkAllPermissionsGranted() ->
+                                                Routes.HOME
+                                            else -> Routes.FINISH_SETUP
+                                        }
+                                        navController.navigate(target) {
+                                            popUpTo(Routes.PROFILE_SETUP) {
+                                                inclusive = true
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
