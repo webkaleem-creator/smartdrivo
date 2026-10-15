@@ -80,6 +80,7 @@ import com.example.ui.screens.PaymentScreen
 import com.example.ui.screens.PaymentSuccessScreen
 import com.example.ui.screens.PlanSelectionScreen
 import com.example.ui.screens.ProfileScreen
+import com.example.ui.screens.ReadOnlyDriverProfileScreen
 import com.example.ui.screens.ProfileSetupScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SecurityLockScreen
@@ -115,6 +116,7 @@ object Routes {
     const val ORDER_HISTORY = "order_history"
     const val SETTINGS = "settings"
     const val PROFILE = "profile"
+    const val PROFILE_DETAILS = "profile_details"
     const val COMMUNITY = "community"
     const val ADMIN_PANEL = "admin_panel"
     const val FINISH_SETUP = "finish_setup"
@@ -1384,6 +1386,7 @@ fun SmartDrivoApp(
                 onNavigateToPaymentHistory = { navController.navigate(Routes.PAYMENT_HISTORY) },
                 onNavigateToSettings = { navController.navigate(Routes.SETTINGS) },
                 onNavigateToCommunity = { navController.navigate(Routes.COMMUNITY) },
+                onNavigateToReadOnlyProfile = { navController.navigate(Routes.PROFILE_DETAILS) },
                 onNavigateToAdminPanel = { navController.navigate(Routes.ADMIN_PANEL) },
                 onLogout = {
                     repository.stopOwnMembershipSync()
@@ -1400,6 +1403,13 @@ fun SmartDrivoApp(
             )
         }
 
+        // READ_ONLY_PROFILE_ROUTE_V1
+        composable(Routes.PROFILE_DETAILS) {
+            ReadOnlyDriverProfileScreen(
+                prefs = prefs,
+                onBack = { navController.popBackStack() }
+            )
+        }
         // 17. Community Screen
         composable(Routes.COMMUNITY) {
             CommunityScreen(

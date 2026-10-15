@@ -1,5 +1,12 @@
 package com.example.ui.screens
 
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -89,6 +96,7 @@ fun MoreScreen(
     onNavigateToPaymentHistory: () -> Unit,
     onNavigateToSettings: () -> Unit = {},
     onNavigateToCommunity: () -> Unit = {},
+    onNavigateToReadOnlyProfile: () -> Unit = {},
     onNavigateToAdminPanel: () -> Unit = {},
     onLogout: () -> Unit,
     onBack: () -> Unit = {}
@@ -96,6 +104,33 @@ fun MoreScreen(
     val userProfile by prefs.userProfile.collectAsState()
     val settings by prefs.appSettings.collectAsState()
     var showTutorialDialog by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val links by prefs.communityLinks.collectAsState()
+
+    fun openSupportLink(url: String) {
+        val address = url.trim()
+        if (!address.startsWith("https://", ignoreCase = true) &&
+            !address.startsWith("http://", ignoreCase = true)) {
+            Toast.makeText(
+                context,
+                "Support link unavailable",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+        try {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(address))
+            )
+        } catch (_: Exception) {
+            Toast.makeText(
+                context,
+                "Unable to open support link",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
 
     Scaffold(
         // SMARTDRIVO_ALL_PAGES_UP_V3
@@ -161,17 +196,133 @@ fun MoreScreen(
         ) {
             item { Spacer(modifier = Modifier.height(2.dp)) }
 
-            // 1. Driver Profile Card
+            // SMARTDRIVO_SUPPORT_CENTER_V1
             item {
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onNavigateToCommunity() },
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color(0xFF142B50)
+                    ),
+                    border = BorderStroke(
+                        1.dp, Color(0xFF36547D)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(13.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(43.dp)
+                                    .background(
+                                        Color(0xFF28599C),
+                                        RoundedCornerShape(12.dp)
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.HeadsetMic,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            Spacer(Modifier.width(10.dp))
+
+                            Column(
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = "SMARTDRIVO SUPPORT CENTER",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = "Help, updates & driver community",
+                                    fontSize = 10.sp,
+                                    color = Color(0xFFBDD0EA)
+                                )
+                            }
+
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = "Open support center",
+                                tint = Color(0xFFBDD0EA)
+                            )
+                        }
+
+                        HorizontalDivider(
+                            color = Color(0xFF37547B)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            MoreSupportShortcut(
+                                title = "Telegram",
+                                icon = Icons.Default.Send,
+                                tint = Color(0xFF229ED9),
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    openSupportLink(links.supportTelegramUrl)
+                                }
+                            )
+
+                            MoreSupportShortcut(
+                                title = "WhatsApp",
+                                icon = Icons.Default.Campaign,
+                                tint = Color(0xFF16A34A),
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    openSupportLink(links.whatsappUrl)
+                                }
+                            )
+
+                            MoreSupportShortcut(
+                                title = "Instagram",
+                                icon = Icons.Default.PhotoCamera,
+                                tint = Color(0xFFE1306C),
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    openSupportLink(links.instagramUrl)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // READ_ONLY_MY_PROFILE_V1
+            item {
+                val vehicleLabel = when (userProfile.vehicleType) {
+                    VehicleType.AUTO -> "Auto Rickshaw"
+                    VehicleType.BIKE -> "Bike"
+                    VehicleType.CAR -> "Car"
+                }
+                val planActive = userProfile.isPlanValid || userProfile.isAdmin
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onNavigateToReadOnlyProfile() },
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = CardBackground),
+                    colors = CardDefaults.cardColors(
+                        containerColor = CardBackground
+                    ),
                     border = BorderStroke(1.dp, CardBorderDefault)
                 ) {
                     Column(
                         modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -179,72 +330,42 @@ fun MoreScreen(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(46.dp)
-                                    .background(BlueContainer, CircleShape),
+                                    .size(48.dp)
+                                    .background(
+                                        BlueContainer,
+                                        CircleShape
+                                    ),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Person,
                                     contentDescription = null,
                                     tint = BluePrimary,
-                                    modifier = Modifier.size(24.dp)
+                                    modifier = Modifier.size(25.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Spacer(Modifier.width(12.dp))
+
                             Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = userProfile.name.ifEmpty { "Driver Account" },
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp,
-                                        color = TextDarkPrimary
-                                    )
-                                    if (userProfile.isAdmin) {
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .background(StatusActiveGreenBg, RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = "ADMIN",
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = StatusActiveGreen
-                                            )
-                                        }
-                                    }
-                                }
-                                if (userProfile.phone.isNotEmpty()) {
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = "📱 ${userProfile.phone}",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = TextDarkPrimary
-                                    )
-                                }
-                                if (userProfile.city.isNotEmpty() || userProfile.state.isNotEmpty()) {
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    val locationText = listOf(userProfile.city, userProfile.state)
-                                        .filter { it.isNotEmpty() }
-                                        .joinToString(", ")
-                                    Text(
-                                        text = "📍 $locationText",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = BluePrimary
-                                    )
-                                }
-                                if (userProfile.email.isNotEmpty() && userProfile.email != userProfile.phone) {
-                                    Spacer(modifier = Modifier.height(1.dp))
-                                    Text(
-                                        text = "✉️ ${userProfile.email}",
-                                        fontSize = 11.sp,
-                                        color = TextDarkSecondary
-                                    )
-                                }
+                                Text(
+                                    text = "My Profile",
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextDarkPrimary
+                                )
+                                Text(
+                                    text = "View account details",
+                                    fontSize = 11.sp,
+                                    color = TextDarkSecondary
+                                )
                             }
+
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = "View Profile",
+                                tint = BluePrimary
+                            )
                         }
 
                         HorizontalDivider(color = CardBorderDefault)
@@ -254,53 +375,29 @@ fun MoreScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Vehicle badge
-                            Box(
-                                modifier = Modifier
-                                    .background(BlueContainer, RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                val vIcon = when (userProfile.vehicleType) {
-                                    VehicleType.BIKE -> "🏍️"
-                                    VehicleType.AUTO -> "🛺"
-                                    VehicleType.CAR -> "🚗"
-                                }
-                                val vLabel = when (userProfile.vehicleType) {
-                                    VehicleType.AUTO -> "Auto Rickshaw"
-                                    VehicleType.BIKE -> "Bike"
-                                    VehicleType.CAR -> "Car"
-                                }
-                                Text(
-                                    text = "$vIcon $vLabel",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = BluePrimary
-                                )
-                            }
+                            Text(
+                                text = vehicleLabel,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = BluePrimary
+                            )
 
-                            // Membership Status badge
-                            val isPlanActive = userProfile.isPlanValid || userProfile.isAdmin
-                            val statusBg = if (isPlanActive) StatusActiveGreenBg else StatusInactiveRedBg
-                            val statusText = if (isPlanActive) StatusActiveGreen else StatusInactiveRed
-                            val planLabel = if (isPlanActive) "Active Plan" else "No Active Plan"
-
-                            Box(
-                                modifier = Modifier
-                                    .background(statusBg, RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = "● $planLabel",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = statusText
-                                )
-                            }
+                            Text(
+                                text = if (planActive)
+                                    "● Active Plan"
+                                else
+                                    "● No Active Plan",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (planActive)
+                                    StatusActiveGreen
+                                else
+                                    StatusInactiveRed
+                            )
                         }
                     }
                 }
             }
-
 
             // 2. MEMBERSHIP & BILLING (Unique options: Plans, Payment Receipts)
             item {
@@ -431,37 +528,25 @@ fun MoreScreen(
                 }
             }
 
-            // 4. SUPPORT & HELP (Unique options: Tutorial, Telegram Community)
+            // 4. DRIVER GUIDE
             item {
-                SectionHeader("SUPPORT & HELP")
+                SectionHeader("DRIVER GUIDE")
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = CardBackground),
+                    colors = CardDefaults.cardColors(
+                        containerColor = CardBackground
+                    ),
                     border = BorderStroke(1.dp, CardBorderDefault)
                 ) {
-                    Column {
-                        MoreCardRow(
-                            icon = Icons.Default.School,
-                            title = "SmartDrivo Driver Guide",
-                            subtitle = "Complete guide to all SmartDrivo features",
-                            onClick = { showTutorialDialog = true }
-                        )
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 14.dp),
-                            color = CardBorderDefault,
-                            thickness = 1.dp
-                        )
-                        MoreCardRow(
-                            icon = Icons.Default.HeadsetMic,
-                            title = "Contact SmartDrivo",
-                            subtitle = "WhatsApp Channel & driver support",
-                            onClick = onNavigateToCommunity
-                        )
-                    }
+                    MoreCardRow(
+                        icon = Icons.Default.School,
+                        title = "SmartDrivo Driver Guide",
+                        subtitle = "Complete guide to SmartDrivo features",
+                        onClick = { showTutorialDialog = true }
+                    )
                 }
             }
-
 
             // 5. ADMINISTRATIVE (Only if user has Admin privileges)
             if (userProfile.isAdmin) {
@@ -747,6 +832,245 @@ fun MoreCardRow(
             contentDescription = null,
             tint = TextDarkTertiary,
             modifier = Modifier.size(17.dp)
+        )
+    }
+}
+
+@Composable
+private fun MoreSupportShortcut(
+    title: String,
+    icon: ImageVector,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFFF1F6FD)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 11.dp, horizontal = 3.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .background(
+                        tint.copy(alpha = 0.12f),
+                        CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Text(
+                text = title,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF152744)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ReadOnlyDriverProfileScreen(
+    prefs: PreferencesManager,
+    onBack: () -> Unit
+) {
+    val profile by prefs.userProfile.collectAsState()
+
+    val vehicleLabel = when (profile.vehicleType) {
+        VehicleType.AUTO -> "Auto Rickshaw"
+        VehicleType.BIKE -> "Bike"
+        VehicleType.CAR -> "Car"
+    }
+
+    val activePlan = profile.isAdmin || profile.isPlanValid
+
+    // READ_ONLY_PROFILE_DETAILS_V1
+    Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "My Profile",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        color = TextDarkPrimary
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = TextDarkPrimary
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.White
+                )
+            )
+        },
+        containerColor = LightBackground
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "ACCOUNT INFORMATION",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = BluePrimary
+                )
+            }
+
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color.White
+                    ),
+                    border = BorderStroke(1.dp, CardBorderDefault)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(13.dp)
+                    ) {
+                        ReadOnlyProfileRow(
+                            "Full Name",
+                            profile.name
+                        )
+                        HorizontalDivider(color = CardBorderDefault)
+
+                        ReadOnlyProfileRow(
+                            "Mobile Number",
+                            profile.effectiveMobile
+                        )
+                        HorizontalDivider(color = CardBorderDefault)
+
+                        ReadOnlyProfileRow(
+                            "Email ID",
+                            profile.email
+                        )
+                        HorizontalDivider(color = CardBorderDefault)
+
+                        ReadOnlyProfileRow(
+                            "City",
+                            profile.city
+                        )
+                        HorizontalDivider(color = CardBorderDefault)
+
+                        ReadOnlyProfileRow(
+                            "State",
+                            profile.state
+                        )
+                        HorizontalDivider(color = CardBorderDefault)
+
+                        ReadOnlyProfileRow(
+                            "Vehicle Type",
+                            vehicleLabel
+                        )
+                        HorizontalDivider(color = CardBorderDefault)
+
+                        ReadOnlyProfileRow(
+                            "Account Type",
+                            if (profile.isAdmin) "Admin" else "Driver"
+                        )
+                    }
+                }
+            }
+
+            item {
+                Text(
+                    text = "MEMBERSHIP INFORMATION",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = BluePrimary
+                )
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color.White
+                    ),
+                    border = BorderStroke(1.dp, CardBorderDefault)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(13.dp)
+                    ) {
+                        ReadOnlyProfileRow(
+                            "Membership Status",
+                            if (activePlan) "Active" else "Inactive"
+                        )
+                        HorizontalDivider(color = CardBorderDefault)
+
+                        ReadOnlyProfileRow(
+                            "Current Plan",
+                            if (profile.isAdmin) "Admin Access"
+                            else profile.plan.takeIf {
+                                it.isNotBlank() && it != "NONE"
+                            } ?: "No Plan"
+                        )
+                    }
+                }
+            }
+
+            item {
+                Text(
+                    text = "These account details are read-only.",
+                    fontSize = 11.sp,
+                    color = TextDarkSecondary
+                )
+                Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReadOnlyProfileRow(
+    label: String,
+    value: String
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            color = TextDarkSecondary
+        )
+
+        Spacer(Modifier.height(3.dp))
+
+        Text(
+            text = value.ifBlank { "Not provided" },
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextDarkPrimary
         )
     }
 }
