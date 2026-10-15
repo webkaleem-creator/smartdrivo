@@ -105,7 +105,11 @@ object OrderDecisionPopup {
         status: OrderStatus,
         platform: String,
         fare: Float,
-        reason: String
+        reason: String,
+        pickupKm: Float? = null,
+        tripKm: Float? = null,
+        destination: String = "",
+        tipAmount: Float? = null
     ) {
         if (status == OrderStatus.PROCESSING) {
             return
@@ -142,7 +146,11 @@ object OrderDecisionPopup {
                 status = status,
                 platform = platform,
                 fare = fare,
-                reason = reason
+                reason = reason,
+                pickupKm = pickupKm,
+                tripKm = tripKm,
+                destination = destination,
+                tipAmount = tipAmount
             )
         }
     }
@@ -152,7 +160,11 @@ object OrderDecisionPopup {
         status: OrderStatus,
         platform: String,
         fare: Float,
-        reason: String
+        reason: String,
+        pickupKm: Float?,
+        tripKm: Float?,
+        destination: String,
+        tipAmount: Float?
     ) {
         if (
             Build.VERSION.SDK_INT >=
@@ -190,10 +202,10 @@ object OrderDecisionPopup {
                     Gravity.CENTER_VERTICAL
 
                 setPadding(
+                    dp(7),
+                    dp(6),
                     dp(8),
-                    dp(8),
-                    dp(12),
-                    dp(8)
+                    dp(6)
                 )
 
                 background =
@@ -205,12 +217,12 @@ object OrderDecisionPopup {
                             18f * density
 
                         setColor(
-                            0xFF0B1220.toInt()
+                            0xFF09285C.toInt()
                         )
 
                         setStroke(
                             dp(1),
-                            0xFF25324A.toInt()
+                            0xFF639DE4.toInt()
                         )
                     }
 
@@ -233,8 +245,8 @@ object OrderDecisionPopup {
 
                 layoutParams =
                     LinearLayout.LayoutParams(
-                        dp(5),
-                        dp(48)
+                        dp(4),
+                        dp(38)
                     ).apply {
                         marginEnd =
                             dp(9)
@@ -257,138 +269,221 @@ object OrderDecisionPopup {
                     )
             }
 
-        val topRow =
-            LinearLayout(context).apply {
-                orientation =
-                    LinearLayout.HORIZONTAL
+        // SMARTDRIVO_TASK2_BLUE_V5
+        // Only presentation. No order engine or history changes.
+        val reasonTitle = compactReason(status, reason)
 
-                gravity =
-                    Gravity.CENTER_VERTICAL
-            }
-
-        val platformText =
-            TextView(context).apply {
-                text =
-                    platform
-                        .trim()
-                        .ifBlank {
-                            "SMARTDRIVO"
-                        }
-                        .uppercase()
-
-                setTextColor(
-                    0xFFE2E8F0.toInt()
-                )
-
-                textSize = 11f
-
-                typeface =
-                    Typeface.DEFAULT_BOLD
-
-                maxLines = 1
-
-                ellipsize =
-                    TextUtils.TruncateAt.END
-
-                layoutParams =
-                    LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams
-                            .WRAP_CONTENT,
-                        1f
-                    )
-            }
-
-        topRow.addView(platformText)
-
-        val badge =
-            TextView(context).apply {
-                text = style.label
-
-                setTextColor(
-                    style.badgeText
-                )
-
-                textSize = 10f
-
-                typeface =
-                    Typeface.DEFAULT_BOLD
-
-                gravity =
-                    Gravity.CENTER
-
-                setPadding(
-                    dp(8),
-                    dp(3),
-                    dp(8),
-                    dp(3)
-                )
-
-                background =
-                    GradientDrawable().apply {
-                        shape =
-                            GradientDrawable.RECTANGLE
-
-                        cornerRadius =
-                            20f * density
-
-                        setColor(
-                            style.accent
-                        )
-                    }
-            }
-
-        topRow.addView(badge)
-
-        if (fare > 0f) {
-            val fareText =
-                TextView(context).apply {
-                    text =
-                        "  ₹${fare.toInt()}"
-
-                    setTextColor(
-                        0xFFF8FAFC.toInt()
-                    )
-
-                    textSize = 12f
-
-                    typeface =
-                        Typeface.DEFAULT_BOLD
-                }
-
-            topRow.addView(fareText)
+        val statusLabel = when (status) {
+            OrderStatus.ACCEPTED -> "Accepted"
+            OrderStatus.IGNORED -> "Ignored"
+            OrderStatus.REJECTED -> "Rejected"
+            OrderStatus.SKIPPED -> "Skipped"
+            OrderStatus.FAILED -> "Failed"
+            OrderStatus.MISSED -> "Missed"
+            OrderStatus.PROCESSING -> "Checking"
         }
 
-        content.addView(topRow)
+        val titleColor = when (status) {
+            OrderStatus.ACCEPTED ->
+                0xFF5EF0AF.toInt()
 
-        val reasonText =
-            TextView(context).apply {
-                text =
-                    compactReason(
-                        status,
-                        reason
+            OrderStatus.IGNORED ->
+                0xFFFF9650.toInt()
+
+            OrderStatus.REJECTED,
+            OrderStatus.SKIPPED ->
+                0xFFFF794B.toInt()
+
+            OrderStatus.FAILED,
+            OrderStatus.MISSED ->
+                0xFFFFB15B.toInt()
+
+            OrderStatus.PROCESSING ->
+                0xFFFFFFFF.toInt()
+        }
+
+        val heading = TextView(context).apply {
+            text = "$statusLabel: $reasonTitle"
+
+            setTextColor(titleColor)
+
+            textSize = 12.5f
+            typeface = Typeface.DEFAULT_BOLD
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+
+            setPadding(
+                0,
+                0,
+                0,
+                dp(5)
+            )
+        }
+
+        content.addView(heading)
+
+        val dropName = destination
+            .trim()
+            .substringBefore(" - ")
+            .substringBefore(",")
+            .trim()
+
+        val summaryParts = mutableListOf<String>()
+
+        if (fare > 0f) {
+            summaryParts.add("₹${fare.toInt()}")
+        }
+
+        // SMARTDRIVO_TASK2_COMPACT_V6
+        // Display actual detected +Amount. Do not alter fare.
+        tipAmount?.takeIf {
+            it.isFinite() && it > 0f
+        }?.let { amount ->
+            val amountText =
+                if (amount % 1f == 0f) {
+                    amount.toInt().toString()
+                } else {
+                    String.format(
+                        java.util.Locale.US,
+                        "%.1f",
+                        amount
                     )
+                }
 
-                setTextColor(
-                    0xFFCBD5E1.toInt()
+            summaryParts.add("+₹$amountText")
+        }
+
+        if (dropName.isNotBlank() &&
+            !dropName.equals(
+                "Address unavailable",
+                ignoreCase = true
+            )
+        ) {
+            summaryParts.add(dropName)
+        }
+
+        if (summaryParts.isEmpty()) {
+            summaryParts.add(platform.uppercase())
+        }
+
+        val summary = TextView(context).apply {
+            val label = summaryParts.joinToString(" | ")
+            val styled = android.text.SpannableString(label)
+
+            val greenStart = label.indexOf("+₹")
+
+            if (greenStart >= 0) {
+                val nextSeparator =
+                    label.indexOf(" | ", greenStart)
+
+                val greenEnd =
+                    if (nextSeparator >= 0) {
+                        nextSeparator
+                    } else {
+                        label.length
+                    }
+
+                styled.setSpan(
+                    android.text.style.ForegroundColorSpan(
+                        0xFF4ADE80.toInt()
+                    ),
+                    greenStart,
+                    greenEnd,
+                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
                 )
 
-                textSize = 11.5f
-
-                maxLines = 2
-
-                ellipsize =
-                    TextUtils.TruncateAt.END
-
-                setPadding(
-                    0,
-                    dp(3),
-                    0,
-                    0
+                styled.setSpan(
+                    android.text.style.StyleSpan(
+                        Typeface.BOLD
+                    ),
+                    greenStart,
+                    greenEnd,
+                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
                 )
             }
 
-        content.addView(reasonText)
+            text = styled
+
+            setTextColor(0xFFFFFFFF.toInt())
+
+            textSize = 11f
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+
+            setPadding(
+                0,
+                0,
+                0,
+                dp(2)
+            )
+        }
+
+        content.addView(summary)
+
+        val fullDrop = destination.trim()
+
+        val shortAddress = when {
+            fullDrop.contains(" - ") ->
+                fullDrop.substringAfter(" - ").trim()
+
+            fullDrop.contains(",") ->
+                fullDrop.substringAfter(",").trim()
+
+            else -> ""
+        }
+
+        if (shortAddress.isNotBlank()) {
+            val addressText = TextView(context).apply {
+                text = shortAddress
+
+                setTextColor(0xFFC2D2EC.toInt())
+
+                textSize = 10.5f
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            }
+
+            content.addView(addressText)
+        } else if (pickupKm != null || tripKm != null) {
+            val distances = mutableListOf<String>()
+
+            pickupKm?.takeIf {
+                it.isFinite() && it > 0f
+            }?.let {
+                distances.add(
+                    "Pickup " +
+                        String.format(
+                            java.util.Locale.US,
+                            "%.1f",
+                            it
+                        ) + " km"
+                )
+            }
+
+            tripKm?.takeIf {
+                it.isFinite() && it > 0f
+            }?.let {
+                distances.add(
+                    "Trip " +
+                        String.format(
+                            java.util.Locale.US,
+                            "%.1f",
+                            it
+                        ) + " km"
+                )
+            }
+
+            if (distances.isNotEmpty()) {
+                content.addView(
+                    TextView(context).apply {
+                        text = distances.joinToString(" • ")
+                        setTextColor(0xFFC2D2EC.toInt())
+                        textSize = 10.5f
+                        maxLines = 1
+                    }
+                )
+            }
+        }
 
         root.addView(content)
 
@@ -407,10 +502,10 @@ object OrderDecisionPopup {
 
         val params =
             WindowManager.LayoutParams(
-                (context.resources
-                    .displayMetrics
-                    .widthPixels * 0.90f)
-                    .toInt(),
+                minOf(
+                    dp(230),
+                    context.resources.displayMetrics.widthPixels - dp(24)
+                ),
                 WindowManager.LayoutParams
                     .WRAP_CONTENT,
                 type,
@@ -424,9 +519,10 @@ object OrderDecisionPopup {
             ).apply {
                 gravity =
                     Gravity.TOP or
-                        Gravity.CENTER_HORIZONTAL
+                        Gravity.END
 
-                y = dp(70)
+                x = dp(12)
+                y = dp(52)
 
                 windowAnimations = 0
             }
@@ -464,82 +560,116 @@ object OrderDecisionPopup {
         status: OrderStatus,
         raw: String
     ): String {
-        var reason =
-            raw
-                .replace(
-                    "Auto Reject:",
-                    "",
-                    ignoreCase = true
-                )
-                .replace(
-                    "Separate Both",
-                    "Filter 2",
-                    ignoreCase = true
-                )
-                .replace(
-                    "destination matches",
-                    "",
-                    ignoreCase = true
-                )
-                .replace(
-                    Regex("""\s*\|\s*"""),
-                    " • "
-                )
-                .replace(
-                    Regex("""\s+"""),
-                    " "
-                )
-                .trim()
-
-        val noGoMatch =
-            Regex(
-                """(?i)No-Go Area:\s*(?:matches\s*)?'([^']+)'"""
+        val cleaned = raw
+            .replace(
+                "Auto Reject:",
+                "",
+                ignoreCase = true
             )
-                .find(reason)
-                ?.groupValues
-                ?.getOrNull(1)
-                ?.trim()
+            .replace(
+                "Separate Both",
+                "Filter 2",
+                ignoreCase = true
+            )
+            .replace(
+                Regex("""\s*\|\s*"""),
+                " • "
+            )
+            .replace(
+                Regex("""\s+"""),
+                " "
+            )
+            .trim()
 
-        if (!noGoMatch.isNullOrBlank()) {
-            return "No-Go Area: $noGoMatch"
+        val noGo = Regex(
+            """(?i)No-Go Area:\s*(?:destination matches\s*)?'([^']+)'"""
+        ).find(cleaned)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+
+        if (!noGo.isNullOrBlank()) {
+            return "No-Go Area blocked: $noGo"
         }
 
-        reason =
-            reason
-                .replace(
-                    Regex(
-                        """(?i)Filter 1\s+Fare Only\s+failed"""
-                    ),
-                    "Filter 1: Fare Only Not Match"
-                )
-                .replace(
-                    Regex(
-                        """(?i)Filter 1\s+Distance Only\s+failed"""
-                    ),
-                    "Filter 1: Distance Only Not Match"
-                )
-                .replace(
-                    Regex(
-                        """(?i)Filter 1\s+Both\s+failed"""
-                    ),
-                    "Filter 1: Both Not Match"
-                )
-                .replace(
-                    Regex(
-                        """(?i)Filter 2\s+failed"""
-                    ),
-                    "Filter 2: Not Match"
-                )
-                .replace(
-                    Regex(
-                        """(?i)No condition matched\s*•?\s*"""
-                    ),
-                    ""
-                )
-                .trim()
+        if (status == OrderStatus.ACCEPTED) {
+            when {
+                cleaned.contains(
+                    "+Amount",
+                    ignoreCase = true
+                ) || cleaned.contains(
+                    "+ Amount",
+                    ignoreCase = true
+                ) -> return "+Amount filter matched"
 
-        if (reason.isNotBlank()) {
-            return reason
+                cleaned.contains(
+                    "Order Filter Unlimited",
+                    ignoreCase = true
+                ) -> return "Order Filter Unlimited matched"
+
+                cleaned.contains(
+                    "Go-To",
+                    ignoreCase = true
+                ) -> return "Go-To Area matched"
+
+                cleaned.contains(
+                    "Fastest",
+                    ignoreCase = true
+                ) -> return "Fastest Mode matched"
+            }
+        }
+
+        val offPattern = Regex(
+            """(?i)(?:Order\s+)?Filter\s+\d+\s+OFF"""
+        )
+
+        val failedPattern = Regex(
+            """(?i)(?:Order\s+)?Filter\s+(\d+)\s+failed"""
+        )
+
+        val notMatchPattern = Regex(
+            """(?i)(?:Order\s+)?Filter\s+(\d+):?\s*Not Match(?:ed)?"""
+        )
+
+        val parts = cleaned
+            .split('•')
+            .map { it.trim() }
+            .mapNotNull { part ->
+                val failed =
+                    failedPattern.matchEntire(part)
+
+                val notMatch =
+                    notMatchPattern.matchEntire(part)
+
+                when {
+                    part.isBlank() -> null
+
+                    offPattern.matches(part) -> null
+
+                    part.equals(
+                        "No condition matched",
+                        ignoreCase = true
+                    ) -> null
+
+                    failed != null ->
+                        "Order Filter ${failed.groupValues[1]} not matched"
+
+                    notMatch != null ->
+                        "Order Filter ${notMatch.groupValues[1]} not matched"
+
+                    part.matches(
+                        Regex(
+                            """(?i)Filter 1:\s*(?:Fare Only|Distance Only|Both)\s+Not Match"""
+                        )
+                    ) -> "Order Filter 1 not matched"
+
+                    else -> part
+                }
+            }
+            .distinct()
+
+        if (parts.isNotEmpty()) {
+            return parts.take(2).joinToString(" • ")
         }
 
         return when (status) {
@@ -547,7 +677,7 @@ object OrderDecisionPopup {
                 "Saved conditions matched"
 
             OrderStatus.IGNORED ->
-                "Order did not match saved conditions"
+                "No saved filter matched"
 
             OrderStatus.REJECTED,
             OrderStatus.SKIPPED ->

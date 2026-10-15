@@ -10044,7 +10044,23 @@ val isOrderStillVisible =
             fare =
                 candidate.fare ?: 0f,
             reason =
-                reasonText
+                reasonText,
+            pickupKm =
+                candidate.pickupDistKm,
+            tripKm =
+                candidate.dropDistKm,
+            tipAmount =
+                candidate.tipAmount,
+            destination =
+                candidate.dropAddress
+                    ?.takeIf {
+                        it.isNotBlank() &&
+                            !it.equals(
+                                "Address unavailable",
+                                ignoreCase = true
+                            )
+                    }
+                    ?: candidate.dropArea.orEmpty()
         )
     }
     private fun onOrderDetectedFast(candidate: RideCandidate): String {
