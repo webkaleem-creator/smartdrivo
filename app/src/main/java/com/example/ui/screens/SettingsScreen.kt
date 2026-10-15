@@ -200,6 +200,35 @@ fun SettingsScreen(
     var plusAmountMaxPickupText by rememberSaveable { mutableStateOf(if (settings.plusAmountMaxPickupDistanceKm % 1.0f == 0f) settings.plusAmountMaxPickupDistanceKm.toInt().toString() else settings.plusAmountMaxPickupDistanceKm.toString()) }
     var plusAmountMaxDropText by rememberSaveable { mutableStateOf(if (settings.plusAmountMaxDropDistanceKm % 1.0f == 0f) settings.plusAmountMaxDropDistanceKm.toInt().toString() else settings.plusAmountMaxDropDistanceKm.toString()) }
 
+    // FULL_CARD_MODE_TOGGLE_UI_V1
+    fun setFastestModeFromCard(enabled: Boolean) {
+        val currentPickup =
+            maxPickupText.toFloatOrNull()?.takeIf { it > 0f }
+                ?: settings.maxPickupDistanceKm.takeIf { it > 0f }
+                ?: 3.0f
+
+        maxPickupText =
+            if (currentPickup % 1.0f == 0f)
+                currentPickup.toInt().toString()
+            else
+                currentPickup.toString()
+
+        prefs.saveAppSettings(
+            settings.copy(
+                isFastestModeEnabled = enabled,
+                maxPickupDistanceKm = currentPickup
+            )
+        )
+        hasUnsavedChanges = false
+        showSavedSnackbar()
+    }
+
+    fun setBundleOrderFromCard(enabled: Boolean) {
+        prefs.saveAppSettings(
+            settings.copy(isBundleOrderEnabled = enabled)
+        )
+        showSavedSnackbar()
+    }
     Scaffold(
         // SMARTDRIVO_ALL_PAGES_UP_V3
         // Parent layout already handles system bars.
@@ -302,7 +331,9 @@ fun SettingsScreen(
                     ),
                     shape = RoundedCornerShape(14.dp),
                     border = BorderStroke(1.dp, if (settings.isFastestModeEnabled) BluePrimary else CardBorderDefault),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        setFastestModeFromCard(!settings.isFastestModeEnabled)
+                    }
                 ) {
                     Column(
                         modifier = Modifier.padding(11.dp),
@@ -401,50 +432,7 @@ fun SettingsScreen(
                                     checked =
                                         settings
                                             .isFastestModeEnabled,
-                                    onCheckedChange = {
-                                        enabled ->
-
-                                        val currentPickup =
-                                            maxPickupText
-                                                .toFloatOrNull()
-                                                ?.takeIf {
-                                                    it > 0f
-                                                }
-                                                ?: settings
-                                                    .maxPickupDistanceKm
-                                                    .takeIf {
-                                                        it > 0f
-                                                    }
-                                                ?: 3.0f
-
-                                        maxPickupText =
-                                            if (
-                                                currentPickup %
-                                                    1.0f ==
-                                                    0f
-                                            ) {
-                                                currentPickup
-                                                    .toInt()
-                                                    .toString()
-                                            } else {
-                                                currentPickup
-                                                    .toString()
-                                            }
-
-                                        prefs.saveAppSettings(
-                                            settings.copy(
-                                                isFastestModeEnabled =
-                                                    enabled,
-                                                maxPickupDistanceKm =
-                                                    currentPickup
-                                            )
-                                        )
-
-                                        hasUnsavedChanges =
-                                            false
-
-                                        showSavedSnackbar()
-                                    },
+                                    onCheckedChange = { enabled -> setFastestModeFromCard(enabled) },
                                     colors =
                                         SwitchDefaults.colors(
                                             checkedThumbColor =
@@ -615,7 +603,9 @@ fun SettingsScreen(
                     ),
                     shape = RoundedCornerShape(14.dp),
                     border = BorderStroke(1.dp, if (settings.isBundleOrderEnabled) BluePrimary else CardBorderDefault),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        setBundleOrderFromCard(!settings.isBundleOrderEnabled)
+                    }
                 ) {
                     Column(
                         modifier =
@@ -719,18 +709,7 @@ fun SettingsScreen(
                                     checked =
                                         settings
                                             .isBundleOrderEnabled,
-                                    onCheckedChange = {
-                                        enabled ->
-
-                                        prefs.saveAppSettings(
-                                            settings.copy(
-                                                isBundleOrderEnabled =
-                                                    enabled
-                                            )
-                                        )
-
-                                        showSavedSnackbar()
-                                    },
+                                    onCheckedChange = { enabled -> setBundleOrderFromCard(enabled) },
                                     colors =
                                         SwitchDefaults.colors(
                                             checkedThumbColor =
