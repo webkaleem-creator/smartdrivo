@@ -7,45 +7,148 @@ service cloud.firestore {
       return request.auth != null;
     }
     
+    // SECURITY_V2B_SAFE_ADMIN_LOOKUP
     function isAdmin() {
-      return isAuthenticated() && 
+      return isAuthenticated() &&
         (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true ||
-          request.auth.token.admin == true
+          request.auth.token.get('admin', false) == true ||
+          (
+            exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isAdmin', false) == true
+          )
         );
     }
     
+    // SECURITY_V2B_TRIAL_RULES - LOCAL TEST ONLY
+
+    function trialPath(key) {
+      return /databases/$(database)/documents/trialDevices/$(key);
+    }
+
+    function userPath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function validNewDriver(uid) {
+      let d = request.resource.data;
+
+      return isAuthenticated() &&
+        request.auth.uid == uid &&
+        d.keys().hasAll([
+          'uid', 'email', 'isAdmin', 'isApproved',
+          'isActive', 'plan', 'planPrice',
+          'planExpireMillis', 'freeTrialUsed',
+          'freeTrialStartedAt', 'trialDeviceKey',
+          'securityDeviceKey', 'createdAt'
+        ]) &&
+        d.uid == uid &&
+        d.email is string &&
+        d.email == request.auth.token.email &&
+        d.isAdmin == false &&
+        d.isApproved == false &&
+        d.isActive == true &&
+        d.planPrice == 0 &&
+        d.freeTrialUsed == true &&
+        d.trialDeviceKey is string &&
+        d.trialDeviceKey.matches('^[a-f0-9]{64}$') &&
+        d.securityDeviceKey == d.trialDeviceKey &&
+        d.createdAt is int &&
+        d.createdAt >= request.time.toMillis() - 600000 &&
+        d.createdAt <= request.time.toMillis() + 600000 &&
+        (
+          (
+            d.plan == 'NONE' &&
+            d.planExpireMillis == 0 &&
+            d.freeTrialStartedAt == 0
+          ) ||
+          (
+            d.plan == 'FREE_TRIAL' &&
+            d.freeTrialStartedAt == d.createdAt &&
+            d.planExpireMillis == d.createdAt + 86400000 &&
+            !exists(trialPath(d.trialDeviceKey)) &&
+            existsAfter(trialPath(d.trialDeviceKey)) &&
+            getAfter(trialPath(d.trialDeviceKey)).data.firstUid == uid &&
+            getAfter(trialPath(d.trialDeviceKey)).data.deviceTrialKey == d.trialDeviceKey &&
+            getAfter(trialPath(d.trialDeviceKey)).data.source == 'ANDROID_ID_SHA256_V4'
+          )
+        );
+    }
+
+    function validTrialReservation(key) {
+      let d = request.resource.data;
+
+      return isAuthenticated() &&
+        d.keys().hasAll([
+          'deviceTrialKey', 'firstUid',
+          'createdAt', 'trialExpireMillis', 'source'
+        ]) &&
+        key.matches('^[a-f0-9]{64}$') &&
+        d.deviceTrialKey == key &&
+        d.firstUid == request.auth.uid &&
+        d.createdAt is int &&
+        d.createdAt >= request.time.toMillis() - 600000 &&
+        d.createdAt <= request.time.toMillis() + 600000 &&
+        d.trialExpireMillis is int &&
+        (
+          (
+            d.source == 'ANDROID_ID_SHA256_V4' &&
+            !exists(userPath(request.auth.uid)) &&
+            existsAfter(userPath(request.auth.uid)) &&
+            getAfter(userPath(request.auth.uid)).data.plan == 'FREE_TRIAL' &&
+            getAfter(userPath(request.auth.uid)).data.trialDeviceKey == key &&
+            getAfter(userPath(request.auth.uid)).data.planExpireMillis == d.trialExpireMillis
+          ) ||
+          (
+            d.source == 'HISTORICAL_BACKFILL_V4' &&
+            exists(userPath(request.auth.uid)) &&
+            (
+              get(userPath(request.auth.uid)).data.freeTrialUsed == true ||
+              get(userPath(request.auth.uid)).data.plan == 'FREE_TRIAL'
+            )
+          )
+        );
+    }
     // Users collection rules
     match /users/{userId} {
       // Any authenticated user can read their own profile; Admins can read all profiles
       allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
       
-      // Creating a new user:
-      // An authenticated user can create their own document, BUT cannot set isAdmin=true or isApproved=true
-      allow create: if isAuthenticated() && (
-        (request.auth.uid == userId &&
-          (!request.resource.data.keys().hasAny(['isAdmin', 'isApproved']) ||
-           (request.resource.data.isAdmin == false && request.resource.data.isApproved == false))
-        ) || isAdmin()
-      );
-      
-      // Updating user:
-      // Regular user can update their personal details (phone, vehicleType, city, etc.),
-      // but CANNOT modify protected fields: isAdmin, isApproved, plan, planPrice, planExpireMillis, isActive
-      // Admins have unrestricted update access.
-      allow update: if isAuthenticated() && (
-        isAdmin() ||
+      // Membership and trial entitlement are server-protected.
+      allow create: if validNewDriver(userId) || isAdmin();
+
+      allow update: if isAdmin() ||
         (
+          isAuthenticated() &&
           request.auth.uid == userId &&
-          !request.resource.data.diff(resource.data).affectedKeys()
-            .hasAny(['isAdmin', 'isApproved', 'plan', 'planPrice', 'planExpireMillis', 'isActive'])
-        )
-      );
-      
+          request.resource.data.uid == userId &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly([
+              'uid', 'name', 'email', 'phone',
+              'mobile', 'mobileNumber',
+              'city', 'state', 'vehicleType',
+              'referralCode', 'updatedAt',
+              'lastDevice', 'lastAndroidVersion',
+              'lastAppVersion', 'lastSeenAt',
+              'securityDeviceKey',
+              'registeredDevice',
+              'registeredAndroidVersion',
+              'registeredAppVersion',
+              'registeredDeviceAt',
+              'registeredDeviceSource',
+              'activeSessionId', 'activeSessionAt'
+            ])
+        );
       // Only admins can delete user profiles
       allow delete: if isAdmin();
     }
     
+    // Trial reservations are immutable once created.
+    match /trialDevices/{deviceKey} {
+      allow get: if isAuthenticated();
+      allow list: if false;
+      allow create: if validTrialReservation(deviceKey);
+      allow update, delete: if false;
+    }
     // Payments collection rules
     match /payments/{paymentId} {
       // Drivers can read their own submissions; Admins can read all submissions
