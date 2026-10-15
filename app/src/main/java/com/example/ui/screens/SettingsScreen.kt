@@ -249,11 +249,52 @@ fun SettingsScreen(
         ) {
             item { Spacer(modifier = Modifier.height(2.dp)) }
 
-            // 1. FASTEST MODE
+            // 1. ORDER FILTERS
+            // ORDER_FILTER_UNLIMITED_V2
+            // Legacy Filter 2 and 3 presets migrate to these independent rows.
+            item {
+                SectionHeader("1. ORDER FILTERS")
+                UnlimitedRulesEditor(
+                    title = "Order Filter Unlimited",
+                    plus = false,
+                    rules = settings.extraFareRules,
+                    onRulesChange = { updated, notifySaved ->
+                        prefs.saveAppSettings(
+                            prefs.appSettings.value.copy(extraFareRules = updated)
+                        )
+                        if (notifySaved) showSavedSnackbar()
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // PLUS_AMOUNT_UNLIMITED_IN_PARENT_V2
+                // +Amount only applies to Rapido, as in V1.
+                UnlimitedRulesEditor(
+                    title = "+ Amount Filter Unlimited",
+                    plus = true,
+                    rules = settings.extraPlusAmountRules,
+                    onRulesChange = { updated, notifySaved ->
+                        prefs.saveAppSettings(
+                            prefs.appSettings.value.copy(extraPlusAmountRules = updated)
+                        )
+                        if (notifySaved) showSavedSnackbar()
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(5.dp))
+                Text(
+                    text = "Any ON filter row can match. Each row requires all 3 values.",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = BluePrimary
+                )
+            }
+            // 2. FASTEST MODE
             // FASTEST_COMPACT_CARD_V1
             // ACTIVE_ONLY_CARD_COLOR_V3
             item {
-                SectionHeader("1. FASTEST MODE")
+                SectionHeader("2. FASTEST MODE")
 
                 Card(
                     colors = CardDefaults.cardColors(
@@ -562,46 +603,6 @@ fun SettingsScreen(
                         }
                     }
                 }
-            }
-            // ORDER_FILTER_UNLIMITED_V2
-            // Legacy Filter 2 and 3 presets migrate to these independent rows.
-            item {
-                SectionHeader("2. ORDER FILTERS")
-                UnlimitedRulesEditor(
-                    title = "Order Filter Unlimited",
-                    plus = false,
-                    rules = settings.extraFareRules,
-                    onRulesChange = { updated, notifySaved ->
-                        prefs.saveAppSettings(
-                            prefs.appSettings.value.copy(extraFareRules = updated)
-                        )
-                        if (notifySaved) showSavedSnackbar()
-                    }
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // PLUS_AMOUNT_UNLIMITED_IN_PARENT_V2
-                // +Amount only applies to Rapido, as in V1.
-                UnlimitedRulesEditor(
-                    title = "+ Amount Filter Unlimited",
-                    plus = true,
-                    rules = settings.extraPlusAmountRules,
-                    onRulesChange = { updated, notifySaved ->
-                        prefs.saveAppSettings(
-                            prefs.appSettings.value.copy(extraPlusAmountRules = updated)
-                        )
-                        if (notifySaved) showSavedSnackbar()
-                    }
-                )
-
-                Spacer(modifier = Modifier.height(5.dp))
-                Text(
-                    text = "Any ON filter row can match. Each row requires all 3 values.",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = BluePrimary
-                )
             }
             // 3. BUNDLE ORDER
             // BUNDLE_COMPACT_CARD_V1
