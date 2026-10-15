@@ -860,50 +860,70 @@ val goToAreas by prefs.goToAreas.collectAsState()
                 }
             }
 
-            // SMARTDRIVO_ASSISTANCE_UI_V1
-            // Visual redesign only. Existing toggle handler is reused.
+            // ASSISTANCE_DESIGN4_SIDE_CIRCLES_V1
+            // Only Home UI is changed. Assistant and reject logic remain separate.
             item {
                 val assistanceActive = settings.isAutoAcceptActive
+                val rejectEnabled = settings.isAutoRejectBadFaresEnabled
+
+                val changeReject: (Boolean) -> Unit = { enabled ->
+                    prefs.saveAppSettings(
+                        prefs.appSettings.value.copy(
+                            isAutoRejectBadFaresEnabled = enabled
+                        )
+                    )
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar(
+                            message = if (enabled)
+                                "Auto Reject No Condition Match ON"
+                            else
+                                "Auto Reject No Condition Match OFF - Manual mode",
+                            duration = SnackbarDuration.Short
+                        )
+                    }
+                }
 
                 Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            handleToggleAutoAccept(!settings.isAutoAcceptActive)
-                        },
+                    modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFF1C2B4B)
+                        containerColor = Color.White
                     ),
                     shape = RoundedCornerShape(18.dp),
                     border = BorderStroke(
-                        1.dp, Color(0xFF354669)
+                        1.dp, Color(0xFFDCE6F2)
                     )
                 ) {
                     Column(
-                        modifier = Modifier.padding(
-                            horizontal = 14.dp,
-                            vertical = 12.dp
-                        ),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.ElectricBolt,
+                                contentDescription = null,
+                                tint = Color(0xFF1677F2),
+                                modifier = Modifier.size(23.dp)
+                            )
+
+                            Spacer(Modifier.width(7.dp))
+
                             Text(
-                                text = "SMARTDRIVO ASSISTANT",
-                                color = Color(0xFFBBC9E9),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
+                                text = "SmartDrivo Assistant",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF15213A),
+                                modifier = Modifier.weight(1f)
                             )
 
                             Surface(
                                 color = if (assistanceActive)
-                                    Color(0xFF116B64)
+                                    Color(0xFF08A64B)
                                 else
-                                    Color(0xFF40516F),
-                                shape = RoundedCornerShape(20.dp)
+                                    Color(0xFF94A3B8),
+                                shape = RoundedCornerShape(18.dp)
                             ) {
                                 Text(
                                     text = if (assistanceActive)
@@ -912,222 +932,194 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                         "PAUSED",
                                     modifier = Modifier.padding(
                                         horizontal = 11.dp,
-                                        vertical = 6.dp
+                                        vertical = 5.dp
                                     ),
-                                    color = Color.White,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 10.sp
+                                    color = Color.White
                                 )
                             }
                         }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .background(
-                                        Color(0xFF38568D),
-                                        RoundedCornerShape(12.dp)
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.ElectricBolt,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(27.dp),
-                                    tint = Color.White
-                                )
-                            }
-
-                            Spacer(Modifier.width(10.dp))
-
-                            Column(
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = "Smart Assistance",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    maxLines = 1
-                                )
-
-                                Text(
-                                    text = if (assistanceActive)
-                                        "Auto-Accept running"
-                                    else
-                                        "Auto-Accept paused",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFFC1CEE6),
-                                    maxLines = 1
-                                )
-                            }
-
-                            Switch(
-                                checked = assistanceActive,
-                                onCheckedChange = { enabled ->
-                                    handleToggleAutoAccept(enabled)
-                                },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = BluePrimary,
-                                    uncheckedThumbColor = Color.White,
-                                    uncheckedTrackColor = Color(0xFF5F7090),
-                                    uncheckedBorderColor = Color(0xFFA6B6D3)
-                                )
-                            )
-                        }
-
-                        Button(
-                            onClick = {
-                                handleToggleAutoAccept(!settings.isAutoAcceptActive)
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(46.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = BluePrimary,
-                                contentColor = Color.White
-                            )
-                        ) {
-                            Icon(
-                                Icons.Default.ElectricBolt,
-                                contentDescription = null,
-                                modifier = Modifier.size(19.dp)
-                            )
-
-                            Spacer(Modifier.width(8.dp))
-
-                            Text(
-                                text = if (assistanceActive)
-                                    "STOP ASSISTANCE"
-                                else
-                                    "START ASSISTANCE",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
-                            )
-                        }
-                    }
-                }
-            }
-            // AUTO REJECT NO CONDITION MATCH — SEPARATE CARD
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        // AUTO_REJECT_CARD_CLICK_V2
-                        .clickable {
-                            val enabled = !settings.isAutoRejectBadFaresEnabled
-                            prefs.saveAppSettings(
-                                settings.copy(
-                                    isAutoRejectBadFaresEnabled = enabled
-                                )
-                            )
-
-                            coroutineScope.launch {
-                                snackbarHostState.showSnackbar(
-                                    if (enabled)
-                                        "Auto Reject No Condition Match ON"
-                                    else
-                                        "Auto Reject No Condition Match OFF - Manual mode"
-                                )
-                            }
-                        },
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (settings.isAutoRejectBadFaresEnabled)
-                            Color(0xFFFFF1F2)
-                        else
-                            Color.White
-                    ),
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(
-                        1.dp,
-                        if (settings.isAutoRejectBadFaresEnabled)
-                            Color(0xFFFCA5A5)
-                        else
-                            CardBorderDefault
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .background(
-                                    if (settings.isAutoRejectBadFaresEnabled)
-                                        Color(0xFFFFE4E6)
-                                    else
-                                        Color(0xFFF1F5F9),
-                                    RoundedCornerShape(8.dp)
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "⛔",
-                                fontSize = 15.sp
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(9.dp))
 
                         Column(
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color(0xFFEDF5FF))
+                                .padding(
+                                    horizontal = 10.dp,
+                                    vertical = 8.dp
+                                ),
+                            verticalArrangement = Arrangement.spacedBy(7.dp)
                         ) {
-                            Text(
-                                text = "Auto Reject No Condition Match",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextDarkPrimary,
-                                maxLines = 1
-                            )
-
-                            Text(
-                                text = if (settings.isAutoRejectBadFaresEnabled)
-                                    "ACTIVE • Skip orders that fail saved conditions"
-                                else
-                                    "INACTIVE • Manual action",
-                                fontSize = 10.sp,
-                                color = if (settings.isAutoRejectBadFaresEnabled)
-                                    StatusInactiveRed
-                                else
-                                    TextDarkSecondary,
-                                maxLines = 1
-                            )
-                        }
-
-                        Switch(
-                            checked = settings.isAutoRejectBadFaresEnabled,
-                            onCheckedChange = { enabled ->
-                                prefs.saveAppSettings(
-                                    settings.copy(
-                                        isAutoRejectBadFaresEnabled = enabled
-                                    )
-                                )
-
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar(
-                                        if (enabled)
-                                            "Auto Reject No Condition Match ON ✓"
-                                        else
-                                            "Auto Reject No Condition Match OFF • Manual mode"
+                            // Blue circular icon - Smart Assistance
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        handleToggleAutoAccept(
+                                            !settings.isAutoAcceptActive
+                                        )
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(43.dp)
+                                        .background(
+                                            Color(0xFF1976F3),
+                                            CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.ElectricBolt,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(27.dp)
                                     )
                                 }
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = StatusInactiveRed,
-                                uncheckedThumbColor = Color.White,
-                                uncheckedTrackColor = Color(0xFFBDBDBD)
+
+                                Spacer(Modifier.width(9.dp))
+
+                                Column(
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = "Smart Assistance",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF15213A),
+                                        maxLines = 2
+                                    )
+
+                                    Text(
+                                        text = if (assistanceActive)
+                                            "Auto Accept running"
+                                        else
+                                            "Auto Accept paused",
+                                        fontSize = 10.sp,
+                                        color = Color(0xFF64748B)
+                                    )
+                                }
+
+                                Text(
+                                    text = if (assistanceActive) "ON" else "OFF",
+                                    color = if (assistanceActive)
+                                        Color(0xFF1677F2)
+                                    else
+                                        Color(0xFF94A3B8),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                Spacer(Modifier.width(5.dp))
+
+                                Switch(
+                                    checked = assistanceActive,
+                                    onCheckedChange = { enabled ->
+                                        handleToggleAutoAccept(enabled)
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = Color(0xFF1677F2),
+                                        uncheckedThumbColor = Color.White,
+                                        uncheckedTrackColor = Color(0xFFCBD5E1)
+                                    )
+                                )
+                            }
+
+                            HorizontalDivider(
+                                color = Color(0xFFD1DEEF),
+                                thickness = 1.dp
                             )
-                        )
+
+                            // Green circular icon - Auto Reject
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        changeReject(
+                                            !settings.isAutoRejectBadFaresEnabled
+                                        )
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(43.dp)
+                                        .background(
+                                            Color(0xFF09B34F),
+                                            CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.HealthAndSafety,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(27.dp)
+                                    )
+                                }
+
+                                Spacer(Modifier.width(9.dp))
+
+                                Column(
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = "Auto Reject",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF15213A)
+                                    )
+                                    Text(
+                                        text = "No Condition Match",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF334155)
+                                    )
+                                    Text(
+                                        text = when {
+                                            !rejectEnabled -> "Manual action"
+                                            !assistanceActive -> "Waiting for assistance"
+                                            else -> "Skip unmatched orders"
+                                        },
+                                        fontSize = 10.sp,
+                                        color = Color(0xFF64748B)
+                                    )
+                                }
+
+                                Text(
+                                    text = if (rejectEnabled) "ON" else "OFF",
+                                    color = if (rejectEnabled)
+                                        Color(0xFF09A84B)
+                                    else
+                                        Color(0xFF94A3B8),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                Spacer(Modifier.width(5.dp))
+
+                                Switch(
+                                    checked = rejectEnabled,
+                                    onCheckedChange = { enabled ->
+                                        changeReject(enabled)
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = Color(0xFF09B34F),
+                                        uncheckedThumbColor = Color.White,
+                                        uncheckedTrackColor = Color(0xFFCBD5E1)
+                                    )
+                                )
+                            }
+                        }
                     }
                 }
             }
