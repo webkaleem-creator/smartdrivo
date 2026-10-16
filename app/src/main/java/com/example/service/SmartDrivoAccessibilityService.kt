@@ -2413,8 +2413,11 @@ private val processingTimeoutRunnable = Runnable {
 
             lastRapidoEventDispatchAt = now
 
+            // RAPIDO_EARLY_TURBO_V2
+            // Reuse the event source already obtained by Auto Priority.
+            // Preserve a fresh fallback read only when it was null.
             val directSource =
-                try {
+                autoPrioritySource ?: try {
                     event.source
                 } catch (_: Exception) {
                     null
@@ -2937,12 +2940,15 @@ private val processingTimeoutRunnable = Runnable {
                         isRapidoPackage(sourcePkg)
                     }
 
+            var sourceValidationForFallback: RapidoPopupValidation? = null
+
             if (directRapidoSource != null) {
 
                 val sourceValidation =
                     RapidoAdapter.validateRapidoOrderPopup(
                         directRapidoSource
                     )
+                sourceValidationForFallback = sourceValidation
                 if (isRapidoIncompleteValidation(sourceValidation)) {
                     partialRapidoOfferSeenInPass = true
                 }
@@ -2992,6 +2998,8 @@ private val processingTimeoutRunnable = Runnable {
                         isRapidoPackage(sourcePkg)
                     }
 
+            var rootValidationForFallback: RapidoPopupValidation? = null
+
             if (
                 directRapidoRoot != null &&
                 directRapidoRoot !== directRapidoSource
@@ -3001,6 +3009,7 @@ private val processingTimeoutRunnable = Runnable {
                     RapidoAdapter.validateRapidoOrderPopup(
                         directRapidoRoot
                     )
+                rootValidationForFallback = directValidation
                 if (isRapidoIncompleteValidation(directValidation)) {
                     partialRapidoOfferSeenInPass = true
                 }
@@ -3032,7 +3041,12 @@ private val processingTimeoutRunnable = Runnable {
             fun addCandidateRoot(node: AccessibilityNodeInfo?) {
                 if (node == null) return
 
-                val top = getTopRootNode(node) ?: node
+                val top =
+                    if (node === eventSource && directRapidoRoot != null) {
+                        directRapidoRoot
+                    } else {
+                        getTopRootNode(node) ?: node
+                    }
                 val pkg =
                     top.packageName
                         ?.toString()
@@ -3065,8 +3079,18 @@ private val processingTimeoutRunnable = Runnable {
             var validatedPopup: RapidoPopupValidation? = null
 
             for (root in candidateRoots) {
+                val previousValidation =
+                    when {
+                        root === directRapidoSource ->
+                            sourceValidationForFallback
+                        root === directRapidoRoot ->
+                            rootValidationForFallback
+                        else -> null
+                    }
+
                 val validation =
-                    RapidoAdapter.validateRapidoOrderPopup(root)
+                    previousValidation
+                        ?: RapidoAdapter.validateRapidoOrderPopup(root)
                 if (isRapidoIncompleteValidation(validation)) {
                     partialRapidoOfferSeenInPass = true
                 }
