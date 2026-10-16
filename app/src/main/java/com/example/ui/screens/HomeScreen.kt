@@ -157,6 +157,8 @@ fun HomeScreen(
     }
 val goToAreas by prefs.goToAreas.collectAsState()
     val noGoAreas by prefs.noGoAreas.collectAsState()
+    // HOME_FIX_AREA_COUNT_V1
+    val fixArea by prefs.fixAreaSettings.collectAsState()
     val activeGoToCount by remember(goToAreas) {
         derivedStateOf {
             goToAreas.count { it.isEnabled && it.keywords.isNotEmpty() }
@@ -167,9 +169,16 @@ val goToAreas by prefs.goToAreas.collectAsState()
             noGoAreas.count { it.isEnabled && it.keywords.isNotEmpty() }
         }
     }
-    val activeAreaFilterCount by remember(activeGoToCount, activeNoGoCount) {
-        derivedStateOf { activeGoToCount + activeNoGoCount }
-    }
+    val activeFixAreaCount =
+        if (
+            fixArea.enabled &&
+            fixArea.words.isNotEmpty() &&
+            fixArea.maxPickupKm.isFinite() &&
+            fixArea.maxPickupKm > 0f
+        ) 1 else 0
+
+    val activeAreaFilterCount =
+        activeGoToCount + activeNoGoCount + activeFixAreaCount
 
     var showSimulateDialog by remember { mutableStateOf(false) }
     var simPlatform by remember { mutableStateOf(Platform.RAPIDO) }
@@ -1920,10 +1929,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
                             }
 
                             Text(
-                                text = if (activeAreaFilterCount > 0)
-                                    "$activeGoToCount Go-To • $activeNoGoCount No-Go"
-                                else
-                                    "No active area rules",
+                                text = "$activeGoToCount Go-To • $activeNoGoCount No-Go • $activeFixAreaCount Fix Area",
                                 color = TextDarkSecondary,
                                 fontSize = 11.sp,
                                 maxLines = 1

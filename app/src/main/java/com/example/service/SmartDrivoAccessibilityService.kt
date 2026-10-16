@@ -10200,6 +10200,12 @@ val isOrderStillVisible =
                 }
         activeOrderRecordIds[candidate.platform] = tempId
 
+        // SHORT_POPUP_V7: new valid order supersedes old banner.
+        // No database or network work on the click-critical path.
+        if (prefs.appSettings.value.showOrderReasonPopups) {
+            OrderDecisionPopup.onNewOrderDetected(tempId)
+        }
+
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val entity = rideHistoryRepository.onOrderDetected(

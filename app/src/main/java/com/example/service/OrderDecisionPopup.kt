@@ -39,7 +39,25 @@ object OrderDecisionPopup {
     private var activeWindowManager: WindowManager? = null
     private var dismissRunnable: Runnable? = null
 
-    private const val DISPLAY_MS = 2800L
+    // SHORT_POPUP_V7
+    @Volatile
+    private var latestOrderKey: String = ""
+
+    fun onNewOrderDetected(recordKey: String) {
+        val key = recordKey.trim()
+        if (key.isBlank() || key == latestOrderKey) return
+
+        latestOrderKey = key
+
+        // Async UI work only. Never block Rapido order processing.
+        mainHandler.post {
+            if (latestOrderKey == key) {
+                removeActive()
+            }
+        }
+    }
+
+    private const val DISPLAY_MS = 4500L
     private const val DEDUPE_MS = 5000L
 
     private data class Style(
@@ -115,8 +133,16 @@ object OrderDecisionPopup {
             return
         }
 
-        val safeKey =
-            "${recordKey.trim()}:${status.name}"
+        val key = recordKey.trim()
+
+        // A previous order must never overwrite a newer popup.
+        if (
+            key.isNotBlank() &&
+            latestOrderKey.isNotBlank() &&
+            key != latestOrderKey
+        ) return
+
+        val safeKey = "$key:${status.name}"
 
         val now =
             System.currentTimeMillis()
@@ -141,6 +167,12 @@ object OrderDecisionPopup {
             context.applicationContext
 
         mainHandler.post {
+            if (
+                key.isNotBlank() &&
+                latestOrderKey.isNotBlank() &&
+                key != latestOrderKey
+            ) return@post
+
             showOnMain(
                 context = appContext,
                 status = status,
@@ -334,24 +366,9 @@ object OrderDecisionPopup {
             summaryParts.add("₹${fare.toInt()}")
         }
 
-        // SMARTDRIVO_TASK2_COMPACT_V6
-        // Display actual detected +Amount. Do not alter fare.
-        tipAmount?.takeIf {
-            it.isFinite() && it > 0f
-        }?.let { amount ->
-            val amountText =
-                if (amount % 1f == 0f) {
-                    amount.toInt().toString()
-                } else {
-                    String.format(
-                        java.util.Locale.US,
-                        "%.1f",
-                        amount
-                    )
-                }
-
-            summaryParts.add("+₹$amountText")
-        }
+        // SHORT_POPUP_V7
+        // Show total fare only. Extra +Amount remains available
+        // to the filter engine and History; do not display twice.
 
         if (dropName.isNotBlank() &&
             !dropName.equals(
@@ -370,7 +387,7 @@ object OrderDecisionPopup {
             val label = summaryParts.joinToString(" | ")
             val styled = android.text.SpannableString(label)
 
-            val greenStart = label.indexOf("+₹")
+            val greenStart = if (fare > 0f) label.indexOf("₹") else -1
 
             if (greenStart >= 0) {
                 val nextSeparator =
