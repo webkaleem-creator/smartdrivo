@@ -2975,7 +2975,8 @@ private val processingTimeoutRunnable = Runnable {
                     logRapidoReadLatency("source", rapidoReadStartedNs, eventUptimeMs)
                     handleRapidoOrder(
                         directRapidoSource,
-                        sourceValidation
+                        sourceValidation,
+                        eventUptimeMs
                     )
 
                     return
@@ -3029,7 +3030,8 @@ private val processingTimeoutRunnable = Runnable {
                     logRapidoReadLatency("root", rapidoReadStartedNs, eventUptimeMs)
                     handleRapidoOrder(
                         directRapidoRoot,
-                        directValidation
+                        directValidation,
+                        eventUptimeMs
                     )
 
                     return
@@ -3119,7 +3121,8 @@ private val processingTimeoutRunnable = Runnable {
                 logRapidoReadLatency("window", rapidoReadStartedNs, eventUptimeMs)
                 handleRapidoOrder(
                     validatedRoot,
-                    validatedPopup
+                    validatedPopup,
+                    eventUptimeMs
                 )
                 return
             }
@@ -7655,7 +7658,11 @@ private val processingTimeoutRunnable = Runnable {
             capturedAtMs = capturedAtMs
         )
     }
-    private fun handleRapidoOrder(root: AccessibilityNodeInfo?, preValidation: RapidoPopupValidation? = null) {
+    private fun handleRapidoOrder(
+        root: AccessibilityNodeInfo?,
+        preValidation: RapidoPopupValidation? = null,
+        eventUptimeMs: Long = 0L
+    ) {
         if (root == null) return
 
         val rootPkg = root.packageName?.toString().orEmpty()
@@ -7972,7 +7979,8 @@ private val processingTimeoutRunnable = Runnable {
                     prevalidatedAcceptNode = snapshot.acceptNode,
                     historyRecordId = recordId,
                     verifiedPopupSession = rapidoVerifiedClickGuard.beginNewPopup(),
-                    acceptedHistoryReason = plusReason
+                    acceptedHistoryReason = plusReason,
+                    eventUptimeMs = eventUptimeMs
                 )
                 return
             }
@@ -8150,7 +8158,8 @@ private val processingTimeoutRunnable = Runnable {
                 historyRecordId = recordId,
                 verifiedPopupSession = rapidoVerifiedClickGuard.beginNewPopup(),
                 acceptedHistoryReason =
-                    acceptedHistoryReason
+                    acceptedHistoryReason,
+                eventUptimeMs = eventUptimeMs
             )
         } catch (e: Exception) {
             Log.e(TAG, "Error in handleRapidoOrder", e)
@@ -8175,7 +8184,8 @@ private val processingTimeoutRunnable = Runnable {
         prevalidatedAcceptNode: AccessibilityNodeInfo? = null,
         historyRecordId: String? = null,
         acceptedHistoryReason: String? = null,
-        verifiedPopupSession: Long? = null
+        verifiedPopupSession: Long? = null,
+        eventUptimeMs: Long = 0L
     ) {
         // HISTORY_PINNED_RECORD_V2
         // Keep every retry/final status attached to the same real ride.
@@ -8379,9 +8389,8 @@ private val processingTimeoutRunnable = Runnable {
         // Rapido may show its live order card above SmartDrivo while SmartDrivo
         // remains rootInActiveWindow. Allow a click ONLY when the already-found
         // strict Accept node/root is verified as belonging to Rapido.
-        val activeBeforeClick = rootInActiveWindow
-        val activePkgBeforeClick =
-            activeBeforeClick?.packageName?.toString().orEmpty().trim().lowercase()
+        // RAPIDO_TURBO_V3
+        // Avoid a nonessential active-window Binder read before Accept.
 
         val acceptNodePkg =
             acceptNode.packageName?.toString().orEmpty().trim().lowercase()
@@ -8419,21 +8428,9 @@ private val processingTimeoutRunnable = Runnable {
             return
         }
 
-        if (RapidoAdapter.isSmartDrivoPackage(activePkgBeforeClick)) {
-            Log.i(
-                TAG,
-                "✅ [Rapido] SmartDrivo is active root, but verified Rapido overlay " +
-                    "Accept target belongs to Rapido. Safe click allowed."
-            )
-        }
-        Log.i(
-            TAG,
-            "✅ [Rapido] Strict Accept button FOUND | " +
-                "ID: ${acceptNode.viewIdResourceName} | " +
-                "Text: '${acceptNode.text}' | " +
-                "ContentDesc: '${acceptNode.contentDescription}' | " +
-                "Clickable: ${acceptNode.isClickable}"
-        )
+        // RAPIDO_TURBO_V3
+        // Detailed button-label logging is not required before first click.
+        // Existing strict Accept / package / card safety checks remain active.
 
         // Verified popup and per-order guard already authorized this click.
         // Do not start a global 3-second lock for Rapido retries.
@@ -8488,6 +8485,24 @@ private val processingTimeoutRunnable = Runnable {
             (System.nanoTime() - rapidoClickStartedNs) / 1_000_000.0
         Log.i(TAG, "RAPIDO_CLICK_LATENCY_V1 attempt=$attemptNumber dispatchMs=" +
             String.format(Locale.ENGLISH, "%.2f", rapidoClickDispatchMs))
+
+        // RAPIDO_TURBO_V3: timing measured after first click dispatch.
+        if (attemptNumber == 1 && eventUptimeMs > 0L) {
+            val eventToClickMs =
+                (android.os.SystemClock.uptimeMillis() - eventUptimeMs)
+                    .coerceAtLeast(0L)
+
+            Log.i(
+                TAG,
+                "RAPIDO_TURBO_V3 eventToClickMs=$eventToClickMs " +
+                    "dispatchMs=" +
+                    String.format(
+                        Locale.ENGLISH,
+                        "%.2f",
+                        rapidoClickDispatchMs
+                    )
+            )
+        }
 
         // ═══ STEP 4 - Verify: order popup gone in 200ms = ACCEPTED. Cooldown: 200ms max between attempts ═══
         serviceScope.launch(Dispatchers.IO) {
