@@ -19,6 +19,37 @@ sealed class DecisionResult {
 
 object AreaRulesEngine {
 
+    // FILTER_TURBO_V1
+    // Cache only compiled destination patterns.
+    // Rules, priority, boundaries and results remain unchanged.
+    // Bounded to avoid unlimited memory growth.
+    private val destinationPatternCache =
+        object : java.util.LinkedHashMap<String, Regex>(
+            64, 0.75f, true
+        ) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<String, Regex>?
+            ): Boolean = size > 256
+        }
+
+    private fun destinationKeywordMatches(
+        keyword: String,
+        destination: String
+    ): Boolean {
+        val expression = synchronized(destinationPatternCache) {
+            destinationPatternCache[keyword]
+                ?: Regex(
+                    "(?<![\\p{L}\\p{N}])" +
+                        Regex.escape(keyword) +
+                        "(?![\\p{L}\\p{N}])",
+                    RegexOption.IGNORE_CASE
+                ).also {
+                    destinationPatternCache[keyword] = it
+                }
+        }
+
+        return expression.containsMatchIn(destination)
+    }
     fun evaluateRide(
         candidate: RideCandidate,
         areas: List<AreaGroup> = emptyList(),
@@ -61,7 +92,7 @@ object AreaRulesEngine {
                     }
 
                 for (word in words) {
-                    if (Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(word.lowercase()) + "(?![\\p{L}\\p{N}])", RegexOption.IGNORE_CASE).containsMatchIn(dropText)) {
+                    if (destinationKeywordMatches(word.lowercase(), dropText)) {
                         return DecisionResult.Reject(
                             "No-Go Area: destination matches '$word' in '${group.name}'"
                         )
@@ -92,12 +123,7 @@ object AreaRulesEngine {
                             val word = area.name.trim()
                             if (
                                 word.isNotBlank() &&
-                                Regex(
-                                    "(?<![\\p{L}\\p{N}])" +
-                                        Regex.escape(word) +
-                                        "(?![\\p{L}\\p{N}])",
-                                    RegexOption.IGNORE_CASE
-                                ).containsMatchIn(dropText)
+                                destinationKeywordMatches(word, dropText)
                             ) {
                                 matches.add(GoToMatch(group, area))
                             }
@@ -109,12 +135,7 @@ object AreaRulesEngine {
                             if (
                                 word.isNotBlank() &&
                                 !word.equals(group.name, ignoreCase = true) &&
-                                Regex(
-                                    "(?<![\\p{L}\\p{N}])" +
-                                        Regex.escape(word) +
-                                        "(?![\\p{L}\\p{N}])",
-                                    RegexOption.IGNORE_CASE
-                                ).containsMatchIn(dropText)
+                                destinationKeywordMatches(word, dropText)
                             ) {
                                 val oldMinFare =
                                     if (group.maxFare > 0f) group.maxFare

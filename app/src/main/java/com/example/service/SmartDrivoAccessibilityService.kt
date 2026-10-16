@@ -2650,6 +2650,36 @@ private val processingTimeoutRunnable = Runnable {
         }
     }
 
+    // RAPIDO_FILTER_TURBO_V1
+    // No fare, address, database write or click in this diagnostic.
+    private var lastRapidoTurboPartialLogMs = 0L
+
+    private fun logRapidoTurboPartial(
+        eventUptimeMs: Long,
+        rootsScanned: Int
+    ) {
+        val now = android.os.SystemClock.uptimeMillis()
+
+        if (now - lastRapidoTurboPartialLogMs < 750L) {
+            return
+        }
+
+        lastRapidoTurboPartialLogMs = now
+
+        val eventAgeMs =
+            if (eventUptimeMs > 0L) {
+                (now - eventUptimeMs).coerceAtLeast(0L)
+            } else {
+                -1L
+            }
+
+        Log.i(
+            TAG,
+            "RAPIDO_FILTER_TURBO_V1 PARTIAL " +
+                "eventAgeMs=$eventAgeMs " +
+                "rootsScanned=$rootsScanned"
+        )
+    }
     // RAPIDO_READ_LATENCY_V1 - intentionally no fare/address logging.
     private fun logRapidoReadLatency(
         path: String, readStartedNs: Long, eventUptimeMs: Long
@@ -3074,6 +3104,7 @@ private val processingTimeoutRunnable = Runnable {
                 // The valid offer may be mid-render. Request at most two
                 // short scans; never click or log incomplete data.
                 rapidoPartialPopupSeen = true
+                logRapidoTurboPartial(eventUptimeMs, candidateRoots.size)
                 Log.d(TAG, "RAPIDO_PARTIAL_READ_V1 pending bounded recheck")
             }
 
