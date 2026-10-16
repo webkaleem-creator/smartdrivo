@@ -1962,7 +1962,8 @@ private val processingTimeoutRunnable = Runnable {
             candidate = filteredCandidate,
             settings = settings,
             goToAreas = prefs.goToAreas.value,
-            noGoAreas = prefs.noGoAreas.value
+            noGoAreas = prefs.noGoAreas.value,
+            fixArea = prefs.fixAreaSettings.value
         )
         if (decision !is DecisionResult.Accept) {
             val reason = when (decision) {
@@ -7851,6 +7852,47 @@ private val processingTimeoutRunnable = Runnable {
             resetProcessing()
             return
         }
+        // FIX_AREA_V1: independent priority before +Amount and Go-To.
+        // Preserve full popup validation and the verified Accept target.
+        if (autoAcceptEnabled) {
+            val fixed = com.example.engine.FixAreaRuleEngine.evaluate(
+                candidate = candidate,
+                fix = prefs.fixAreaSettings.value,
+                noGoAreas = prefs.noGoAreas.value,
+                noGoEnabled = settings.isNoGoEnabled,
+                bundleAllowed = settings.isBundleOrderEnabled
+            )
+
+            when (fixed) {
+                is DecisionResult.Accept -> {
+                    executeRapidoAutoAccept(
+                        candidate = candidate,
+                        orderRoot = root,
+                        prevalidatedAcceptNode = snapshot.acceptNode,
+                        historyRecordId = recordId,
+                        verifiedPopupSession =
+                            rapidoVerifiedClickGuard.beginNewPopup(),
+                        acceptedHistoryReason = fixed.reason,
+                        eventUptimeMs = eventUptimeMs
+                    )
+                    return
+                }
+
+                is DecisionResult.Reject -> {
+                    handleRapidoFilterFailure(
+                        root = root,
+                        candidate = candidate,
+                        recordId = recordId,
+                        reason = fixed.reason,
+                        defaultStatus = OrderStatus.REJECTED
+                    )
+                    return
+                }
+
+                else -> Unit
+            }
+        }
+
         // RAPIDO_PLUS_AMOUNT_UNLIMITED_V1
         // Match original +Amount OR any enabled additional +Amount row.
         // Every selected row requires +Amount AND pickup AND drop.

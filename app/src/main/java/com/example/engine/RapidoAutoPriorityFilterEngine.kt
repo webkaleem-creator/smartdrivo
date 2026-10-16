@@ -15,7 +15,8 @@ object RapidoAutoPriorityFilterEngine {
         candidate: RideCandidate,
         settings: AppSettings,
         goToAreas: List<AreaGroup> = emptyList(),
-        noGoAreas: List<AreaGroup> = emptyList()
+        noGoAreas: List<AreaGroup> = emptyList(),
+        fixArea: FixAreaSettings = FixAreaSettings()
     ): DecisionResult {
         val fare = candidate.fare
         val pickup = candidate.pickupDistKm
@@ -39,6 +40,16 @@ object RapidoAutoPriorityFilterEngine {
                 "Auto Priority: incomplete destination - waiting for full order"
             )
         }
+
+        // FIX_AREA_V1: Fix Area priority before Go-To and numeric filters.
+        val fixed = FixAreaRuleEngine.evaluate(
+            candidate = candidate,
+            fix = fixArea,
+            noGoAreas = noGoAreas,
+            noGoEnabled = settings.isNoGoEnabled,
+            bundleAllowed = settings.isBundleOrderEnabled
+        )
+        if (fixed != null) return fixed
 
         val normal = AreaRulesEngine.evaluateRide(
             candidate = candidate,

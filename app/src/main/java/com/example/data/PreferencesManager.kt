@@ -1,6 +1,7 @@
 package com.example.data
 
 import com.example.model.AreaEntry
+import com.example.engine.FixAreaSettings
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -95,6 +96,58 @@ class PreferencesManager(private val context: Context) {
 
     private val _noGoAreas = MutableStateFlow(loadNoGoAreaGroups())
     val noGoAreas: StateFlow<List<AreaGroup>> = _noGoAreas.asStateFlow()
+
+    // FIX_AREA_V1: separate persistent configuration.
+    private val _fixAreaSettings = MutableStateFlow(readFixAreaSettings())
+    val fixAreaSettings: StateFlow<FixAreaSettings> =
+        _fixAreaSettings.asStateFlow()
+
+    private fun readFixAreaSettings(): FixAreaSettings {
+        val words = mutableListOf<String>()
+        try {
+            val raw = prefs.getString("fix_area_v1_words", "[]") ?: "[]"
+            val array = JSONArray(raw)
+            for (i in 0 until array.length()) {
+                val word = array.optString(i).trim()
+                if (word.isNotEmpty()) words.add(word)
+            }
+        } catch (_: Exception) {}
+
+        return FixAreaSettings(
+            enabled = prefs.getBoolean("fix_area_v1_enabled", false),
+            words = words.distinctBy { it.lowercase() }.take(10),
+            maxPickupKm = prefs.getFloat("fix_area_v1_pickup", 0.7f)
+        )
+    }
+
+    fun saveFixAreaSettings(value: FixAreaSettings) {
+        val cleaned = value.words
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
+            .take(10)
+
+        val safePickup =
+            value.maxPickupKm.takeIf { it.isFinite() && it > 0f }
+                ?: 0.7f
+
+        val saved = FixAreaSettings(
+            enabled = value.enabled,
+            words = cleaned,
+            maxPickupKm = safePickup
+        )
+
+        val array = JSONArray()
+        cleaned.forEach { array.put(it) }
+
+        prefs.edit()
+            .putString("fix_area_v1_words", array.toString())
+            .putBoolean("fix_area_v1_enabled", saved.enabled)
+            .putFloat("fix_area_v1_pickup", saved.maxPickupKm)
+            .apply()
+
+        _fixAreaSettings.value = saved
+    }
 
     private val _isGoToEnabled = MutableStateFlow(prefs.getBoolean(KEY_GOTO_ENABLED, false))
     val isGoToEnabledFlow: StateFlow<Boolean> = _isGoToEnabled.asStateFlow()

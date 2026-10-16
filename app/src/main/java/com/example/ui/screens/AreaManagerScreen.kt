@@ -72,6 +72,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.FirebaseRepository
 import com.example.data.PreferencesManager
+import com.example.engine.FixAreaSettings
 import com.example.model.AreaGroup
 import com.example.model.AreaType
 import kotlinx.coroutines.Dispatchers
@@ -105,10 +106,12 @@ fun AreaManagerScreen(
 ) {
     val storedGoTo by prefs.goToAreas.collectAsState()
     val storedNoGo by prefs.noGoAreas.collectAsState()
+    val savedFixArea by prefs.fixAreaSettings.collectAsState()
 
     var goToGroups by remember { mutableStateOf(cleanAreaGroups(prefs.goToAreas.value)) }
     var noGoGroups by remember { mutableStateOf(cleanAreaGroups(prefs.noGoAreas.value)) }
     var selectedType by remember { mutableStateOf(AreaType.GO_TO) }
+    var selectedFixArea by remember { mutableStateOf(false) }
     var editorGroup by remember { mutableStateOf<AreaGroup?>(null) }
     var showNewEditor by remember { mutableStateOf(false) }
     var deleteGroup by remember { mutableStateOf<AreaGroup?>(null) }
@@ -250,7 +253,8 @@ fun AreaManagerScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
+            if (!selectedFixArea) {
+                FloatingActionButton(
                 onClick = {
                     editorGroup = null
                     showNewEditor = true
@@ -260,6 +264,7 @@ fun AreaManagerScreen(
                 shape = RoundedCornerShape(18.dp)
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Add group")
+                }
             }
         },
         containerColor = Color(0xFFF8FAFC)
@@ -282,20 +287,31 @@ fun AreaManagerScreen(
                 ) {
                     CompactAreaTab(
                         text = "GO TO (${goToGroups.size})",
-                        selected = selectedType == AreaType.GO_TO,
+                        selected = !selectedFixArea && selectedType == AreaType.GO_TO,
                         color = GoToGreen,
                         modifier = Modifier.weight(1f)
                     ) {
+                        selectedFixArea = false
                         selectedType = AreaType.GO_TO
                     }
 
                     CompactAreaTab(
                         text = "NO GO (${noGoGroups.size})",
-                        selected = selectedType == AreaType.NO_GO,
+                        selected = !selectedFixArea && selectedType == AreaType.NO_GO,
                         color = NoGoRed,
                         modifier = Modifier.weight(1f)
                     ) {
+                        selectedFixArea = false
                         selectedType = AreaType.NO_GO
+                    }
+
+                    CompactAreaTab(
+                        text = "FIX AREA",
+                        selected = selectedFixArea,
+                        color = Color(0xFF00897B),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        selectedFixArea = true
                     }
                 }
             }
@@ -304,7 +320,9 @@ fun AreaManagerScreen(
             // Display-only explanation of existing AreaRulesEngine priority.
             item {
                 Surface(
-                    color = if (selectedType == AreaType.GO_TO) {
+                    color = if (selectedFixArea) {
+                        Color(0xFFE0F2F1)
+                    } else if (selectedType == AreaType.GO_TO) {
                         GoToGreenBg.copy(alpha = 0.65f)
                     } else {
                         NoGoRedBg.copy(alpha = 0.65f)
@@ -313,7 +331,9 @@ fun AreaManagerScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = if (selectedType == AreaType.GO_TO) {
+                        text = if (selectedFixArea) {
+                            "FIX AREA: Matching DROP destination + Max Pickup accepts first. NO GO blocks always. Other orders follow normal saved filters."
+                        } else if (selectedType == AreaType.GO_TO) {
                             "WHEN ON: Only saved GO TO destinations and their Fare/Pickup/Drop limits apply. Regular numeric filters are skipped. Enabled NO GO blocks first."
                         } else {
                             "WHEN ON: Saved blocked DROP destinations are rejected, even if other filters match. Pickup location does not trigger NO GO."
@@ -324,7 +344,9 @@ fun AreaManagerScreen(
                         ),
                         fontSize = 10.sp,
                         lineHeight = 15.sp,
-                        color = if (selectedType == AreaType.GO_TO) {
+                        color = if (selectedFixArea) {
+                            Color(0xFF00796B)
+                        } else if (selectedType == AreaType.GO_TO) {
                             GoToGreen
                         } else {
                             NoGoRed
@@ -334,7 +356,19 @@ fun AreaManagerScreen(
                     )
                 }
             }
-            if (visibleGroups.isEmpty()) {
+            if (selectedFixArea) {
+                item {
+                    FixAreaEditorCard(
+                        saved = savedFixArea,
+                        onSave = { updated ->
+                            prefs.saveFixAreaSettings(updated)
+                            scope.launch {
+                                snackbar.showSnackbar("Fix Area settings saved")
+                            }
+                        }
+                    )
+                }
+            } else if (visibleGroups.isEmpty()) {
                 item {
                     Card(
                         colors = CardDefaults.cardColors(
@@ -510,6 +544,138 @@ fun AreaManagerScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FixAreaEditorCard(
+    saved: FixAreaSettings,
+    onSave: (FixAreaSettings) -> Unit
+) {
+    var wordText by remember(saved) {
+        mutableStateOf(saved.words.joinToString(", "))
+    }
+    var pickupText by remember(saved) {
+        mutableStateOf(saved.maxPickupKm.toString())
+    }
+    var enabled by remember(saved) {
+        mutableStateOf(saved.enabled)
+    }
+
+    val words = wordText
+        .split(',', '\n')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .distinctBy { it.lowercase() }
+
+    val pickup = pickupText.toFloatOrNull()
+    val valid = words.isNotEmpty() &&
+        words.size <= 10 &&
+        pickup != null &&
+        pickup.isFinite() &&
+        pickup > 0f
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.White
+        ),
+        border = BorderStroke(1.dp, Color(0xFFB2DFDB))
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "FIX AREA",
+                        color = Color(0xFF00897B),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                    Text(
+                        "Independent destination priority",
+                        color = Color(0xFF64748B),
+                        fontSize = 11.sp
+                    )
+                }
+                Text(
+                    if (enabled) "ON" else "OFF",
+                    fontSize = 12.sp,
+                    color = Color(0xFF475569)
+                )
+                Spacer(Modifier.width(8.dp))
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = { enabled = it }
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = wordText,
+                onValueChange = { wordText = it },
+                label = { Text("Destination words (maximum 10)") },
+                supportingText = {
+                    Text("${words.size}/10 - Separate words with commas")
+                },
+                minLines = 2,
+                maxLines = 4,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            OutlinedTextField(
+                value = pickupText,
+                onValueChange = { raw ->
+                    val clean = raw.replace(',', '.')
+                    if (clean.isEmpty() ||
+                        clean.matches(Regex("""^\d*\.?\d*$"""))
+                    ) pickupText = clean
+                },
+                label = { Text("Maximum Pickup Distance (km)") },
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Decimal
+                ),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            Text(
+                "Example: Charminar + Pickup 0.7 km = Fix Area match. " +
+                    "No-Go still blocks. If Fix Area does not qualify, " +
+                    "normal saved filters apply.",
+                fontSize = 11.sp,
+                color = Color(0xFF64748B)
+            )
+
+            Spacer(Modifier.height(14.dp))
+
+            Button(
+                onClick = {
+                    onSave(
+                        FixAreaSettings(
+                            enabled = enabled,
+                            words = words,
+                            maxPickupKm = pickup ?: 0.7f
+                        )
+                    )
+                },
+                enabled = valid,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF00897B)
+                )
+            ) {
+                Text("Save Changes", fontWeight = FontWeight.Bold)
             }
         }
     }
