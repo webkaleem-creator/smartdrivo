@@ -19,7 +19,7 @@ service cloud.firestore {
         );
     }
     
-    // SECURITY_V2B_TRIAL_RULES - LOCAL TEST ONLY
+    // SECURITY_V2B_TRIAL_RULES - PRODUCTION MERGE
 
     function trialPath(key) {
       return /databases/$(database)/documents/trialDevices/$(key);
@@ -135,8 +135,35 @@ service cloud.firestore {
               'registeredAppVersion',
               'registeredDeviceAt',
               'registeredDeviceSource',
-              'activeSessionId', 'activeSessionAt'
-            ])
+              'activeSessionId', 'activeSessionAt',
+              'activeSessionDevice',
+              'activeSessionStartedAt',
+              'activeSessionAppVersion',
+              'boundInstallId', 'boundDevice', 'deviceBoundAt'
+            ]) &&
+          (
+            !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['boundInstallId', 'boundDevice', 'deviceBoundAt']) ||
+            (
+              resource.data.get('boundInstallId', '') == '' &&
+              request.resource.data.boundInstallId is string &&
+              request.resource.data.boundInstallId != ''
+            )
+          ) &&
+          (
+            !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny([
+                'activeSessionDevice',
+                'activeSessionStartedAt',
+                'activeSessionAppVersion'
+              ]) ||
+            (
+              request.resource.data.activeSessionId is string &&
+              request.resource.data.activeSessionDevice is string &&
+              request.resource.data.activeSessionStartedAt is int &&
+              request.resource.data.activeSessionAppVersion is string
+            )
+          )
         );
       // Only admins can delete user profiles
       allow delete: if isAdmin();
@@ -145,10 +172,18 @@ service cloud.firestore {
     // Trial reservations are immutable once created.
     match /trialDevices/{deviceKey} {
       allow get: if isAuthenticated();
-      allow list: if false;
+      allow list: if isAdmin();
       allow create: if validTrialReservation(deviceKey);
       allow update, delete: if false;
     }
+    // BLOCKED_USER_DEVICE_BLACKLIST_V1
+    // Permanent device blacklist. Drivers can read the single hash document
+    // for their current device; only admins can list or mutate the blacklist.
+    match /blockedDevices/{deviceKey} {
+      allow get: if isAuthenticated();
+      allow list, create, update, delete: if isAdmin();
+    }
+
     // Payments collection rules
     match /payments/{paymentId} {
       // Drivers can read their own submissions; Admins can read all submissions
