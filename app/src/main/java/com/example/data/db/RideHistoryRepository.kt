@@ -196,7 +196,7 @@ class RideHistoryRepository(
                         tipAmount = if ((candidate.fare ?: 0f) > 0f) {
                             candidate.tipAmount ?: 0f
                         } else existing.tipAmount,
-                        pickupDistanceKm = if ((candidate.pickupDistKm ?: 0f) > 0f) (candidate.pickupDistKm ?: 0f) else existing.pickupDistanceKm,
+                        pickupDistanceKm = candidate.pickupDistKm?.takeIf { it.isFinite() && it >= 0f } ?: existing.pickupDistanceKm,
                         dropDistanceKm = if ((candidate.dropDistKm ?: 0f) > 0f) (candidate.dropDistKm ?: 0f) else existing.dropDistanceKm,
                         pickupAddress = if (!(candidate.pickupAddress.isNullOrBlank())) (candidate.pickupAddress ?: "") else existing.pickupAddress,
                         dropAddress = if (!(candidate.dropAddress.isNullOrBlank())) (candidate.dropAddress ?: "") else existing.dropAddress,
@@ -241,8 +241,7 @@ class RideHistoryRepository(
                             else candidate.baseFare?.takeIf { it > 0f } ?: incomingFare,
                         tipAmount = if (existing.fare > 0f) existing.tipAmount
                             else candidate.tipAmount ?: existing.tipAmount,
-                        pickupDistanceKm = if (existing.pickupDistanceKm > 0f)
-                            existing.pickupDistanceKm else candidate.pickupDistKm ?: 0f,
+                        pickupDistanceKm = candidate.pickupDistKm?.takeIf { it.isFinite() && it >= 0f } ?: existing.pickupDistanceKm,
                         dropDistanceKm = if (existing.dropDistanceKm > 0f)
                             existing.dropDistanceKm else candidate.dropDistKm ?: 0f,
                         dropAddress = existing.dropAddress.ifBlank { candidate.dropAddress.orEmpty() },

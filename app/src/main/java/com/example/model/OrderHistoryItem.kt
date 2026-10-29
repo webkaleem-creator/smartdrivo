@@ -9,7 +9,8 @@ enum class OrderStatus {
     IGNORED,
     FAILED,
     SKIPPED,
-    MISSED
+    MISSED,
+    UNCONFIRMED
 }
 
 @Immutable

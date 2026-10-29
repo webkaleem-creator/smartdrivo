@@ -210,6 +210,7 @@ fun OrderHistoryScreen(
                 !isNoGoOrder(it) &&
                     it.status != OrderStatus.ACCEPTED &&
                     it.status != OrderStatus.REJECTED &&
+                    it.status != OrderStatus.UNCONFIRMED &&
                     it.status != OrderStatus.PROCESSING
             }
         }
@@ -245,6 +246,7 @@ fun OrderHistoryScreen(
                         !isNoGoOrder(item) &&
                             item.status != OrderStatus.ACCEPTED &&
                             item.status != OrderStatus.REJECTED &&
+                            item.status != OrderStatus.UNCONFIRMED &&
                             item.status != OrderStatus.PROCESSING
                 }
             }
@@ -678,6 +680,9 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
             item.status == OrderStatus.ACCEPTED ->
                 OrderStatus.ACCEPTED
 
+
+            item.status == OrderStatus.UNCONFIRMED ->
+                OrderStatus.UNCONFIRMED
             item.status == OrderStatus.FAILED ->
                 OrderStatus.FAILED
 
@@ -697,6 +702,9 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
 
     val historyCardBackground =
         when (historyVisualStatus) {
+            OrderStatus.UNCONFIRMED ->
+                Color(0xFFFFF8E7)
+
             OrderStatus.ACCEPTED ->
                 StatusActiveGreenBg
 
@@ -721,6 +729,9 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
 
     val historyCardAccent =
         when (historyVisualStatus) {
+            OrderStatus.UNCONFIRMED ->
+                Color(0xFFB7791F)
+
             OrderStatus.ACCEPTED ->
                 StatusActiveGreen
 
@@ -764,6 +775,7 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
             val effectiveStatus = when {
                 item.status == OrderStatus.PROCESSING -> OrderStatus.PROCESSING
                 item.status == OrderStatus.ACCEPTED -> OrderStatus.ACCEPTED
+                item.status == OrderStatus.UNCONFIRMED -> OrderStatus.UNCONFIRMED
                 item.status == OrderStatus.FAILED -> OrderStatus.FAILED
                 item.status == OrderStatus.SKIPPED -> OrderStatus.SKIPPED
                 isNoGo || item.status == OrderStatus.REJECTED -> OrderStatus.REJECTED
@@ -817,6 +829,7 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
 
                 // Status badge
                 val (statusBg, statusTextColor) = when (effectiveStatus) {
+                    OrderStatus.UNCONFIRMED -> Pair(Color(0xFFFFF8E7), Color(0xFF8A6000))
                     OrderStatus.PROCESSING -> Pair(Color(0xFFFFF8E1), Color(0xFFE65100))
                     OrderStatus.ACCEPTED -> Pair(StatusActiveGreenBg, StatusActiveGreen)
                     OrderStatus.REJECTED -> Pair(StatusInactiveRedBg, StatusInactiveRed)
@@ -1062,6 +1075,34 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
 
             // Status Reason Section for each order:
             when (effectiveStatus) {
+                OrderStatus.UNCONFIRMED -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFFFF8E7), RoundedCornerShape(10.dp))
+                            .border(BorderStroke(1.dp, Color(0xFFB7791F).copy(alpha = 0.5f)), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                    ) {
+                        Column {
+                            Text(
+                                text = "Acceptance Unconfirmed",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF8A6000)
+                            )
+                            Spacer(modifier = Modifier.height(1.dp))
+                            Text(
+                                text = item.decisionReasonText.ifBlank {
+                                    "Accept attempted; Rapido acceptance has not been verified. Check Rapido before taking action."
+                                },
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                                color = TextDarkPrimary
+                            )
+                        }
+                    }
+                }
+
                 OrderStatus.ACCEPTED -> {
                     val reasonText = formatAcceptedFilterReason(item)
                     Box(

@@ -21,9 +21,10 @@ object RapidoEarlyReadGate {
         fare: Float?, pickupKm: Float?, tripKm: Float?, strictAcceptFound: Boolean
     ): Boolean {
         fun positive(v: Float?): Boolean = v != null && v.isFinite() && v > 0f
+        val pickupValid = RapidoDistanceValidity.isValidPickup(pickupKm)
         return (positive(fare) &&
-            (positive(pickupKm) || positive(tripKm) || strictAcceptFound)) ||
-            (strictAcceptFound && (positive(pickupKm) || positive(tripKm)))
+            (pickupValid || positive(tripKm) || strictAcceptFound)) ||
+            (strictAcceptFound && (pickupValid || positive(tripKm)))
     }
 
     // Underlying Rapido Home texts may coexist with an overlay order card.
@@ -34,7 +35,7 @@ object RapidoEarlyReadGate {
     ): Boolean {
         if (!homeDetected) return false
         fun positive(v: Float?): Boolean = v != null && v.isFinite() && v > 0f
-        return !(positive(fare) && positive(pickupKm) &&
+        return !(positive(fare) && RapidoDistanceValidity.isValidPickup(pickupKm) &&
             positive(tripKm) && strictAcceptFound)
     }
 }

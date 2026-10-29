@@ -89,6 +89,8 @@ object RapidoAdapter {
 
     private fun collectAllNodeTextsForHomeCheck(node: AccessibilityNodeInfo?, outList: MutableList<String>, depth: Int = 0) {
         if (node == null || depth > 15 || outList.size > 80) return
+        // Ignore identifiable pickup street/address subtrees before text access.
+        if (isRapidoPickupAddressViewId(node.viewIdResourceName)) return
         val text = node.text?.toString()?.trim()
         val desc = node.contentDescription?.toString()?.trim()
         if (!text.isNullOrEmpty()) outList.add(text)
@@ -307,7 +309,29 @@ object RapidoAdapter {
         val packageName: String? = null
     )
 
-    private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextNodeEntry>, inheritedPkg: String? = null) {
+        // RAPIDO_NO_PICKUP_ADDRESS_READ_V1
+    // Identifies only explicitly address/location-labelled pickup nodes. Distance nodes remain readable.
+    internal fun isRapidoPickupAddressViewId(rawId: String?): Boolean {
+        val id = rawId?.substringAfter(":id/")?.lowercase()?.replace('-', '_').orEmpty()
+        if (id.isBlank()) return false
+        val pickupField = id.contains("pickup") || id.contains("pick_up") ||
+            id.contains("source") || id.contains("start_loc") ||
+            id.contains("from_address") || id.contains("from_location")
+        if (!pickupField) return false
+        val distanceField = listOf("distance", "dist", "kilometer", "kilometre", "pickup_km", "pickupkm", "km_value").any { id.contains(it) }
+        if (distanceField) return false
+        // Broaden only unmistakable address identifiers. A generic pickup title,
+        // label or TextView may contain the numeric 0 km, so never skip those
+        // without live hierarchy evidence. Numeric distance IDs remain readable.
+        return listOf(
+            "address", "addr", "location", "landmark", "locality", "place",
+            "area", "pickup_name", "source_name", "start_name",
+            "pickup_street", "pickup_building", "pickup_house", "pickup_landmark",
+            "source_street", "source_building", "source_house",
+            "from_street", "from_house", "start_street"
+        ).any { id.contains(it) }
+    }
+private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextNodeEntry>, inheritedPkg: String? = null, skipPickupAddress: Boolean = false) {
         if (node == null) return
         val nodePkg = node.packageName?.toString()
         val effectivePkg = nodePkg ?: inheritedPkg
@@ -317,6 +341,7 @@ object RapidoAdapter {
             return
         }
 
+        if (skipPickupAddress && isRapidoPickupAddressViewId(node.viewIdResourceName)) return
         val text = node.text?.toString()?.trim()
         val desc = node.contentDescription?.toString()?.trim()
         val content = when {
@@ -332,7 +357,7 @@ object RapidoAdapter {
         for (i in 0 until node.childCount) {
             val child = node.getChild(i)
             if (child != null) {
-                collectEntries(child, list, effectivePkg)
+                collectEntries(child, list, effectivePkg, skipPickupAddress)
                 child.recycle()
             }
         }
@@ -354,8 +379,14 @@ object RapidoAdapter {
         fun usableAddress(
             raw: String?
         ): String? {
-            val clean =
-                cleanRapidoAddress(raw)
+                        val rawLower = raw?.trim()?.lowercase().orEmpty()
+            if (
+                rawLower == "pickup" || rawLower == "pick up" || rawLower == "from" ||
+                rawLower.startsWith("pickup:") || rawLower.startsWith("pickup ") ||
+                rawLower.startsWith("pick up:") || rawLower.startsWith("pick up ") ||
+                rawLower.startsWith("from:") || rawLower.startsWith("from ")
+            ) return null
+            val clean = cleanRapidoAddress(raw)
 
             if (clean.length < 3) {
                 return null
@@ -483,25 +514,19 @@ object RapidoAdapter {
             }
 
         if (lastKmIndex >= 0) {
-            for (
-                i in
-                (lastKmIndex + 1)
-                    until texts.size
-            ) {
-                usableAddress(
-                    texts[i]
-                )?.let {
-                    return it
-                }
+                        for (i in (lastKmIndex + 1) until texts.size) {
+                val currentLine = texts[i].trim().lowercase()
+                val previousLine = texts.getOrNull(i - 1)?.trim()?.lowercase().orEmpty()
+                if (
+                    currentLine == "pickup" || currentLine == "pick up" || currentLine == "from" ||
+                    previousLine == "pickup" || previousLine == "pick up" || previousLine == "from"
+                ) continue
+                usableAddress(texts[i])?.let { return it }
             }
         }
 
-        // Last conservative fallback: pickup is normally above destination.
-        return texts
-            .asReversed()
-            .firstNotNullOfOrNull {
-                usableAddress(it)
-            }
+        // Do not guess from arbitrary text; it may be the pickup address.
+        return null
     }
 
     fun extractAutoPriorityDropAddressOnly(
@@ -521,11 +546,7 @@ object RapidoAdapter {
         val entries =
             mutableListOf<TextNodeEntry>()
 
-        collectEntries(
-            root,
-            entries,
-            rootPkg
-        )
+        collectEntries(root, entries, rootPkg, skipPickupAddress = true)
 
         val validEntries =
             entries.filter { entry ->
@@ -544,8 +565,14 @@ object RapidoAdapter {
         fun usableAddress(
             raw: String?
         ): String? {
-            val clean =
-                cleanRapidoAddress(raw)
+                        val rawLower = raw?.trim()?.lowercase().orEmpty()
+            if (
+                rawLower == "pickup" || rawLower == "pick up" || rawLower == "from" ||
+                rawLower.startsWith("pickup:") || rawLower.startsWith("pickup ") ||
+                rawLower.startsWith("pick up:") || rawLower.startsWith("pick up ") ||
+                rawLower.startsWith("from:") || rawLower.startsWith("from ")
+            ) return null
+            val clean = cleanRapidoAddress(raw)
 
             if (clean.length < 3) {
                 return null
@@ -652,26 +679,19 @@ object RapidoAdapter {
             }
 
         if (lastKmIndex >= 0) {
-            for (
-                i in
-                (lastKmIndex + 1)
-                    until validEntries.size
-            ) {
-                usableAddress(
-                    validEntries[i].text
-                )?.let {
-                    return it
-                }
+                        for (i in (lastKmIndex + 1) until validEntries.size) {
+                val currentLine = validEntries[i].text.trim().lowercase()
+                val previousLine = validEntries.getOrNull(i - 1)?.text?.trim()?.lowercase().orEmpty()
+                if (
+                    currentLine == "pickup" || currentLine == "pick up" || currentLine == "from" ||
+                    previousLine == "pickup" || previousLine == "pick up" || previousLine == "from"
+                ) continue
+                usableAddress(validEntries[i].text)?.let { return it }
             }
         }
 
-        // Conservative fallback: Rapido card usually shows pickup before drop,
-        // so take the last valid address-like line.
-        return validEntries
-            .asReversed()
-            .firstNotNullOfOrNull {
-                usableAddress(it.text)
-            }
+        // Do not guess from arbitrary address-like text; it may be pickup.
+        return null
     }
 
     /**
@@ -703,7 +723,7 @@ object RapidoAdapter {
                     .any { id.contains(it) }) continue
             val kmValues = KM_REGEX.findAll(rawText)
                 .mapNotNull { it.groupValues.getOrNull(1)?.toFloatOrNull() }
-                .filter { it.isFinite() && it > 0f }
+                .filter { it.isFinite() && it >= 0f }
                 .toList()
             // Containers with multiple distances do not identify one field.
             if (kmValues.size != 1) continue
@@ -752,7 +772,7 @@ object RapidoAdapter {
         }
 
         val entries = mutableListOf<TextNodeEntry>()
-        collectEntries(root, entries, rootPkg)
+        collectEntries(root, entries, rootPkg, skipPickupAddress)
 
         // Only extract address text from Rapido app package (com.rapido.passenger), not from SmartDrivo UI
         val validEntries = entries.filter { entry ->
@@ -768,7 +788,7 @@ object RapidoAdapter {
         var dropFromId: String? = null
         for (entry in validEntries) {
             val id = entry.viewId?.lowercase().orEmpty()
-            if (pickupFromId == null && (id.contains("pickup") || id.contains("source") || id.contains("start_loc") || id.contains("tv_pickup"))) {
+            if (!skipPickupAddress && pickupFromId == null && (id.contains("pickup") || id.contains("source") || id.contains("start_loc") || id.contains("tv_pickup"))) {
                 val clean = cleanRapidoAddress(entry.text)
                 if (clean.length >= 3 && !isInvalidAddress(clean)) pickupFromId = clean
             }
@@ -793,7 +813,7 @@ object RapidoAdapter {
         val rawDrop = dropFromId ?: data.dropAddress
 
         // If extracted address matches any blocklist word → save as "Address unavailable" instead
-        val finalPickup = if (rawPickup.isNullOrBlank() || matchesBlocklist(rawPickup) || isInvalidAddress(rawPickup)) {
+        val finalPickup = if (skipPickupAddress || rawPickup.isNullOrBlank() || matchesBlocklist(rawPickup) || isInvalidAddress(rawPickup)) {
             "Address unavailable"
         } else {
             rawPickup
@@ -972,7 +992,9 @@ object RapidoAdapter {
             val sanitized = line.replace(Regex("""[0-9]+(?:\.[0-9]+)?\s*(?:km/h|kmph|km\s*/\s*h|km/hr)\b""", RegexOption.IGNORE_CASE), " ")
             KM_REGEX.findAll(sanitized).forEach { m ->
                 val kmVal = m.groupValues[1].toFloatOrNull()
-                if (kmVal != null && kmVal > 0f) {
+                // A visibly measured 0 km pickup is a valid known value.
+                // Keep zero in the ordered km stream; never invent zero when absent.
+                if (kmVal != null && kmVal.isFinite() && kmVal >= 0f) {
                     kmMatches.add(Pair(i, kmVal))
                 }
             }
@@ -1021,14 +1043,14 @@ object RapidoAdapter {
                     ?: if (standaloneTrip.matches(line))
                         texts.getOrNull(i + 1)?.let { KM_REGEX.find(it)?.groupValues?.getOrNull(1) }
                     else null
-                explicitDropKm = found?.toFloatOrNull()?.takeIf { it > 0f }
+                explicitDropKm = found?.toFloatOrNull()?.takeIf { it.isFinite() && it >= 0f }
             }
             if (explicitPickupKm == null) {
                 val found = pickupLabeled.find(stripped)?.groupValues?.getOrNull(1)
                     ?: if (standalonePickup.matches(line))
                         texts.getOrNull(i + 1)?.let { KM_REGEX.find(it)?.groupValues?.getOrNull(1) }
                     else null
-                explicitPickupKm = found?.toFloatOrNull()?.takeIf { it > 0f }
+                explicitPickupKm = found?.toFloatOrNull()?.takeIf { it.isFinite() && it >= 0f }
             }
         }
 
@@ -1038,15 +1060,17 @@ object RapidoAdapter {
         val labeledTripValues = linkedSetOf<Float>()
         for (i in texts.indices) {
             val line = texts[i].trim()
-            fun addValid(set: MutableSet<Float>, raw: String?) {
-                raw?.toFloatOrNull()?.takeIf { it.isFinite() && it > 0f }?.let { set.add(it) }
+            fun addValid(set: MutableSet<Float>, raw: String?, allowZero: Boolean = false) {
+                raw?.toFloatOrNull()?.takeIf {
+                    it.isFinite() && (it > 0f || (allowZero && it == 0f))
+                }?.let { set.add(it) }
             }
-            pickupLabeled.findAll(line).forEach { addValid(labeledPickupValues, it.groupValues[1]) }
+            pickupLabeled.findAll(line).forEach { addValid(labeledPickupValues, it.groupValues[1], allowZero = true) }
             tripLabeled.findAll(line).forEach { addValid(labeledTripValues, it.groupValues[1]) }
             tripReverse.findAll(line).forEach { addValid(labeledTripValues, it.groupValues[1]) }
             if (standalonePickup.matches(line)) {
                 addValid(labeledPickupValues,
-                    texts.getOrNull(i + 1)?.let { KM_REGEX.find(it)?.groupValues?.getOrNull(1) })
+                    texts.getOrNull(i + 1)?.let { KM_REGEX.find(it)?.groupValues?.getOrNull(1) }, allowZero = true)
             }
             if (standaloneTrip.matches(line)) {
                 addValid(labeledTripValues,
@@ -1077,6 +1101,14 @@ object RapidoAdapter {
             } else orderedKm.getOrNull(1)?.second
         }
 
+        // With only one unlabelled distance, its role is ambiguous.
+        // Do not turn a lone trip distance into a fabricated pickup distance.
+        if (!hasNearby && explicitPickupKm == null && explicitDropKm == null &&
+            orderedKm.size < 2
+        ) {
+            pickupKm = null
+        }
+
         if (dropKm == null) {
             dropKm = OrderDataExtractor.extractDropDistance(texts, texts.joinToString(" "))
         }
@@ -1105,7 +1137,7 @@ object RapidoAdapter {
             val bundleDrop =
                 bundleDistances.filterIndexed { index, _ -> index % 2 == 1 }.maxOrNull()
 
-            if (bundlePickup != null && bundlePickup > 0f) {
+            if (bundlePickup != null && bundlePickup.isFinite() && bundlePickup >= 0f) {
                 pickupKm = bundlePickup
             }
             if (bundleDrop != null && bundleDrop > 0f) {
@@ -1164,6 +1196,17 @@ object RapidoAdapter {
 
         if (dropAddress == null && secondKmIdx != null) {
             for (i in (secondKmIdx + 1) until texts.size) {
+                                val currentLine = texts[i].trim().lowercase()
+                val previousLine = texts.getOrNull(i - 1)?.trim()?.lowercase().orEmpty()
+                if (
+                    skipPickupAddress && (
+                        currentLine == "pickup" || currentLine == "pick up" || currentLine == "from" ||
+                        currentLine.startsWith("pickup:") || currentLine.startsWith("pickup ") ||
+                        currentLine.startsWith("pick up:") || currentLine.startsWith("pick up ") ||
+                        currentLine.startsWith("from:") || currentLine.startsWith("from ") ||
+                        previousLine == "pickup" || previousLine == "pick up" || previousLine == "from"
+                    )
+                ) continue
                 val clean = cleanRapidoAddress(texts[i])
                 if (clean.length >= 3 && !isInvalidAddress(clean)) {
                     dropAddress = clean
@@ -1172,7 +1215,8 @@ object RapidoAdapter {
             }
         }
 
-        // Step 3c: Filter candidate address strings from all texts
+                if (!skipPickupAddress) {
+// Step 3c: Filter candidate address strings from all texts
         val candidateLines = mutableListOf<String>()
         for (text in texts) {
             val clean = cleanRapidoAddress(text)
@@ -1200,7 +1244,10 @@ object RapidoAdapter {
             }
         }
 
-        // Requirement 2: If extracted address matches any blocklist word → save as "Address unavailable" instead
+
+        }
+
+// Requirement 2: If extracted address matches any blocklist word → save as "Address unavailable" instead
         val safePickup =
             if (skipPickupAddress) {
                 "Address unavailable"
@@ -2026,9 +2073,7 @@ object RapidoAdapter {
         val visitedNodes: Int
     )
 
-    private fun scanRapidoNormalOfferSinglePass(
-        root: AccessibilityNodeInfo
-    ): RapidoNormalSinglePassScan {
+    private fun scanRapidoNormalOfferSinglePass(root: AccessibilityNodeInfo, skipPickupAddress: Boolean = true): RapidoNormalSinglePassScan {
         val entries =
             ArrayList<TextNodeEntry>(48)
 
@@ -2190,15 +2235,12 @@ object RapidoAdapter {
                     ?: inheritedPkg
                     ?: rootPkg
 
-            val text =
-                node.text
-                    ?.toString()
-                    ?.trim()
+            // Exclude own UI and identifiable pickup-address subtrees BEFORE reading text.
+            if (isSmartDrivoPackage(effectivePkg)) return
+            if (skipPickupAddress && isRapidoPickupAddressViewId(node.viewIdResourceName)) return
+            val text = node.text?.toString()?.trim()
 
-            val desc =
-                node.contentDescription
-                    ?.toString()
-                    ?.trim()
+            val desc = node.contentDescription?.toString()?.trim()
 
             // Preserve the old Home-screen check scope without another tree walk.
             if (
@@ -2219,14 +2261,6 @@ object RapidoAdapter {
                         desc
                     )
                 }
-            }
-
-            if (
-                isSmartDrivoPackage(
-                    effectivePkg
-                )
-            ) {
-                return
             }
 
             val content =
@@ -2347,8 +2381,7 @@ object RapidoAdapter {
                     ?.lowercase()
                     .orEmpty()
 
-            if (
-                pickupFromId == null &&
+            if (!skipPickupAddress && pickupFromId == null &&
                 (
                     id.contains("pickup") ||
                         id.contains("source") ||
@@ -2426,8 +2459,7 @@ object RapidoAdapter {
                 ?: data.dropAddress
 
         val finalPickup =
-            if (
-                rawPickup.isNullOrBlank() ||
+            if (skipPickupAddress || rawPickup.isNullOrBlank() ||
                 matchesBlocklist(rawPickup) ||
                 isInvalidAddress(rawPickup)
             ) {
@@ -2519,9 +2551,7 @@ object RapidoAdapter {
         val hasNearby =
             orderData.hasNearby
 
-        val hasPickupKm =
-            orderData.pickupKm != null &&
-                orderData.pickupKm > 0f
+        val hasPickupKm = RapidoDistanceValidity.isValidPickup(orderData.pickupKm)
 
         if (
             !hasPickupKm &&
@@ -2648,7 +2678,7 @@ object RapidoAdapter {
 
         // Requirement 1b: A pickup distance in km OR "Nearby"
         val hasNearby = texts.any { it.trim().equals("nearby", ignoreCase = true) || it.contains("nearby", ignoreCase = true) }
-        val hasPickupKm = orderData.pickupKm != null && orderData.pickupKm > 0f
+        val hasPickupKm = RapidoDistanceValidity.isValidPickup(orderData.pickupKm)
 
         if (!hasPickupKm && !hasNearby) {
             return RapidoPopupValidation(

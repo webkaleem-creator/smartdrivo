@@ -561,12 +561,21 @@ class ExampleUnitTest {
         val validation1 = RapidoAdapter.validateRapidoOrderPopupFromTexts(homeTexts, hasAcceptButton = false)
         assertFalse("Home screen should not be a valid order popup", validation1.isValid)
 
-        // 2. Genuine order popup with all 3: Fare, pickup km, Accept button: MUST PASS
-        val validTexts = listOf("₹75", "0.4 km", "Koramangala", "Indiranagar", "Accept")
+        // 2. Complete offer: fare, distinct pickup/drop distances, and Accept: MUST PASS
+        val validTexts = listOf("₹75", "0.4 km", "3.2 km", "Koramangala", "Indiranagar", "Accept")
         val validation2 = RapidoAdapter.validateRapidoOrderPopupFromTexts(validTexts, hasAcceptButton = true)
         assertTrue("Valid order with fare, pickup km, and Accept button should pass", validation2.isValid)
         assertEquals(75f, validation2.fare ?: 0f, 0.01f)
         assertEquals(0.4f, validation2.pickupDistKm ?: 0f, 0.01f)
+        assertEquals(3.2f, RapidoAdapter.extractOrderDataFromTexts(validTexts).dropKm ?: -1f, 0.01f)
+
+        // A lone unlabelled km value might be trip distance. Never guess pickup.
+        val ambiguousTexts = listOf("₹75", "0.4 km", "Koramangala", "Accept")
+        val ambiguousValidation = RapidoAdapter.validateRapidoOrderPopupFromTexts(
+            ambiguousTexts, hasAcceptButton = true
+        )
+        assertFalse("One unlabelled km must not validate pickup", ambiguousValidation.isValid)
+        assertNull("Unlabelled single km must leave pickup unknown", ambiguousValidation.orderData?.pickupKm)
 
         // 3. Genuine order popup with "Nearby": MUST PASS
         val nearbyTexts = listOf("₹60", "Nearby", "MG Road", "Indiranagar", "Accept")

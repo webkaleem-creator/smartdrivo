@@ -21,7 +21,7 @@ data class UnlimitedFilterRule(
         enabled && isValid() &&
         amount != null && amount.isFinite() && amount >= minimum &&
         pickup != null && pickup.isFinite() && pickup >= 0f && pickup <= maxPickupKm &&
-        drop != null && drop.isFinite() && drop >= 0f && drop <= maxDropKm
+        drop != null && drop.isFinite() && drop > 0f && drop <= maxDropKm
 
     companion object {
         @Volatile private var cachedRaw: String? = null

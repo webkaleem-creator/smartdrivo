@@ -20,7 +20,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -40,6 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -59,7 +60,6 @@ private val OrderSurface = Color(0xFFEBF6FF)
 private val AmountSurface = Color(0xFFECFBF4)
 private val RuleInactive = Color(0xFFF8FAFC)
 private val RuleActive = Color(0xFFF2F8FF)
-private val SaveSurface = Color(0xFFE5F3FF)
 private val DeleteSurface = Color(0xFFFEEDEE)
 
 @Composable
@@ -249,6 +249,7 @@ private fun CompactUnlimitedRuleRow(
     var drop by rememberSaveable(rule.id) {
         mutableStateOf(rule.maxDropKm.toString())
     }
+    val context = LocalContext.current
 
     // SMARTDRIVO_UNLIMITED_ACTIONS_V2
     var showDeleteConfirmation by rememberSaveable(rule.id) {
@@ -263,6 +264,32 @@ private fun CompactUnlimitedRuleRow(
         amount != null && amount.isFinite() && amount > 0f &&
         pick != null && pick.isFinite() && pick > 0f &&
         destination != null && destination.isFinite() && destination > 0f
+
+    // SMARTDRIVO_UNLIMITED_AUTOSAVE_V11
+    // Write only complete, positive numeric values. A temporary empty/partial
+    // keyboard draft is kept locally and never corrupts the saved rule.
+    fun saveValidNumbers(nextMinimum: String, nextPickup: String, nextDrop: String) {
+        val minValue = nextMinimum.toFloatOrNull()
+        val pickupValue = nextPickup.toFloatOrNull()
+        val dropValue = nextDrop.toFloatOrNull()
+        if (minValue != null && minValue.isFinite() && minValue > 0f &&
+            pickupValue != null && pickupValue.isFinite() && pickupValue > 0f &&
+            dropValue != null && dropValue.isFinite() && dropValue > 0f
+        ) {
+            if (minValue != rule.minimum || pickupValue != rule.maxPickupKm ||
+                dropValue != rule.maxDropKm
+            ) {
+                onUpdate(
+                    rule.copy(
+                        minimum = minValue,
+                        maxPickupKm = pickupValue,
+                        maxDropKm = dropValue
+                    ),
+                    false
+                )
+            }
+        }
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -292,27 +319,36 @@ private fun CompactUnlimitedRuleRow(
                 TinyRuleField(
                     label = if (plus) "+₹ Min" else "₹ Min",
                     value = minimum,
-                    onValueChange = { minimum = it },
+                    onValueChange = { next ->
+                        minimum = next
+                        saveValidNumbers(next, pickup, drop)
+                    },
                     modifier = Modifier.weight(1f)
                 )
 
                 TinyRuleField(
                     label = "Pickup",
                     value = pickup,
-                    onValueChange = { pickup = it },
+                    onValueChange = { next ->
+                        pickup = next
+                        saveValidNumbers(minimum, next, drop)
+                    },
                     modifier = Modifier.weight(1f)
                 )
 
                 TinyRuleField(
                     label = "Drop",
                     value = drop,
-                    onValueChange = { drop = it },
+                    onValueChange = { next ->
+                        drop = next
+                        saveValidNumbers(minimum, pickup, next)
+                    },
                     modifier = Modifier.weight(1f)
                 )
             }
 
             Column(
-                modifier = Modifier.width(112.dp),
+                modifier = Modifier.width(88.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(7.dp)
             ) {
@@ -320,48 +356,44 @@ private fun CompactUnlimitedRuleRow(
                     checked = rule.enabled,
                     enabled = true,
                     onClick = {
-                        // Only ON/OFF changes here.
-                        // Numeric drafts remain unsaved until Save.
-                        onUpdate(
-                            rule.copy(enabled = !rule.enabled),
-                            false
-                        )
-                    }
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    SmallRuleButton(
-                        label = "Save",
-                        icon = Icons.Default.Save,
-                        isDelete = false,
-                        enabled = valid,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            if (valid) {
-                                onUpdate(
+                        // OFF is always allowed. ON requires valid drafts;
+                        // save the three edited numbers and enabled state atomically.
+                        if (!rule.enabled && !valid) {
+                            Toast.makeText(
+                                context, "Enter valid filter values", Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            val nextEnabled = !rule.enabled
+                            onUpdate(
+                                if (valid) {
                                     rule.copy(
+                                        enabled = nextEnabled,
                                         minimum = amount!!,
                                         maxPickupKm = pick!!,
                                         maxDropKm = destination!!
-                                    ),
-                                    true
-                                )
-                            }
+                                    )
+                                } else {
+                                    rule.copy(enabled = false)
+                                },
+                                false
+                            )
+                            Toast.makeText(
+                                context,
+                                if (nextEnabled) "Filter ON ✓" else "Filter OFF",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
-                    )
+                    }
+                )
 
-                    SmallRuleButton(
-                        label = "Delete",
-                        icon = Icons.Default.DeleteOutline,
-                        isDelete = true,
-                        enabled = true,
-                        modifier = Modifier.weight(1f),
-                        onClick = { showDeleteConfirmation = true }
-                    )
-                }
+                SmallRuleButton(
+                    label = "Delete",
+                    icon = Icons.Default.DeleteOutline,
+                    isDelete = true,
+                    enabled = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { showDeleteConfirmation = true }
+                )
             }
         }
     }
@@ -481,7 +513,7 @@ private fun SmallRuleButton(
             .height(34.dp)
             .clip(shape)
             .background(
-                if (isDelete) DeleteSurface else SaveSurface
+                DeleteSurface
             )
             .border(
                 1.dp,

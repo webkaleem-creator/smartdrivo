@@ -22,7 +22,7 @@ object RapidoAutoPriorityFilterEngine {
         val pickup = candidate.pickupDistKm
         val trip = candidate.dropDistKm
         if (fare == null || !fare.isFinite() || fare <= 0f ||
-            pickup == null || !pickup.isFinite() || pickup <= 0f ||
+            !com.example.engine.RapidoDistanceValidity.isValidPickup(pickup) ||
             trip == null || !trip.isFinite() || trip <= 0f
         ) {
             return DecisionResult.Ignore(
@@ -38,6 +38,19 @@ object RapidoAutoPriorityFilterEngine {
         ) {
             return DecisionResult.Ignore(
                 "Auto Priority: incomplete destination - waiting for full order"
+            )
+        }
+
+        // V12_FASTEST_AUTO_PRIORITY: Auto Priority is an offer type, not a
+        // competing saved-rule priority while Fastest is enabled. Its click
+        // still requires a real valid Rapido offer and the strict Accept target.
+        if (settings.isFastestModeEnabled) {
+            return AreaRulesEngine.evaluateRide(
+                candidate = candidate,
+                settings = settings,
+                pickupLocationTextOverride = "",
+                isGoToEnabled = false,
+                isNoGoEnabled = false
             )
         }
 
@@ -73,8 +86,8 @@ object RapidoAutoPriorityFilterEngine {
             settings.isPlusAmountFilterEnabled &&
                 tip != null && tip.isFinite() && tip > 0f &&
                 tip >= settings.plusAmountMin &&
-                pickup <= settings.plusAmountMaxPickupDistanceKm &&
-                trip <= settings.plusAmountMaxDropDistanceKm
+                pickup != null && pickup.isFinite() && pickup >= 0f && pickup <= settings.plusAmountMaxPickupDistanceKm &&
+                trip != null && trip.isFinite() && trip > 0f && trip <= settings.plusAmountMaxDropDistanceKm
         if (legacyPlusMatched) {
             return DecisionResult.Accept(
                 "Mode: + Amount Filter | +₹$tip >= +₹${settings.plusAmountMin}" +

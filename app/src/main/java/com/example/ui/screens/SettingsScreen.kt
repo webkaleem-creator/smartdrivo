@@ -93,7 +93,6 @@ fun SettingsScreen(
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     var snackbarJob by remember { mutableStateOf<Job?>(null) }
-    var hasUnsavedChanges by rememberSaveable { mutableStateOf(false) }
 
     val showSavedSnackbar: () -> Unit = {
         snackbarJob?.cancel()
@@ -122,13 +121,6 @@ fun SettingsScreen(
             if (settings.maxFare > 0) {
                 if (settings.maxFare % 1.0f == 0f) settings.maxFare.toInt().toString() else settings.maxFare.toString()
             } else "999"
-        )
-    }
-    var maxPickupText by rememberSaveable {
-        mutableStateOf(
-            if (settings.maxPickupDistanceKm > 0) {
-                if (settings.maxPickupDistanceKm % 1.0f == 0f) settings.maxPickupDistanceKm.toInt().toString() else settings.maxPickupDistanceKm.toString()
-            } else "3.0"
         )
     }
     var maxDropText by rememberSaveable {
@@ -200,29 +192,6 @@ fun SettingsScreen(
     var plusAmountMaxPickupText by rememberSaveable { mutableStateOf(if (settings.plusAmountMaxPickupDistanceKm % 1.0f == 0f) settings.plusAmountMaxPickupDistanceKm.toInt().toString() else settings.plusAmountMaxPickupDistanceKm.toString()) }
     var plusAmountMaxDropText by rememberSaveable { mutableStateOf(if (settings.plusAmountMaxDropDistanceKm % 1.0f == 0f) settings.plusAmountMaxDropDistanceKm.toInt().toString() else settings.plusAmountMaxDropDistanceKm.toString()) }
 
-    // FULL_CARD_MODE_TOGGLE_UI_V1
-    fun setFastestModeFromCard(enabled: Boolean) {
-        val currentPickup =
-            maxPickupText.toFloatOrNull()?.takeIf { it > 0f }
-                ?: settings.maxPickupDistanceKm.takeIf { it > 0f }
-                ?: 3.0f
-
-        maxPickupText =
-            if (currentPickup % 1.0f == 0f)
-                currentPickup.toInt().toString()
-            else
-                currentPickup.toString()
-
-        prefs.saveAppSettings(
-            settings.copy(
-                isFastestModeEnabled = enabled,
-                maxPickupDistanceKm = currentPickup
-            )
-        )
-        hasUnsavedChanges = false
-        showSavedSnackbar()
-    }
-
     fun setBundleOrderFromCard(enabled: Boolean) {
         prefs.saveAppSettings(
             settings.copy(isBundleOrderEnabled = enabled)
@@ -246,7 +215,7 @@ fun SettingsScreen(
                             color = TextDarkPrimary
                         )
                         Text(
-                            text = "Configure fastest auto-accept mode",
+                            text = "Configure order and bundle filters",
                             fontSize = 14.sp,
                             color = TextDarkSecondary
                         )
@@ -319,283 +288,10 @@ fun SettingsScreen(
                     color = BluePrimary
                 )
             }
-            // 2. FASTEST MODE
-            // FASTEST_COMPACT_CARD_V1
-            // ACTIVE_ONLY_CARD_COLOR_V3
-            item {
-                SectionHeader("2. FASTEST MODE")
-
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (settings.isFastestModeEnabled) BlueContainer else CardBackground
-                    ),
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, if (settings.isFastestModeEnabled) BluePrimary else CardBorderDefault),
-                    modifier = Modifier.fillMaxWidth().clickable {
-                        setFastestModeFromCard(!settings.isFastestModeEnabled)
-                    }
-                ) {
-                    Column(
-                        modifier = Modifier.padding(11.dp),
-                        verticalArrangement =
-                            Arrangement.spacedBy(9.dp)
-                    ) {
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement =
-                                Arrangement.SpaceBetween,
-                            verticalAlignment =
-                                Alignment.CenterVertically
-                        ) {
-
-                            Column(
-                                modifier = Modifier.weight(1f)
-                            ) {
-
-                                Box(
-                                    modifier = Modifier
-                                        .background(
-                                            Color.White.copy(
-                                                alpha = 0.75f
-                                            ),
-                                            RoundedCornerShape(9.dp)
-                                        )
-                                        .padding(
-                                            horizontal = 9.dp,
-                                            vertical = 5.dp
-                                        )
-                                ) {
-                                    Text(
-                                        text = "FASTEST",
-                                        fontSize = 10.sp,
-                                        fontWeight =
-                                            FontWeight.Bold,
-                                        color = BluePrimary
-                                    )
-                                }
-
-                                Spacer(
-                                    modifier =
-                                        Modifier.height(7.dp)
-                                )
-
-                                Text(
-                                    text = "Fastest Mode",
-                                    fontWeight =
-                                        FontWeight.Bold,
-                                    fontSize = 15.sp,
-                                    color = TextDarkPrimary
-                                )
-
-                                Text(
-                                    text =
-                                        "Pickup-only speed option",
-                                    fontSize = 11.sp,
-                                    color = TextDarkSecondary
-                                )
-                            }
-
-                            Row(
-                                verticalAlignment =
-                                    Alignment.CenterVertically
-                            ) {
-
-                                Text(
-                                    text =
-                                        if (
-                                            settings
-                                                .isFastestModeEnabled
-                                        )
-                                            "ON"
-                                        else
-                                            "OFF",
-                                    fontSize = 11.sp,
-                                    fontWeight =
-                                        FontWeight.Bold,
-                                    color =
-                                        if (
-                                            settings
-                                                .isFastestModeEnabled
-                                        )
-                                            BluePrimary
-                                        else
-                                            TextDarkSecondary
-                                )
-
-                                Spacer(
-                                    modifier =
-                                        Modifier.width(7.dp)
-                                )
-
-                                Switch(
-                                    checked =
-                                        settings
-                                            .isFastestModeEnabled,
-                                    onCheckedChange = { enabled -> setFastestModeFromCard(enabled) },
-                                    colors =
-                                        SwitchDefaults.colors(
-                                            checkedThumbColor =
-                                                Color.White,
-                                            checkedTrackColor =
-                                                BluePrimary,
-                                            uncheckedThumbColor =
-                                                Color.White,
-                                            uncheckedTrackColor =
-                                                Color(
-                                                    0xFFBDBDBD
-                                                )
-                                        )
-                                )
-                            }
-                        }
-
-                        Text(
-                            text =
-                                "Only Maximum Pickup Distance must match",
-                            fontSize = 10.sp,
-                            fontWeight =
-                                FontWeight.SemiBold,
-                            color = BluePrimary
-                        )
-
-                        if (
-                            settings.isFastestModeEnabled
-                        ) {
-
-                            val pickupValue =
-                                maxPickupText
-                                    .toFloatOrNull()
-
-                            val pickupValid =
-                                pickupValue != null &&
-                                    pickupValue > 0f
-
-                            OutlinedTextField(
-                                value = maxPickupText,
-                                onValueChange = {
-                                    input ->
-
-                                    if (
-                                        input.isEmpty() ||
-                                        input.matches(
-                                            Regex(
-                                                """^\d*\.?\d*$"""
-                                            )
-                                        )
-                                    ) {
-                                        maxPickupText =
-                                            input
-
-                                        hasUnsavedChanges =
-                                            true
-                                    }
-                                },
-                                label = {
-                                    Text(
-                                        "Maximum Pickup (km)",
-                                        fontSize = 10.sp
-                                    )
-                                },
-                                keyboardOptions =
-                                    KeyboardOptions(
-                                        keyboardType =
-                                            KeyboardType.Decimal
-                                    ),
-                                singleLine = true,
-                                modifier =
-                                    Modifier.fillMaxWidth(),
-                                shape =
-                                    RoundedCornerShape(
-                                        10.dp
-                                    ),
-                                colors =
-                                    OutlinedTextFieldDefaults
-                                        .colors(
-                                            focusedBorderColor =
-                                                BluePrimary,
-                                            focusedLabelColor =
-                                                BluePrimary,
-                                            unfocusedBorderColor =
-                                                CardBorderDefault,
-                                            focusedTextColor =
-                                                TextDarkPrimary,
-                                            unfocusedTextColor =
-                                                TextDarkPrimary
-                                        )
-                            )
-
-                            Button(
-                                onClick = {
-
-                                    val maxPickup =
-                                        maxPickupText
-                                            .toFloatOrNull()
-
-                                    if (
-                                        maxPickup != null &&
-                                        maxPickup > 0f
-                                    ) {
-                                        prefs.saveAppSettings(
-                                            settings.copy(
-                                                isFastestModeEnabled =
-                                                    true,
-                                                maxPickupDistanceKm =
-                                                    maxPickup
-                                            )
-                                        )
-
-                                        hasUnsavedChanges =
-                                            false
-
-                                        showSavedSnackbar()
-                                    }
-                                },
-                                enabled = pickupValid,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(44.dp),
-                                shape =
-                                    RoundedCornerShape(
-                                        11.dp
-                                    ),
-                                colors =
-                                    ButtonDefaults
-                                        .buttonColors(
-                                            containerColor =
-                                                BluePrimary,
-                                            contentColor =
-                                                Color.White
-                                        )
-                            ) {
-                                Icon(
-                                    Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    modifier =
-                                        Modifier.size(16.dp)
-                                )
-
-                                Spacer(
-                                    modifier =
-                                        Modifier.width(7.dp)
-                                )
-
-                                Text(
-                                    text =
-                                        "Save Fastest Mode",
-                                    fontWeight =
-                                        FontWeight.Bold,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            // 3. BUNDLE ORDER
+            // 2. BUNDLE ORDER
             // BUNDLE_COMPACT_CARD_V1
             item {
-                SectionHeader("3. BUNDLE ORDER")
+                SectionHeader("2. BUNDLE ORDER")
 
                 Card(
                     colors = CardDefaults.cardColors(
@@ -752,9 +448,9 @@ fun SettingsScreen(
                     }
                 }
             }
-            // 4. SUPPORTED PLATFORMS (Rapido, Uber, Ola toggles)
+            // 3. SUPPORTED PLATFORMS (Rapido, Uber, Ola toggles)
             item {
-                SectionHeader("4. SUPPORTED PLATFORMS")
+                SectionHeader("3. SUPPORTED PLATFORMS")
                 Card(
                     colors = CardDefaults.cardColors(containerColor = CardBackground),
                     shape = RoundedCornerShape(14.dp),

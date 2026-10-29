@@ -43,9 +43,14 @@ object FixAreaRuleEngine {
         if (candidate.isBundledOrder && !bundleAllowed) return null
 
         val pickup = candidate.pickupDistKm ?: return null
-        if (!pickup.isFinite() || pickup <= 0f ||
+        if (!pickup.isFinite() || pickup < 0f ||
             !fix.maxPickupKm.isFinite() || fix.maxPickupKm <= 0f ||
             pickup > fix.maxPickupKm
+        ) return null
+
+        // A Fix Area match must not bypass the mandatory positive fare/trip guards.
+        if (candidate.fare == null || !candidate.fare.isFinite() || candidate.fare <= 0f ||
+            !RapidoDistanceValidity.isValidDrop(candidate.dropDistKm)
         ) return null
 
         val drop =

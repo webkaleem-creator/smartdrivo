@@ -60,6 +60,25 @@ object AreaRulesEngine {
         isGoToEnabled: Boolean = settings.isGoToEnabled,
         isNoGoEnabled: Boolean = settings.isNoGoEnabled
     ): DecisionResult {
+        // V12_FASTEST_PICKUP_ONLY_DECISION
+        // The Fastest filter has precedence over all destination/numeric rule engines.
+        // Bundle OFF remains a separate, intentional safety/manual-action policy.
+        if (candidate.isBundledOrder && !settings.isBundleOrderEnabled) {
+            return DecisionResult.Ignore("Bundle Order OFF  |  Manual action")
+        }
+        if (settings.isFastestModeEnabled) {
+            val pickup = candidate.pickupDistKm
+            val maximum = settings.maxPickupDistanceKm
+            return if (pickup != null && pickup.isFinite() && pickup >= 0f &&
+                maximum.isFinite() && maximum > 0f && pickup <= maximum
+            ) {
+                DecisionResult.Accept("Mode: Fastest | Pickup ${pickup}km <= ${maximum}km")
+            } else {
+                DecisionResult.Reject("Mode: Fastest | Pickup unknown, invalid or exceeds saved max ${maximum}km")
+            }
+        }
+
+        // Read destination strings only for non-Fastest area/filter decisions.
         val pickupText =
             (pickupLocationTextOverride ?: candidate.pickupAddress.orEmpty())
                 .trim()
@@ -69,12 +88,6 @@ object AreaRulesEngine {
             "${candidate.dropAddress.orEmpty()} ${candidate.dropArea.orEmpty()}"
                 .trim()
                 .lowercase()
-
-        if (candidate.isBundledOrder && !settings.isBundleOrderEnabled) {
-            return DecisionResult.Ignore(
-                "Bundle Order OFF  |  Manual action"
-            )
-        }
 
         // NO GO: DROP / DESTINATION ONLY.
         // Group name is a label only. Pickup location must NOT trigger No-Go.
@@ -218,33 +231,6 @@ object AreaRulesEngine {
             }
         }
 
-        // RAPIDO_TURBO_FASTEST_V3
-        // Fastest / Speed Only mode checks ONLY Maximum Pickup Distance.
-        // No-Go and Go-To priority above remain unchanged.
-        if (settings.isFastestModeEnabled) {
-            val pickup =
-                candidate.pickupDistKm
-
-            if (
-                pickup != null &&
-                (
-                    settings.maxPickupDistanceKm <= 0f ||
-                    pickup <= settings.maxPickupDistanceKm
-                )
-            ) {
-                return DecisionResult.Accept(
-                    "Fastest Mode: pickup ${pickup}km matched"
-                )
-            }
-
-            return DecisionResult.Reject(
-                "Fastest Mode: pickup ${
-                    pickup?.let { "${it}km" } ?: "unavailable"
-                } exceeds/does not match saved maximum ${
-                    settings.maxPickupDistanceKm
-                }km"
-            )
-        }
         // Normal Home filter + independent Filter 2 + Filter 3.
         //
         // Home MATCH OR Filter 2 MATCH OR Filter 3 MATCH = ACCEPT.

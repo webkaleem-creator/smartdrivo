@@ -108,6 +108,13 @@ object OrderDecisionPopup {
                     badgeText = Color.WHITE
                 )
 
+            OrderStatus.UNCONFIRMED ->
+                Style(
+                    label = "UNCONFIRMED",
+                    accent = 0xFF64748B.toInt(),
+                    badgeText = Color.WHITE
+                )
+
             OrderStatus.PROCESSING ->
                 Style(
                     label = "CHECKING",
@@ -312,6 +319,7 @@ object OrderDecisionPopup {
             OrderStatus.SKIPPED -> "Skipped"
             OrderStatus.FAILED -> "Failed"
             OrderStatus.MISSED -> "Missed"
+            OrderStatus.UNCONFIRMED -> "Unconfirmed"
             OrderStatus.PROCESSING -> "Checking"
         }
 
@@ -330,6 +338,7 @@ object OrderDecisionPopup {
             OrderStatus.MISSED ->
                 0xFFFFB15B.toInt()
 
+            OrderStatus.UNCONFIRMED,
             OrderStatus.PROCESSING ->
                 0xFFFFFFFF.toInt()
         }
@@ -465,7 +474,7 @@ object OrderDecisionPopup {
             val distances = mutableListOf<String>()
 
             pickupKm?.takeIf {
-                it.isFinite() && it > 0f
+                it.isFinite() && it >= 0f
             }?.let {
                 distances.add(
                     "Pickup " +
@@ -705,6 +714,9 @@ object OrderDecisionPopup {
 
             OrderStatus.MISSED ->
                 "Order was missed"
+
+            OrderStatus.UNCONFIRMED ->
+                "Rapido result not confirmed"
 
             OrderStatus.PROCESSING ->
                 "Checking order"

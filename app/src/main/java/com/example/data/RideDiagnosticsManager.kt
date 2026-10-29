@@ -62,7 +62,7 @@ object RideDiagnosticsManager {
                 existing.copy(
                     duplicateEventsCount = existing.duplicateEventsCount + 1,
                     fare = if ((candidate.fare ?: 0f) > 0f) (candidate.fare ?: 0f) else existing.fare,
-                    pickupDistKm = if ((candidate.pickupDistKm ?: 0f) > 0f) (candidate.pickupDistKm ?: 0f) else existing.pickupDistKm,
+                    pickupDistKm = candidate.pickupDistKm?.takeIf { it.isFinite() && it >= 0f } ?: existing.pickupDistKm,
                     dropDistKm = if ((candidate.dropDistKm ?: 0f) > 0f) (candidate.dropDistKm ?: 0f) else existing.dropDistKm,
                     pickupAddress = candidate.pickupAddress?.ifBlank { null } ?: existing.pickupAddress,
                     dropAddress = candidate.dropAddress?.ifBlank { null } ?: existing.dropAddress
