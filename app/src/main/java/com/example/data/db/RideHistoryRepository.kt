@@ -33,6 +33,21 @@ class RideHistoryRepository(
     val acceptedCount: Flow<Int> = dao.getAcceptedCount()
 
     private val mutex = Mutex()
+
+    // V16: onOrderDetectedFast returns a provisional ride_<fingerprint>_<time>
+    // before Room's async insert/dedupe completes. When dedupe returns an
+    // older primary key, resolve the same ride by its fingerprint + timestamp.
+    // Never match another offer with the same fingerprint outside 3 seconds.
+    private suspend fun resolveActionRecord(id: String): RideHistoryEntity? {
+        val direct = dao.getById(id) ?: dao.getByBookingId(id) ?: dao.getByFingerprint(id)
+        if (direct != null) return direct
+        val match = Regex("^ride_(.+)_([0-9]{13})$").matchEntire(id) ?: return null
+        val timestamp = match.groupValues[2].toLongOrNull() ?: return null
+        val byFingerprint = dao.getByFingerprint(match.groupValues[1]) ?: return null
+        return byFingerprint.takeIf {
+            kotlin.math.abs(it.detectedAt - timestamp) <= 3_000L
+        }
+    }
     private fun todayDateStr(): String =
         SimpleDateFormat(
             "dd/MM/yyyy",
@@ -321,7 +336,9 @@ class RideHistoryRepository(
         matchedNoGo: String = ""
     ): RideHistoryEntity? = withContext(ioDispatcher) {
         mutex.withLock {
-            val existing = dao.getById(id) ?: dao.getByBookingId(id) ?: dao.getByFingerprint(id) ?: return@withContext null
+            val existing = resolveActionRecord(id) ?: return@withContext null
+            // A late filter decision must not overwrite a completed action.
+            if (existing.actionCompletedAt > 0L) return@withContext existing
             val now = System.currentTimeMillis()
             val decisionLatency = (now - existing.detectedAt).coerceAtLeast(0L)
             val totalProcessing = if (status != OrderStatus.ACCEPTED) decisionLatency else existing.totalProcessingMs
@@ -347,7 +364,7 @@ class RideHistoryRepository(
      */
     suspend fun onOrderActionAttempt(id: String): RideHistoryEntity? = withContext(ioDispatcher) {
         mutex.withLock {
-            val existing = dao.getById(id) ?: dao.getByBookingId(id) ?: dao.getByFingerprint(id) ?: return@withContext null
+            val existing = resolveActionRecord(id) ?: return@withContext null
             val now = System.currentTimeMillis()
             val updated = existing.copy(actionAttemptAt = now)
             dao.update(updated)
@@ -368,7 +385,12 @@ class RideHistoryRepository(
         timesClicked: Int = 1
     ): RideHistoryEntity? = withContext(ioDispatcher) {
         mutex.withLock {
-            val existing = dao.getById(id) ?: dao.getByBookingId(id) ?: dao.getByFingerprint(id) ?: return@withContext null
+            val existing = resolveActionRecord(id) ?: return@withContext null
+            // Confirmed acceptance is terminal and must not be downgraded by
+            // stale UNKNOWN, MISSED or filter callbacks on the same ride.
+            if (existing.status == OrderStatus.ACCEPTED.name && status != OrderStatus.ACCEPTED) {
+                return@withContext existing
+            }
             val now = System.currentTimeMillis()
             val attemptTime = if (existing.actionAttemptAt > 0L) existing.actionAttemptAt else if (existing.decisionAt > 0L) existing.decisionAt else existing.detectedAt
             val actionLatency = if (attemptTime > 0L) (now - attemptTime).coerceAtLeast(0L) else 0L
@@ -420,14 +442,20 @@ class RideHistoryRepository(
                         (finishedAt - latest.detectedAt)
                             .coerceAtLeast(timeoutMs)
 
+                    // An Accept attempt whose verification is unresolved is
+                    // NOT evidence of a rejected/ignored ride.
+                    val actionAttempted = latest.actionAttemptAt > 0L
                     dao.update(
                         latest.copy(
-                            status = OrderStatus.IGNORED.name,
+                            status = if (actionAttempted) OrderStatus.UNCONFIRMED.name else OrderStatus.IGNORED.name,
                             decisionAt = finishedAt,
                             decisionLatencyMs = elapsed,
                             totalProcessingMs = elapsed,
-                            decisionReasonCode = "PROCESSING_RECOVERY",
-                            decisionReasonText = "Order ended before SmartDrivo received a final result"
+                            decisionReasonCode = if (actionAttempted) "ACCEPT_ATTEMPT_RECOVERY" else "PROCESSING_RECOVERY",
+                            decisionReasonText = if (actionAttempted)
+                                "Accept was attempted; final Rapido result unavailable"
+                            else
+                                "Order ended before SmartDrivo received a final result"
                         )
                     )
 

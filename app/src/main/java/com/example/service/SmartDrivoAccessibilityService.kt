@@ -7603,6 +7603,78 @@ private val processingTimeoutRunnable = Runnable {
         if (sawPending) return com.example.engine.RapidoPostAcceptSignal.Result.PENDING
         return unknown
     }
+
+    // V17_LIVE_ACCEPT_RECONCILIATION: Read only current Rapido windows.
+    // Our own overlay can temporarily be the active window, even while Rapido
+    // is showing its confirmed pickup screen underneath. Never infer acceptance
+    // from popup disappearance or a dispatched click.
+    private fun readLiveRapidoAcceptanceSignal(): com.example.engine.RapidoPostAcceptSignal.Result {
+        val confirmed = com.example.engine.RapidoPostAcceptSignal.Result.CONFIRMED
+        val signals = mutableListOf<com.example.engine.RapidoPostAcceptSignal.Result>()
+
+        fun collectSignal(root: AccessibilityNodeInfo?) {
+            if (root == null || !isRapidoPackage(root.packageName?.toString().orEmpty())) return
+            val result = readRapidoPostAcceptSignal(root)
+            // A visible fresh offer is not a confirmed pickup screen. Avoid
+            // accepting based on stale text from another card/window.
+            if (result == confirmed && isRapidoOrderPopupShowing(root)) return
+            signals.add(result)
+        }
+
+        collectSignal(rootInActiveWindow)
+        try {
+            // Only inspect live Rapido accessibility windows; no raw text is
+            // logged, no popup is clicked, and pickup street nodes are skipped
+            // by readRapidoPostAcceptSignal().
+            windows.take(12).forEach { window -> collectSignal(window.root) }
+        } catch (e: Exception) {
+            Log.w(TAG, "Rapido confirmation window scan unavailable: ${e.javaClass.simpleName}")
+        }
+
+        // Contradictory windows are not proof of a successful ride.
+        return com.example.engine.RapidoWindowConfirmationPolicy.resolve(signals)
+    }
+
+    // V17_LATE_ACCEPT_RECONCILIATION: Observe a bounded late confirmation
+    // without blocking the next order, clicking again, or creating a new row.
+    private fun observeLateRapidoAcceptance(
+        popupSession: Long,
+        recordId: String,
+        candidate: RideCandidate,
+        attemptNumber: Int,
+        acceptedHistoryReason: String?
+    ) {
+        serviceScope.launch(Dispatchers.IO) {
+            repeat(32) {
+                delay(250L)
+                if (!rapidoVerifiedClickGuard.isCurrent(popupSession)) return@launch
+                when (readLiveRapidoAcceptanceSignal()) {
+                    com.example.engine.RapidoPostAcceptSignal.Result.CONFIRMED -> {
+                        Log.i(TAG, "RAPIDO_LATE_CONFIRM result=CONFIRMED recordId=$recordId")
+                        onOrderActionCompletedFast(
+                            recordId = recordId,
+                            candidate = candidate,
+                            status = OrderStatus.ACCEPTED,
+                            reasonCode = "FILTERS_MATCHED",
+                            reasonText = acceptedHistoryReason
+                                ?.takeIf { it.isNotBlank() }
+                                ?: buildAcceptedFilterReason(candidate),
+                            actionSucceeded = true,
+                            timesClicked = attemptNumber,
+                            buttonFound = true,
+                            buttonDetails = "Verified late Rapido pickup screen",
+                            clickMethod = "Rapido live window late confirmation"
+                        )
+                        showAcceptedOrderOverlay(candidate)
+                        return@launch
+                    }
+                    com.example.engine.RapidoPostAcceptSignal.Result.MISSED -> return@launch
+                    else -> Unit
+                }
+            }
+        }
+    }
+
     private fun isRapidoOrderScreenVisible(root: AccessibilityNodeInfo?): Boolean {
         return isRapidoOrderPopupShowing(root)
     }
@@ -8700,6 +8772,10 @@ private val processingTimeoutRunnable = Runnable {
             )
         }
 
+        // V16: Mark the click attempt on the same History row before the
+        // background verification. This is not evidence of acceptance.
+        onOrderActionAttemptFast(pinnedRecordId)
+
         // RAPIDO_POST_CLICK_VERIFY_SAFE_V1
         // Verification runs after the immediate Accept dispatch; the first click is not delayed.
         val verificationRecordId = pinnedRecordId
@@ -8710,8 +8786,8 @@ private val processingTimeoutRunnable = Runnable {
             var currentRoot: AccessibilityNodeInfo? = null
             var isOrderStillVisible = false
 
-            // Read the live foreground Rapido root only. Do not use the old offer root as
-            // fallback evidence, because that can keep a stale order card alive after acceptance.
+            // Never trust the old offer root as accepted evidence. Read live
+            // Rapido windows, including windows behind SmartDrivo's overlay.
             for (poll in 0 until 12) {
                 if (!rapidoVerifiedClickGuard.isCurrent(livePopupSession)) {
                     Log.i(TAG, "Old Rapido popup verification ended: newer offer active")
@@ -8722,7 +8798,8 @@ private val processingTimeoutRunnable = Runnable {
                 currentRoot = activeRoot?.takeIf {
                     isRapidoPackage(it.packageName?.toString().orEmpty())
                 }
-                signal = readRapidoPostAcceptSignal(currentRoot)
+                // V17: the accepted Rapido window can be behind SmartDrivo's overlay.
+                signal = readLiveRapidoAcceptanceSignal()
                 isOrderStillVisible = currentRoot != null && isRapidoOrderPopupShowing(currentRoot)
 
                 if (signal == com.example.engine.RapidoPostAcceptSignal.Result.CONFIRMED ||
@@ -8799,6 +8876,16 @@ private val processingTimeoutRunnable = Runnable {
                         buttonDetails = "No explicit positive Rapido status was detected",
                         clickMethod = "Rapido post-click verification",
                         errorMsg = if (pending) "Rapido status remained pending" else "No verified pickup/status signal"
+                    )
+                    // Continue observing briefly after UNCONFIRMED. A later
+                    // positive Rapido pickup screen upgrades the SAME History row.
+                    // Do not dispatch a second Accept click.
+                    observeLateRapidoAcceptance(
+                        popupSession = livePopupSession,
+                        recordId = verificationRecordId,
+                        candidate = candidate,
+                        attemptNumber = attemptNumber,
+                        acceptedHistoryReason = acceptedHistoryReason
                     )
                     resetProcessing()
                 }

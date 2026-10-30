@@ -1081,7 +1081,14 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
         val conflictingTripLabels = labeledTripValues.size > 1
 
         // BUG 1: If pickup distance is "Nearby" or unknown, do NOT assign a numeric value to pickupKm!
-        val hasNearby = texts.any { it.trim().equals("nearby", ignoreCase = true) || it.contains("nearby", ignoreCase = true) }
+        // V16: Treat Nearby as a nonnumeric pickup only when there is no
+        // trustworthy pickup distance in the same offer. Do not let an
+        // unrelated Nearby label erase a measured 0.0 km pickup.
+        val hasNearbyText = texts.any {
+            it.trim().equals("nearby", ignoreCase = true) ||
+                it.contains("nearby", ignoreCase = true)
+        }
+        val hasNearby = hasNearbyText && explicitPickupKm == null && orderedKm.size < 2
         var pickupKm: Float?
         var dropKm: Float?
 
@@ -2677,7 +2684,7 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
         }
 
         // Requirement 1b: A pickup distance in km OR "Nearby"
-        val hasNearby = texts.any { it.trim().equals("nearby", ignoreCase = true) || it.contains("nearby", ignoreCase = true) }
+        val hasNearby = orderData.hasNearby && !RapidoDistanceValidity.isValidPickup(orderData.pickupKm)
         val hasPickupKm = RapidoDistanceValidity.isValidPickup(orderData.pickupKm)
 
         if (!hasPickupKm && !hasNearby) {
