@@ -8500,6 +8500,78 @@ private val processingTimeoutRunnable = Runnable {
             }
         }
 
+        // V18_FINAL_NORMAL_FILTER_RECHECK: Every Rapido click path must
+        // still be authorized by an *enabled* currently saved rule. Prior
+        // Fix Area, +Amount or legacy routes are OR alternatives by design;
+        // Fastest ON uses pickup only. This check reads cached settings and
+        // candidate data, never an additional Accessibility tree or address.
+        if (candidate.platform == Platform.RAPIDO) {
+            val canonicalMatch = AreaRulesEngine.evaluateRide(
+                candidate = candidate,
+                areas = finalGoToGroups + finalNoGoGroups,
+                settings = finalSettings,
+                goToAreas = finalGoToGroups,
+                noGoAreas = finalNoGoGroups,
+                pickupLocationTextOverride = "",
+                isGoToEnabled = finalGoToRequired,
+                isNoGoEnabled = finalNoGoRequired
+            ) is DecisionResult.Accept
+
+            val fixAreaMatch = !finalSettings.isFastestModeEnabled &&
+                com.example.engine.FixAreaRuleEngine.evaluate(
+                    candidate = candidate,
+                    fix = prefs.fixAreaSettings.value,
+                    noGoAreas = finalNoGoGroups,
+                    noGoEnabled = finalNoGoRequired,
+                    bundleAllowed = finalSettings.isBundleOrderEnabled
+                ) is DecisionResult.Accept
+
+            val tip = candidate.tipAmount
+            val pickup = candidate.pickupDistKm
+            val trip = candidate.dropDistKm
+            val legacyPlusMatch = !finalSettings.isFastestModeEnabled &&
+                finalSettings.isPlusAmountFilterEnabled &&
+                tip != null && tip.isFinite() && tip > 0f &&
+                tip >= finalSettings.plusAmountMin &&
+                pickup != null && pickup.isFinite() && pickup >= 0f &&
+                pickup <= finalSettings.plusAmountMaxPickupDistanceKm &&
+                trip != null && trip.isFinite() && trip > 0f &&
+                trip <= finalSettings.plusAmountMaxDropDistanceKm
+            val unlimitedPlusMatch = !finalSettings.isFastestModeEnabled &&
+                finalSettings.extraPlusAmountRules.any {
+                    it.matches(tip, pickup, trip)
+                }
+
+            if (!com.example.engine.RapidoFinalMatchGateV18.isEligible(
+                    fastestEnabled = finalSettings.isFastestModeEnabled,
+                    normalMatch = canonicalMatch,
+                    fixAreaMatch = fixAreaMatch,
+                    plusAmountMatch = legacyPlusMatch,
+                    unlimitedPlusMatch = unlimitedPlusMatch
+                )) {
+                Log.w(TAG, "RAPIDO_V18_GATE: BLOCKED. No currently enabled filter matches this offer")
+                onOrderDecisionFast(
+                    recordId = pinnedRecordId,
+                    candidate = candidate,
+                    status = OrderStatus.IGNORED,
+                    reasonCode = "V18_FINAL_NO_ENABLED_MATCH",
+                    reasonText = "No enabled filter matched at final Accept gate"
+                )
+                resetProcessing()
+                return
+            }
+            Log.i(
+                TAG,
+                "RAPIDO_V18_GATE: PASS " + when {
+                    finalSettings.isFastestModeEnabled -> "FASTEST"
+                    fixAreaMatch -> "FIX_AREA"
+                    legacyPlusMatch -> "PLUS_AMOUNT"
+                    unlimitedPlusMatch -> "PLUS_UNLIMITED"
+                    else -> "NORMAL_OR_UNLIMITED"
+                }
+            )
+        }
+
         if (!preferencesManager.isAutoAcceptEnabled) {
             resetProcessing()
             return

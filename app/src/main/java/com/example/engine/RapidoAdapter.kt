@@ -1008,8 +1008,11 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
         val orderedKm = mutableListOf<Pair<Int, Float>>()
         for (match in kmMatches) {
             val last = orderedKm.lastOrNull()
+            // V18: two *different* pickup/trip rows may legitimately show
+            // identical values (e.g. pickup 0.6 km and trip 0.6 km).
+            // Never merge same-looking distances across an intervening row.
             val repeatedSameNodeText = last != null &&
-                match.first - last.first in 0..2 &&
+                match.first - last.first in 0..1 &&
                 kotlin.math.abs(match.second - last.second) < 0.001f &&
                 texts[match.first].trim().equals(
                     texts[last.first].trim(), ignoreCase = true
@@ -1084,9 +1087,15 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
         // V16: Treat Nearby as a nonnumeric pickup only when there is no
         // trustworthy pickup distance in the same offer. Do not let an
         // unrelated Nearby label erase a measured 0.0 km pickup.
+        // V18: the word "Nearby" in a service, navigation or address label
+        // is not a pickup-distance signal. Never override a measured km value
+        // or fabricate a numeric zero from the word alone.
+        val nearbyPickupLabel = Regex(
+            """(?i)^(?:pickup|pick\s*up|distance\s*to\s*pickup)\s*[:\-]?\s*nearby$"""
+        )
         val hasNearbyText = texts.any {
-            it.trim().equals("nearby", ignoreCase = true) ||
-                it.contains("nearby", ignoreCase = true)
+            val value = it.trim()
+            value.equals("nearby", ignoreCase = true) || nearbyPickupLabel.matches(value)
         }
         val hasNearby = hasNearbyText && explicitPickupKm == null && orderedKm.size < 2
         var pickupKm: Float?
