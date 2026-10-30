@@ -1,0 +1,63 @@
+diff --git a/AdminActivity.kt b/AdminActivity.kt
+index f320f8a..95262f4 100644
+--- a/AdminActivity.kt
++++ b/AdminActivity.kt
+@@ -282,9 +282,19 @@ private fun DriversScreen(store: AdminStore) {
+     var search by rememberSaveable { mutableStateOf("") }
+     var selected by remember { mutableStateOf<Driver?>(null) }
+-    val shown = store.drivers.filter {
++    val allMatches = store.drivers.filter {
+         val term = search.trim()
+         term.isEmpty() || listOf(it.name, it.email, it.phone, it.uid, it.vehicleType)
+             .any { field -> field.contains(term, ignoreCase = true) }
+     }
++    // ADMIN_PHONE_GROUPS_V1: UI-only grouping. Never combine Firestore UIDs.
++    // Phone numbers are self-reported; grouping is not proof of ownership.
++    val phoneGroups = allMatches.groupBy { account ->
++        val digits = account.phone.filter { it.isDigit() }
++        if (digits.length >= 10) "phone:${digits.takeLast(10)}" else "uid:${account.uid}"
++    }
++    var showAllAccounts by rememberSaveable { mutableStateOf(false) }
++    val shown = if (showAllAccounts) allMatches else phoneGroups.values.map { accounts ->
++        accounts.firstOrNull { it.isAdmin } ?: accounts.first()
++    }
+     Column(Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
+         Spacer(Modifier.height(8.dp))
+@@ -296,5 +306,12 @@ private fun DriversScreen(store: AdminStore) {
+             singleLine = true
+         )
+-        Text("${shown.size} drivers shown ┬╖ Maximum 200 synced", color = Muted, modifier = Modifier.padding(12.dp))
++        Text("${phoneGroups.size} phone/UID groups ┬╖ ${allMatches.size} account records ┬╖ Maximum 200 synced",
++            color = Muted, modifier = Modifier.padding(12.dp))
++        if (allMatches.size > phoneGroups.size) {
++            TextButton(onClick = { showAllAccounts = !showAllAccounts }) {
++                Text(if (showAllAccounts) "Collapse duplicate phone groups"
++                    else "Show all ${allMatches.size} account records (by UID)")
++            }
++        }
+         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+             items(shown, key = { it.uid }) { driver ->
+@@ -312,5 +329,15 @@ private fun DriversScreen(store: AdminStore) {
+                         if (driver.isBlocked) Text("PERMANENT ACCOUNT BLOCK", color = Color(0xFFFF9797))
+                         if (driver.isAdmin) Text("ADMIN ACCOUNT ΓÇö PROTECTED", color = Orange)
+-                        if (!driver.isAdmin) {
++                        val sharedCount = phoneGroups.values.firstOrNull { accounts ->
++                            accounts.any { it.uid == driver.uid }
++                        }?.size ?: 1
++                        if (sharedCount > 1) {
++                            Text(if (showAllAccounts)
++                                "Shared phone: $sharedCount separate accounts ┬╖ UID: ${driver.uid}"
++                                else "$sharedCount account records share this phone. Show all before changing status.",
++                                color = Orange)
++                        }
++                        // No status action on a collapsed group: status is always per-UID.
++                        if (!driver.isAdmin && (showAllAccounts || sharedCount == 1)) {
+                             OutlinedButton(onClick = { selected = driver }, enabled = !store.busy) {
+                                 Text(if (driver.isActive) "Deactivate Driver" else "Activate Driver")
+@@ -326,5 +353,5 @@ private fun DriversScreen(store: AdminStore) {
+             onDismissRequest = { selected = null },
+             title = { Text("Confirm driver status") },
+-            text = { Text("${if (driver.isActive) "Deactivate" else "Activate"} ${driver.name}? This changes the driver app's remote access.") },
++            text = { Text("${if (driver.isActive) "Deactivate" else "Activate"} ${driver.name}? UID: ${driver.uid}. This changes ONLY this account's remote access.") },
+             confirmButton = {
+                 Button(onClick = { store.setDriverActive(driver, !driver.isActive); selected = null }, enabled = !store.busy) {
