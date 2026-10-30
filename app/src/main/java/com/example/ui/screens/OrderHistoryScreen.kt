@@ -1003,7 +1003,7 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                         Text("📍", fontSize = 10.sp)
                         Spacer(modifier = Modifier.width(3.dp))
                         Text(
-                            text = "Pickup: ${if (item.pickupDistKm > 0f) "%.1f km".format(item.pickupDistKm) else "Nearby"}",
+                            text = "Pickup: ${com.example.engine.PickupDistancePresentationV19.label(item.pickupDistKm)}",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = BlueSecondary

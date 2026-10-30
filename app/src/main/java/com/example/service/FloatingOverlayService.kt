@@ -415,10 +415,7 @@ class FloatingOverlayService : Service() {
             if(amount > 0f) "₹${amount.toInt()}" else "₹--"
 
         val pickupValue =
-            if(pickupDist > 0f)
-                String.format(Locale.US, "%.1f km", pickupDist)
-            else
-                "Nearby"
+            com.example.engine.PickupDistancePresentationV19.label(pickupDist)
 
         val dropValue =
             if(dropDist > 0f)
