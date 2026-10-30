@@ -1,0 +1,33 @@
+diff --git a/AdminActivity.kt b/AdminActivity.kt
+index 95262f4..1668d57 100644
+--- a/AdminActivity.kt
++++ b/AdminActivity.kt
+@@ -396,4 +396,6 @@ private fun PaymentsScreen(store: AdminStore) {
+                             })
+                         }
++                        // ADMIN_PAYMENT_TIMES_V1: read-only submission time, always shown in Pending and All Payments.
++                        Text("Submitted: ${adminPaymentDateTimeIstV1(payment.submittedAt)}", color = Muted)
+                         Text("Plan: ${payment.plan} ┬╖ UTR: ${payment.utr}")
+                         Text("Driver UID: ${payment.uid}", color = Muted)
+@@ -513,2 +515,21 @@ private fun SettingsScreen(store: AdminStore) {
+     }
+ }
++
++// ADMIN_PAYMENT_TIMES_V1: display existing backend timestamp, never synthesize current time.
++private fun adminPaymentDateTimeIstV1(raw: Any?): String {
++    val value = when (raw) {
++        is Number -> raw.toLong()
++        is com.google.firebase.Timestamp -> raw.toDate().time
++        is java.util.Date -> raw.time
++        else -> return "Not recorded"
++    }
++    val millis = if (value in 1_000_000_000L..9_999_999_999L) value * 1000L else value
++    if (millis < 946_684_800_000L || millis > 4_102_444_800_000L) return "Not recorded"
++    return try {
++        val format = java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.ENGLISH)
++        format.timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
++        format.format(java.util.Date(millis)) + " IST"
++    } catch (_: Exception) {
++        "Not recorded"
++    }
++}
