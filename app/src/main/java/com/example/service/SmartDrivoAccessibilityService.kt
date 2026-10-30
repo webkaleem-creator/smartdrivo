@@ -1963,8 +1963,11 @@ private val processingTimeoutRunnable = Runnable {
                     !it.equals("Drop Location", ignoreCase = true) &&
                     !RapidoAdapter.isInvalidAddress(it)
             }
+        // V20: A bundle must use Order 1's destination, never a broad
+        // pre-click scan that might return Order 2's destination.
         val filterDrop =
-            realDrop(preClickDropAddress) ?: realDrop(orderData.dropAddress)
+            if (orderData.isBundledOrder) realDrop(orderData.dropAddress)
+            else realDrop(preClickDropAddress) ?: realDrop(orderData.dropAddress)
         val filteredCandidate = RideCandidate(
             fare = orderData.totalFare.takeIf { it > 0f },
             pickupDistKm = orderData.pickupKm,
@@ -7189,8 +7192,10 @@ private val processingTimeoutRunnable = Runnable {
         collectAllNodeTexts(root, textList, rootPkg, skipPickupAddressNodes = true)
         val fullText = textList.joinToString(" \n ")
 
-        val detectedVehicle = OrderDataExtractor.detectVehicleType(fullText, defaultVehicle)
-        val bookingId = orderData.bookingId ?: OrderDataExtractor.extractBookingId(fullText)
+        val detectedVehicle = if (orderData.isBundledOrder) defaultVehicle
+            else OrderDataExtractor.detectVehicleType(fullText, defaultVehicle)
+        val bookingId = if (orderData.isBundledOrder) orderData.bookingId
+            else orderData.bookingId ?: OrderDataExtractor.extractBookingId(fullText)
 
         val fare = if (orderData.totalFare > 0f) orderData.totalFare else null
 
@@ -7201,7 +7206,8 @@ private val processingTimeoutRunnable = Runnable {
                     !it.equals("Address unavailable", ignoreCase = true) &&
                     !RapidoAdapter.matchesBlocklist(it) &&
                     !RapidoAdapter.isInvalidAddress(it)
-            } ?: RapidoAdapter.extractAutoPriorityDropAddressFromTexts(textList)
+            } ?: if (orderData.isBundledOrder) null
+                else RapidoAdapter.extractAutoPriorityDropAddressFromTexts(textList)
         val dropAddress = usableDrop?.takeIf {
             it.isNotBlank() &&
                 !it.equals("Address unavailable", ignoreCase = true) &&
@@ -7211,14 +7217,15 @@ private val processingTimeoutRunnable = Runnable {
         return RideCandidate(
             fare = fare,
             pickupDistKm = orderData.pickupKm,
-            dropDistKm = orderData.dropKm ?: OrderDataExtractor.extractDropDistance(textList, fullText),
+            dropDistKm = if (orderData.isBundledOrder) orderData.dropKm
+                else orderData.dropKm ?: OrderDataExtractor.extractDropDistance(textList, fullText),
             pickupAddress = "Address unavailable",
             dropAddress = dropAddress,
             dropArea = dropAddress,
             platform = Platform.RAPIDO,
             vehicleType = detectedVehicle,
             bookingId = bookingId,
-            isBundledOrder = OrderDataExtractor.isBundleOrder(fullText),
+            isBundledOrder = orderData.isBundledOrder,
             detectionTimeMs = System.currentTimeMillis(),
             baseFare = if (orderData.baseFare > 0f) orderData.baseFare else fare,
             tipAmount = orderData.tipAmount

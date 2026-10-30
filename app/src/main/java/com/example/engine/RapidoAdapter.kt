@@ -780,13 +780,25 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
             !isSmartDrivoPackage(pkg) && (pkg.isEmpty() || isRapidoPackage(pkg) || pkg == "com.rapido.passenger")
         }
 
-        val textList = validEntries.map { it.text }
+        // V20_ORDER1_BUNDLE: restrict ALL parsing inputs (including View IDs)
+        // to Order 1. Never let bundle total or Order 2 override the fare,
+        // pickup, drop or destination used by any saved filter.
+        val bundled = validEntries.any {
+            it.text.contains("Bundle Order", ignoreCase = true) ||
+                it.text.contains("Bundled Order", ignoreCase = true)
+        }
+        val scopedEntries = if (bundled) {
+            RapidoBundleOrderOneV20.select(
+                validEntries, { it.text }, { e, t -> e.copy(text = t) }
+            ) ?: return RapidoOrderData(isBundledOrder = true)
+        } else validEntries
+        val textList = scopedEntries.map { it.text }
         val data = extractOrderDataFromTexts(textList, skipPickupAddress = skipPickupAddress)
 
         // View ID based address extraction from node tree (only from valid Rapido nodes)
         var pickupFromId: String? = null
         var dropFromId: String? = null
-        for (entry in validEntries) {
+        for (entry in scopedEntries) {
             val id = entry.viewId?.lowercase().orEmpty()
             if (!skipPickupAddress && pickupFromId == null && (id.contains("pickup") || id.contains("source") || id.contains("start_loc") || id.contains("tv_pickup"))) {
                 val clean = cleanRapidoAddress(entry.text)
@@ -801,7 +813,7 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
         // Booking ID extraction from text entries
         var bookingId: String? = null
         val bookingRegex = Regex("(?:CRN|ID|#|Booking\\s*ID)[:\\s-]*([A-Za-z0-9-]+)", RegexOption.IGNORE_CASE)
-        for (entry in validEntries) {
+        for (entry in scopedEntries) {
             val match = bookingRegex.find(entry.text)
             if (match != null) {
                 bookingId = match.groupValues[1].trim()
@@ -826,11 +838,12 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
         }
 
         return reconcileKmByViewId(
-            data, validEntries.map { it.text to it.viewId }
+            data, scopedEntries.map { it.text to it.viewId }
         ).copy(
             pickupAddress = finalPickup,
             dropAddress = finalDrop,
-            bookingId = bookingId
+            bookingId = bookingId,
+            isBundledOrder = bundled
         )
     }
 
@@ -841,6 +854,23 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
         val isBundleOrder = texts.any {
             it.contains("Bundle Order", ignoreCase = true) ||
             it.contains("Bundled Order", ignoreCase = true)
+        }
+        // V20_ORDER1_BUNDLE: never evaluate the combined headline fare or
+        // the second ride's distance/destination. Missing Order 1 bounds
+        // returns incomplete data (no Accept) rather than guessing.
+        if (isBundleOrder) {
+            val orderOne = RapidoBundleOrderOneV20.selectParts(texts)
+                ?.map { it.text }
+                ?: return RapidoOrderData(isBundledOrder = true)
+            val parsed = extractOrderDataFromTexts(orderOne, skipPickupAddress)
+            val complete = parsed.totalFare.isFinite() && parsed.totalFare > 0f &&
+                parsed.pickupKm?.let { it.isFinite() && it >= 0f } == true &&
+                parsed.dropKm?.let { it.isFinite() && it > 0f } == true &&
+                parsed.dropAddress?.let {
+                    it.isNotBlank() && it != "Address unavailable" && !isInvalidAddress(it)
+                } == true
+            return if (complete) parsed.copy(isBundledOrder = true)
+                else RapidoOrderData(isBundledOrder = true)
         }
 
         // 1. Fare extraction - RAPIDO_FARE_ACCURACY_V2
@@ -961,30 +991,6 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
             TAG,
             "Rapido fare verified: total=₹$totalFare base=₹$baseFare tip=₹$tipAmount"
         )
-        // Bundle cards contain a top combined fare plus per-order component fares.
-        // Example: ₹104+ with Order 1 ₹52 and Order 2 ₹52+.
-        // Use the highest visible ₹ amount as the bundle total; never sum all component fares.
-        if (isBundleOrder) {
-            val bundleFareAmounts = mutableListOf<Float>()
-            for (i in texts.indices) {
-                if (isEarningsContext(texts, i)) continue
-                val bundleMatcher = rupeeMatcher.matcher(texts[i])
-                while (bundleMatcher.find()) {
-                    bundleMatcher.group(1)?.toFloatOrNull()?.let {
-                        if (it > 0f) bundleFareAmounts.add(it)
-                    }
-                }
-            }
-
-            val bundleTotal = bundleFareAmounts.maxOrNull()
-            if (bundleTotal != null && bundleTotal > 0f) {
-                baseFare = bundleTotal
-                tipAmount = 0f
-                totalFare = bundleTotal
-                logI(TAG, "📦 Bundle fare parsed from top/maximum visible amount: ₹$bundleTotal")
-            }
-        }
-
         // 2. Distance extraction: pattern [0-9.]+\s*km (excluding speed indicators)
         val kmMatches = mutableListOf<Pair<Int, Float>>()
         for (i in texts.indices) {
@@ -1141,30 +1147,6 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
         }
         if (conflictingPickupLabels) pickupKm = null
         if (conflictingTripLabels) dropKm = null
-
-        // A Bundle Order can contain multiple pickup/trip distance pairs:
-        // Order 1 pickup, Order 1 trip, Order 2 pickup, Order 2 trip...
-        // Use the largest pickup and largest trip/drop so a distant bundled leg
-        // cannot be accidentally accepted because only Order 1 was inspected.
-        if (isBundleOrder && kmMatches.size >= 2) {
-            val bundleDistances = kmMatches.map { it.second }
-            val bundlePickup =
-                bundleDistances.filterIndexed { index, _ -> index % 2 == 0 }.maxOrNull()
-            val bundleDrop =
-                bundleDistances.filterIndexed { index, _ -> index % 2 == 1 }.maxOrNull()
-
-            if (bundlePickup != null && bundlePickup.isFinite() && bundlePickup >= 0f) {
-                pickupKm = bundlePickup
-            }
-            if (bundleDrop != null && bundleDrop > 0f) {
-                dropKm = bundleDrop
-            }
-
-            logI(
-                TAG,
-                "📦 Bundle distances parsed: maxPickup=${pickupKm}km, maxDrop=${dropKm}km"
-            )
-        }
 
         // 3. Address extraction:
         var pickupAddress: String? = null
@@ -2372,8 +2354,20 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
                     )
             }
 
+        // V20_ORDER1_BUNDLE: scope the one-pass entries before parsing or
+        // applying view-id km/drop hints. Incomplete bundle -> fail closed.
+        val bundled = validEntries.any {
+            it.text.contains("Bundle Order", ignoreCase = true) ||
+                it.text.contains("Bundled Order", ignoreCase = true)
+        }
+        val scopedEntries = if (bundled) {
+            RapidoBundleOrderOneV20.select(
+                validEntries, { it.text }, { e, t -> e.copy(text = t) }
+            ) ?: return RapidoOrderData(isBundledOrder = true)
+        } else validEntries
+
         val textList =
-            validEntries.map {
+            scopedEntries.map {
                 it.text
             }
 
@@ -2391,7 +2385,7 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
         var dropFromId:
             String? = null
 
-        for (entry in validEntries) {
+        for (entry in scopedEntries) {
             val id =
                 entry.viewId
                     ?.lowercase()
@@ -2451,7 +2445,7 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
                 RegexOption.IGNORE_CASE
             )
 
-        for (entry in validEntries) {
+        for (entry in scopedEntries) {
             val match =
                 bookingRegex.find(
                     entry.text
@@ -2496,14 +2490,15 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
             }
 
         return reconcileKmByViewId(
-            data, validEntries.map { it.text to it.viewId }
+            data, scopedEntries.map { it.text to it.viewId }
         ).copy(
             pickupAddress =
                 finalPickup,
             dropAddress =
                 finalDrop,
             bookingId =
-                bookingId
+                bookingId,
+            isBundledOrder = bundled
         )
     }
 
