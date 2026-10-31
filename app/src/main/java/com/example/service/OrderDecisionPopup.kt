@@ -16,6 +16,7 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.example.model.OrderStatus
+import com.example.engine.OrderPopupStatusPolicy
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -25,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap
  * - dark compact card
  * - status color strip/badge
  * - only platform + fare + final reason
- * - auto hides after ~2.8 seconds
+ * - auto hides after 8 seconds; a new order immediately replaces the old one
  */
 object OrderDecisionPopup {
 
@@ -38,6 +39,8 @@ object OrderDecisionPopup {
     private var activeView: View? = null
     private var activeWindowManager: WindowManager? = null
     private var dismissRunnable: Runnable? = null
+    // Accessed on the UI thread only. Preserve confirmed status over queued uncertainty.
+    private val shownStates = mutableMapOf<String, Pair<OrderStatus, Long>>()
 
     // SHORT_POPUP_V7
     @Volatile
@@ -57,7 +60,7 @@ object OrderDecisionPopup {
         }
     }
 
-    private const val DISPLAY_MS = 4500L
+    private const val DISPLAY_MS = 8000L
     private const val DEDUPE_MS = 5000L
 
     private data class Style(
@@ -73,7 +76,7 @@ object OrderDecisionPopup {
             OrderStatus.ACCEPTED ->
                 Style(
                     label = "ACCEPTED",
-                    accent = 0xFF14B8A6.toInt(),
+                    accent = 0xFF4ADE80.toInt(),
                     badgeText = Color.WHITE
                 )
 
@@ -110,8 +113,8 @@ object OrderDecisionPopup {
 
             OrderStatus.UNCONFIRMED ->
                 Style(
-                    label = "ACCEPT SENT",
-                    accent = 0xFF64748B.toInt(),
+                    label = "NOT VERIFIED",
+                    accent = 0xFFFBBF24.toInt(),
                     badgeText = Color.WHITE
                 )
 
@@ -180,13 +183,23 @@ object OrderDecisionPopup {
                 key != latestOrderKey
             ) return@post
 
+            // The repository may upgrade UNCONFIRMED -> ACCEPTED later.
+            // Pending callbacks must not downgrade an already-confirmed card.
+            val previous = shownStates[key]?.first
+            if (!OrderPopupStatusPolicy.mayReplace(previous, status)) return@post
+            if (key.isNotBlank()) {
+                val shownAt = System.currentTimeMillis()
+                shownStates[key] = status to shownAt
+                shownStates.entries.removeAll { shownAt - it.value.second > 120_000L }
+            }
+
             showOnMain(
                 context = appContext,
                 status = status,
                 platform = platform,
                 fare = fare,
                 reason = if (status == OrderStatus.UNCONFIRMED)
-                    "Accept sent; check Rapido trip screen"
+                    "Rapido confirmation not found. Check trip screen."
                 else reason,
                 pickupKm = pickupKm,
                 tripKm = tripKm,
@@ -234,286 +247,114 @@ object OrderDecisionPopup {
         val style =
             styleFor(status)
 
-        val root =
-            LinearLayout(context).apply {
-                orientation =
-                    LinearLayout.HORIZONTAL
-
-                gravity =
-                    Gravity.CENTER_VERTICAL
-
-                setPadding(
-                    dp(7),
-                    dp(6),
-                    dp(8),
-                    dp(6)
-                )
-
-                background =
-                    GradientDrawable().apply {
-                        shape =
-                            GradientDrawable.RECTANGLE
-
-                        cornerRadius =
-                            18f * density
-
-                        setColor(
-                            0xFF09285C.toInt()
-                        )
-
-                        setStroke(
-                            dp(1),
-                            0xFF639DE4.toInt()
-                        )
-                    }
-
-                elevation =
-                    14f * density
+        // Compact Driver Card V8. Non-touchable so Rapido remains usable.
+        // Large fare, short reason and legible area on a calm navy surface.
+        fun rounded(color: Int, radiusDp: Int = 15): GradientDrawable =
+            GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = radiusDp * density
+                setColor(color)
             }
 
-        val strip =
-            View(context).apply {
-                background =
-                    GradientDrawable().apply {
-                        shape =
-                            GradientDrawable.RECTANGLE
-
-                        cornerRadius =
-                            10f * density
-
-                        setColor(style.accent)
-                    }
-
-                layoutParams =
-                    LinearLayout.LayoutParams(
-                        dp(4),
-                        dp(38)
-                    ).apply {
-                        marginEnd =
-                            dp(9)
-                    }
+        val root = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 17f * density
+                setColor(0xFF152238.toInt())
+                setStroke(dp(1), style.accent)
             }
-
-        root.addView(strip)
-
-        val content =
-            LinearLayout(context).apply {
-                orientation =
-                    LinearLayout.VERTICAL
-
-                layoutParams =
-                    LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams
-                            .WRAP_CONTENT,
-                        1f
-                    )
-            }
-
-        // SMARTDRIVO_TASK2_BLUE_V5
-        // Only presentation. No order engine or history changes.
-        val reasonTitle = compactReason(status, reason)
-
-        val statusLabel = when (status) {
-            OrderStatus.ACCEPTED -> "Accepted"
-            OrderStatus.IGNORED -> "Ignored"
-            OrderStatus.REJECTED -> "Rejected"
-            OrderStatus.SKIPPED -> "Skipped"
-            OrderStatus.FAILED -> "Failed"
-            OrderStatus.MISSED -> "Missed"
-            OrderStatus.UNCONFIRMED -> "Unconfirmed"
-            OrderStatus.PROCESSING -> "Checking"
+            elevation = 10f * density
         }
 
-        val titleColor = when (status) {
-            OrderStatus.ACCEPTED ->
-                0xFF5EF0AF.toInt()
-
-            OrderStatus.IGNORED ->
-                0xFFFF9650.toInt()
-
-            OrderStatus.REJECTED,
-            OrderStatus.SKIPPED ->
-                0xFFFF794B.toInt()
-
-            OrderStatus.FAILED,
-            OrderStatus.MISSED ->
-                0xFFFFB15B.toInt()
-
-            OrderStatus.UNCONFIRMED,
-            OrderStatus.PROCESSING ->
-                0xFFFFFFFF.toInt()
+        val header = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
-
-        val heading = TextView(context).apply {
-            text = "$statusLabel: $reasonTitle"
-
-            setTextColor(titleColor)
-
+        header.addView(TextView(context).apply {
+            text = platform.uppercase(java.util.Locale.ROOT) +
+                "  •  " + OrderPopupStatusPolicy.statusTitle(status)
+            setTextColor(style.accent)
             textSize = 12.5f
             typeface = Typeface.DEFAULT_BOLD
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            layoutParams = LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        header.addView(TextView(context).apply {
+            text = "●"
+            setTextColor(style.accent)
+            textSize = 12f
+            gravity = Gravity.CENTER
+        })
+        root.addView(header)
+
+        val reasonTitle = compactReason(status, reason)
+        val friendlyReason = if (status == OrderStatus.UNCONFIRMED) {
+            "Checking Rapido trip screen is recommended"
+        } else reasonTitle
+        root.addView(TextView(context).apply {
+            text = friendlyReason
+            setTextColor(0xFFF4F6FB.toInt())
+            textSize = 12f
             maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
+            setPadding(0, dp(4), 0, dp(4))
+        })
 
-            setPadding(
-                0,
-                0,
-                0,
-                dp(5)
-            )
-        }
-
-        content.addView(heading)
-
-        val dropName = destination
-            .trim()
+        val location = destination.trim()
             .substringBefore(" - ")
             .substringBefore(",")
             .trim()
+            .takeIf { it.isNotBlank() && !it.equals("Address unavailable", true) }
+            ?: platform
 
-        val summaryParts = mutableListOf<String>()
-
-        if (fare > 0f) {
-            summaryParts.add("₹${fare.toInt()}")
+        val fareRow = LinearLayout(context).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            orientation = LinearLayout.HORIZONTAL
         }
-
-        // SHORT_POPUP_V7
-        // Show total fare only. Extra +Amount remains available
-        // to the filter engine and History; do not display twice.
-
-        if (dropName.isNotBlank() &&
-            !dropName.equals(
-                "Address unavailable",
-                ignoreCase = true
-            )
-        ) {
-            summaryParts.add(dropName)
-        }
-
-        if (summaryParts.isEmpty()) {
-            summaryParts.add(platform.uppercase())
-        }
-
-        val summary = TextView(context).apply {
-            val label = summaryParts.joinToString(" | ")
-            val styled = android.text.SpannableString(label)
-
-            val greenStart = if (fare > 0f) label.indexOf("₹") else -1
-
-            if (greenStart >= 0) {
-                val nextSeparator =
-                    label.indexOf(" | ", greenStart)
-
-                val greenEnd =
-                    if (nextSeparator >= 0) {
-                        nextSeparator
-                    } else {
-                        label.length
-                    }
-
-                styled.setSpan(
-                    android.text.style.ForegroundColorSpan(
-                        0xFF4ADE80.toInt()
-                    ),
-                    greenStart,
-                    greenEnd,
-                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-                )
-
-                styled.setSpan(
-                    android.text.style.StyleSpan(
-                        Typeface.BOLD
-                    ),
-                    greenStart,
-                    greenEnd,
-                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-                )
-            }
-
-            text = styled
-
-            setTextColor(0xFFFFFFFF.toInt())
-
-            textSize = 11f
+        fareRow.addView(TextView(context).apply {
+            text = if (fare.isFinite() && fare > 0f) "₹" + fare.toInt() else "₹--"
+            setTextColor(0xFF7AF0A3.toInt())
+            typeface = Typeface.DEFAULT_BOLD
+            textSize = 23f
+            maxLines = 1
+        })
+        fareRow.addView(TextView(context).apply {
+            text = "  |  " + location
+            setTextColor(0xFFE4EAF5.toInt())
+            textSize = 12.5f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
+            layoutParams = LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        root.addView(fareRow)
 
-            setPadding(
-                0,
-                0,
-                0,
-                dp(2)
-            )
+        val distances = mutableListOf<String>()
+        pickupKm?.takeIf { it.isFinite() && it >= 0f }?.let {
+            distances.add("Pickup " + String.format(java.util.Locale.US, "%.1f km", it))
         }
-
-        content.addView(summary)
-
-        val fullDrop = destination.trim()
-
-        val shortAddress = when {
-            fullDrop.contains(" - ") ->
-                fullDrop.substringAfter(" - ").trim()
-
-            fullDrop.contains(",") ->
-                fullDrop.substringAfter(",").trim()
-
-            else -> ""
+        tripKm?.takeIf { it.isFinite() && it > 0f }?.let {
+            distances.add("Trip " + String.format(java.util.Locale.US, "%.1f km", it))
         }
-
-        if (shortAddress.isNotBlank()) {
-            val addressText = TextView(context).apply {
-                text = shortAddress
-
-                setTextColor(0xFFC2D2EC.toInt())
-
-                textSize = 10.5f
+        val details = if (distances.isNotEmpty()) {
+            distances.joinToString("  •  ")
+        } else {
+            destination.trim().substringAfter(",", "").trim().take(65)
+        }
+        if (details.isNotBlank()) {
+            root.addView(TextView(context).apply {
+                text = details
+                setTextColor(0xFFB8C8E3.toInt())
+                textSize = 11f
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END
-            }
-
-            content.addView(addressText)
-        } else if (pickupKm != null || tripKm != null) {
-            val distances = mutableListOf<String>()
-
-            pickupKm?.takeIf {
-                it.isFinite() && it >= 0f
-            }?.let {
-                distances.add(
-                    "Pickup " +
-                        String.format(
-                            java.util.Locale.US,
-                            "%.1f",
-                            it
-                        ) + " km"
-                )
-            }
-
-            tripKm?.takeIf {
-                it.isFinite() && it > 0f
-            }?.let {
-                distances.add(
-                    "Trip " +
-                        String.format(
-                            java.util.Locale.US,
-                            "%.1f",
-                            it
-                        ) + " km"
-                )
-            }
-
-            if (distances.isNotEmpty()) {
-                content.addView(
-                    TextView(context).apply {
-                        text = distances.joinToString(" • ")
-                        setTextColor(0xFFC2D2EC.toInt())
-                        textSize = 10.5f
-                        maxLines = 1
-                    }
-                )
-            }
+                setPadding(0, dp(4), 0, 0)
+            })
         }
-
-        root.addView(content)
 
         val type =
             if (
@@ -531,7 +372,7 @@ object OrderDecisionPopup {
         val params =
             WindowManager.LayoutParams(
                 minOf(
-                    dp(230),
+                    dp(288),
                     context.resources.displayMetrics.widthPixels - dp(24)
                 ),
                 WindowManager.LayoutParams
