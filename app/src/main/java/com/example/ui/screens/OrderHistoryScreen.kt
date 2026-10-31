@@ -55,6 +55,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -638,6 +640,103 @@ fun OrderHistoryScreen(
     }
 }
 
+
+@Composable
+private fun AcceptedOrderHistoryPopup(item: OrderHistoryItem, onDismiss: () -> Unit) {
+    val timestamp = when {
+        item.actionCompletedAt > 0L -> item.actionCompletedAt
+        item.clickTimeMs > 0L -> item.clickTimeMs
+        else -> item.timestamp
+    }
+    val time = remember(timestamp) {
+        if (timestamp <= 0L) "Unavailable" else SimpleDateFormat("hh:mm a", Locale.ENGLISH).apply {
+            timeZone = TimeZone.getTimeZone("Asia/Kolkata")
+        }.format(Date(timestamp))
+    }
+    val fare = item.amount.takeIf { it > 0f && it.isFinite() } ?: 0f
+    val tip = item.tipAmount.takeIf { it > 0f && it <= fare && it.isFinite() } ?: 0f
+    val base = item.baseFare.takeIf { it > 0f && it <= fare && it.isFinite() } ?: (fare - tip)
+    val drop = item.dropAddress.takeIf { it.isNotBlank() && !it.equals("Drop Location", true) }
+        ?: item.dropArea.takeIf { it.isNotBlank() } ?: "Location unavailable"
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(Modifier.fillMaxWidth(0.94f)
+            .background(Color.White, RoundedCornerShape(23.dp))
+            .border(2.dp, Color(0xFF8B38FF), RoundedCornerShape(23.dp))
+            .padding(3.dp)) {
+            Row(Modifier.fillMaxWidth().background(
+                androidx.compose.ui.graphics.Brush.horizontalGradient(
+                    listOf(Color(0xFF3828F7), Color(0xFF0869EF), Color(0xFF1025C8))),
+                RoundedCornerShape(topStart = 19.dp, topEnd = 19.dp)
+            ).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("✅ " + item.platform.displayName.uppercase() + " ACCEPTED",
+                    Modifier.weight(1f), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp,
+                    maxLines = 1)
+                Text("⏳ 10:00", color = Color.White, fontSize = 12.sp)
+                Text("  ✕", Modifier.clickable(onClick = onDismiss), color = Color.White, fontSize = 22.sp)
+            }
+            Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf(
+                    Triple(if (fare > 0f) "₹" + fare.toInt() else "₹--", Color(0xFFFFE5B0), Color.Black),
+                    Triple("Base: ₹" + base.toInt(), Color(0xFFF2F2FF), Color.Black),
+                    Triple("Tip: +₹" + tip.toInt(), Color(0xFFDDF9E6), Color(0xFF078827))
+                ).forEachIndexed { index, cell ->
+                    Box(Modifier.weight(if (index == 0) 1.14f else 1f)
+                        .background(cell.second, RoundedCornerShape(12.dp))
+                        .padding(vertical = 13.dp, horizontal = 3.dp), contentAlignment = Alignment.Center) {
+                        Text(cell.first, color = cell.third, maxLines = 1,
+                            fontWeight = FontWeight.Bold, fontSize = if (index == 0) 23.sp else 12.sp)
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).background(Color(0xFFF0F2FC), RoundedCornerShape(14.dp))
+                    .padding(9.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("📍 Pickup", fontSize = 12.sp)
+                    Text(com.example.engine.PickupDistancePresentationV19.label(item.pickupDistKm),
+                        fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1658E9))
+                }
+                Text(" ◉ ┈ ➤ ┈ ◉ ", fontSize = 9.sp, color = Color(0xFF135AF7))
+                Column(Modifier.weight(1f).background(Color(0xFFF0F2FC), RoundedCornerShape(14.dp))
+                    .padding(9.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("📍 Trip", fontSize = 12.sp)
+                    Text(if (item.dropDistKm > 0f && item.dropDistKm.isFinite())
+                        String.format(Locale.ENGLISH, "%.1f km", item.dropDistKm) else "N/A",
+                        fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE01228))
+                }
+            }
+            Box(Modifier.fillMaxWidth().padding(vertical = 9.dp), contentAlignment = Alignment.Center) {
+                Text("✓ Accepted at " + time,
+                    Modifier.background(Color(0xFFDEFBE5), RoundedCornerShape(20.dp))
+                        .border(1.dp, Color(0xFF4BE478), RoundedCornerShape(20.dp))
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    color = Color(0xFF085C29), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 9.dp)
+                .background(Color(0xFFECE0FF), RoundedCornerShape(15.dp))
+                .padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("📍", fontSize = 21.sp)
+                Column(Modifier.weight(1f).padding(start = 5.dp)) {
+                    Text("Drop Address", color = Color(0xFF5114DB),
+                        fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(drop, color = Color(0xFF111827), fontSize = 12.sp, maxLines = 5)
+                }
+                Text("➤", color = Color(0xFF5415D8), fontSize = 22.sp,
+                    modifier = Modifier.background(Color.White, RoundedCornerShape(12.dp))
+                        .clickable(enabled = drop != "Location unavailable") {
+                            runCatching {
+                                context.startActivity(android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("geo:0,0?q=" + android.net.Uri.encode(drop))
+                                ))
+                            }
+                        }.padding(10.dp))
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+    }
+}
+
 // HISTORY COMPACT UI SAFE V3
 // HISTORY_CARD_STYLE_V4
 @Composable
@@ -754,8 +853,10 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                 Color(0xFF94A3B8)
         }
 
+    var showDetails by remember(item.id) { mutableStateOf(false) }
+    if (showDetails) AcceptedOrderHistoryPopup(item) { showDetails = false }
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(enabled = item.status == OrderStatus.ACCEPTED) { showDetails = true },
         colors =
             CardDefaults.cardColors(
                 containerColor = historyCardBackground
