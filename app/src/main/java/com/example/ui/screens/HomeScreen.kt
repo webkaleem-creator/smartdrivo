@@ -2474,7 +2474,9 @@ val goToAreas by prefs.goToAreas.collectAsState()
                             dropDist = simulated.dropDistKm,
                             dropArea = simulated.dropArea,
                             time = simulated.timeStr,
-                            platform = simulated.platform.displayName
+                            platform = simulated.platform.displayName,
+                            baseFare = simulated.baseFare,
+                            tipAmount = simulated.tipAmount
                         )
                     },
                     colors = ButtonDefaults.buttonColors(
