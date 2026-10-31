@@ -7575,6 +7575,9 @@ private val processingTimeoutRunnable = Runnable {
         var sawPending = false
         var sawCustomerVerifiedLocation = false
         var sawArrived = false
+        // Rapido can split a pickup confirmation across sibling accessibility
+        // nodes. Keep a bounded in-memory sequence; never log addresses.
+        val postClickFragments = mutableListOf<String>()
 
         while (queue.isNotEmpty() && nodesVisited < 300) {
             val node = queue.removeFirst()
@@ -7588,6 +7591,10 @@ private val processingTimeoutRunnable = Runnable {
             val nodeText = node.text?.toString()?.lowercase(Locale.ROOT).orEmpty()
             val nodeDescription = node.contentDescription?.toString()?.lowercase(Locale.ROOT).orEmpty()
             val nodeSignalText = "$nodeText $nodeDescription"
+            if (postClickFragments.size < 300) {
+                if (nodeText.isNotBlank()) postClickFragments += nodeText
+                if (nodeDescription.isNotBlank()) postClickFragments += nodeDescription
+            }
             val nodeSignal = com.example.engine.RapidoPostAcceptSignal.classify(nodeSignalText)
 
             if (nodeSignal == com.example.engine.RapidoPostAcceptSignal.Result.MISSED) sawMissed = true
@@ -7602,12 +7609,22 @@ private val processingTimeoutRunnable = Runnable {
             }
         }
 
-        // Explicit negative evidence always takes priority over any positive text.
-        if (sawMissed) return com.example.engine.RapidoPostAcceptSignal.Result.MISSED
-        if (sawConfirmed || (sawCustomerVerifiedLocation && sawArrived)) {
+        // Recognize adjacent text nodes ("Go to" + "Pickup Zone").
+        // Explicit negative evidence always wins, even across text nodes.
+        val combinedSignal = com.example.engine.RapidoPostAcceptSignal.classify(
+            postClickFragments.joinToString(" ")
+        )
+        if (sawMissed || combinedSignal == com.example.engine.RapidoPostAcceptSignal.Result.MISSED) {
+            return com.example.engine.RapidoPostAcceptSignal.Result.MISSED
+        }
+        if (sawConfirmed || combinedSignal == com.example.engine.RapidoPostAcceptSignal.Result.CONFIRMED ||
+            (sawCustomerVerifiedLocation && sawArrived)
+        ) {
             return com.example.engine.RapidoPostAcceptSignal.Result.CONFIRMED
         }
-        if (sawPending) return com.example.engine.RapidoPostAcceptSignal.Result.PENDING
+        if (sawPending || combinedSignal == com.example.engine.RapidoPostAcceptSignal.Result.PENDING) {
+            return com.example.engine.RapidoPostAcceptSignal.Result.PENDING
+        }
         return unknown
     }
 
@@ -7652,7 +7669,9 @@ private val processingTimeoutRunnable = Runnable {
         acceptedHistoryReason: String?
     ) {
         serviceScope.launch(Dispatchers.IO) {
-            repeat(32) {
+            // Some accepted pickup screens arrive later than the first poll.
+            // Observe up to 20 seconds without retrying Accept or blocking orders.
+            repeat(80) {
                 delay(250L)
                 if (!rapidoVerifiedClickGuard.isCurrent(popupSession)) return@launch
                 when (readLiveRapidoAcceptanceSignal()) {

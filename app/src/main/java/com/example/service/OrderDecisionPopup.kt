@@ -110,7 +110,7 @@ object OrderDecisionPopup {
 
             OrderStatus.UNCONFIRMED ->
                 Style(
-                    label = "UNCONFIRMED",
+                    label = "ACCEPT SENT",
                     accent = 0xFF64748B.toInt(),
                     badgeText = Color.WHITE
                 )
@@ -185,7 +185,9 @@ object OrderDecisionPopup {
                 status = status,
                 platform = platform,
                 fare = fare,
-                reason = reason,
+                reason = if (status == OrderStatus.UNCONFIRMED)
+                    "Accept sent; check Rapido trip screen"
+                else reason,
                 pickupKm = pickupKm,
                 tripKm = tripKm,
                 destination = destination,

@@ -29,7 +29,17 @@ object RapidoPostAcceptSignal {
             "navigate to pickup",
             "thanks for accepting",
             "ride accepted",
-            "booking confirmed"
+            "booking confirmed",
+            "booking accepted",
+            "order accepted",
+            "ride confirmed",
+            "arrived at pickup",
+            "arrive at pickup",
+            "reached pickup",
+            "start trip",
+            "start ride",
+            "pickup otp",
+            "verify otp"
         )
         if (positive.any { text.contains(it) }) return Result.CONFIRMED
         if (text.contains("customer verified location") && text.contains("arrived")) {

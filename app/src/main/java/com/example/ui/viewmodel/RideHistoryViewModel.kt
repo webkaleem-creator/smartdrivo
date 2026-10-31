@@ -41,7 +41,7 @@ class RideHistoryViewModel(
             // Convert any previously stuck PROCESSING records
             // into MISSED/IGNORED so History never stays pending.
             repository.finalizeAllStaleProcessing(
-                timeoutMs = 8_000L
+                timeoutMs = 30_000L
             )
 
             // PROCESSING_RECOVERY_LOOP_V2
@@ -51,7 +51,7 @@ class RideHistoryViewModel(
                 delay(2_000L)
 
                 repository.finalizeAllStaleProcessing(
-                    timeoutMs = 8_000L
+                    timeoutMs = 30_000L
                 )
             }
         }
