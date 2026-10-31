@@ -416,7 +416,7 @@ class RideHistoryRepository(
     // PROCESSING_HISTORY_TIMEOUT_V1
     // Never allow a history row to remain PROCESSING forever.
     suspend fun finalizeAllStaleProcessing(
-        timeoutMs: Long = 8_000L
+        timeoutMs: Long = 30_000L
     ): Int = withContext(ioDispatcher) {
         mutex.withLock {
             val now = System.currentTimeMillis()

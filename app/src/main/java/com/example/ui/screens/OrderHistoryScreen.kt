@@ -878,6 +878,9 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
 
                 val statusLabel = when {
                     effectiveStatus == OrderStatus.PROCESSING -> "PROCESSING"
+                    // Keep unresolved legacy rows truthful without the confusing
+                    // user-facing label. Only real confirmation counts as ACCEPTED.
+                    effectiveStatus == OrderStatus.UNCONFIRMED -> "ACCEPT SENT"
                     isAutoAcceptOff -> "IGNORED - AUTO ACCEPT OFF"
                     isAutoRejectOff -> "IGNORED"
                     effectiveStatus == OrderStatus.FAILED -> "ACTION FAILED"
@@ -1085,16 +1088,14 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                     ) {
                         Column {
                             Text(
-                                text = "Acceptance Unconfirmed",
+                                text = "Accept Sent",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF8A6000)
                             )
                             Spacer(modifier = Modifier.height(1.dp))
                             Text(
-                                text = item.decisionReasonText.ifBlank {
-                                    "Accept attempted; Rapido acceptance has not been verified. Check Rapido before taking action."
-                                },
+                                text = "Accept button action was sent. Check Rapido for the final trip result.",
                                 fontSize = 11.sp,
                                 lineHeight = 15.sp,
                                 color = TextDarkPrimary
