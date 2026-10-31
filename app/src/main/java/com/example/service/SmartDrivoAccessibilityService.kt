@@ -10257,7 +10257,9 @@ private val processingTimeoutRunnable = Runnable {
             dropDist = candidate.dropDistKm ?: 0f,
             dropArea = dropArea,
             time = timeStr,
-            platform = candidate.platform.displayName
+            platform = candidate.platform.displayName,
+            baseFare = candidate.baseFare ?: 0f,
+            tipAmount = candidate.tipAmount ?: 0f
         )
     }
 
