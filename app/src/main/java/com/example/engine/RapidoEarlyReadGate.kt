@@ -6,11 +6,15 @@ package com.example.engine
  * validated Rapido popup, settings, strict button and per-offer click guard.
  */
 object RapidoEarlyReadGate {
-    const val MAX_FAST_RETRIES = 2
+    // Try earlier when Rapido finishes rendering quickly; retain an
+    // equivalent ~95ms final fallback for slower incremental layouts.
+    // These retries only READ the order; strict click/filter checks are unchanged.
+    const val MAX_FAST_RETRIES = 3
 
     fun retryDelayMs(retryNumber: Int): Long = when (retryNumber) {
-        1 -> 30L
-        2 -> 65L
+        1 -> 20L
+        2 -> 45L
+        3 -> 30L
         else -> 0L
     }
 
