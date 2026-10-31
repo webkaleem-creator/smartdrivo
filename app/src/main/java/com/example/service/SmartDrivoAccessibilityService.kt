@@ -2291,7 +2291,7 @@ private val processingTimeoutRunnable = Runnable {
         // foreground window, not the stale pre-click popup snapshot.
         var verification = com.example.engine.RapidoPostAcceptSignal.Result.UNKNOWN
         try {
-            for (poll in 0 until 12) {
+            for (poll in 0 until 28) {
                 delay(if (poll == 0) 40L else 140L)
                 val liveRoot = rootInActiveWindow?.takeIf {
                     isRapidoPackage(it.packageName?.toString().orEmpty())
@@ -10613,13 +10613,9 @@ private val processingTimeoutRunnable = Runnable {
         reasonText: String,
         matchedGoTo: String = "",
         matchedNoGo: String = ""
-    ) {        // ORDER_REASON_POPUP_DECISION_V1
-        showOrderReasonPopupIfEnabled(
-            recordKey = recordId,
-            candidate = candidate,
-            status = status,
-            reasonText = reasonText
-        )
+    ) {        // ORDER_REASON_POPUP_DECISION_V2
+        // Publish the popup only after Room resolves the true final status.
+        // An older filter callback must not falsely label an accepted ride.
 
         // HISTORY_FINAL_STATE_V2
         // This method only finalizes an existing detected row.
@@ -10662,6 +10658,16 @@ private val processingTimeoutRunnable = Runnable {
                     return@launch
                 }
 
+                // An old filter event can finish after a verified accept.
+                // Never show its obsolete REJECTED/IGNORED banner.
+                if (finalUpdated.status == status.name) {
+                    showOrderReasonPopupIfEnabled(
+                        recordKey = recordId,
+                        candidate = candidate,
+                        status = status,
+                        reasonText = reasonText
+                    )
+                }
                 repository.recordOrderHistory(finalUpdated.toOrderHistoryItem())
                 prefs.notifyOrderHistoryChanged()
             } catch (e: Exception) {
@@ -10695,15 +10701,9 @@ private val processingTimeoutRunnable = Runnable {
         buttonDetails: String = "",
         clickMethod: String = "",
         errorMsg: String? = null
-    ) {        // ORDER_REASON_POPUP_ACTION_V1
-        // De-dupe inside OrderDecisionPopup prevents the same
-        // rejected/ignored result from appearing twice.
-        showOrderReasonPopupIfEnabled(
-            recordKey = recordId,
-            candidate = candidate,
-            status = status,
-            reasonText = reasonText
-        )
+    ) {        // ORDER_REASON_POPUP_ACTION_V2
+        // Do not show a provisional UNCONFIRMED banner before persisted
+        // status is read. A confirmed acceptance is never downgraded.
 
         // HISTORY_FINAL_STATE_V2
         // Existing history rows must always receive their final result.
@@ -10756,6 +10756,14 @@ private val processingTimeoutRunnable = Runnable {
                 val finalUpdated = updated
 
                 if (finalUpdated != null) {
+                    if (finalUpdated.status == status.name) {
+                        showOrderReasonPopupIfEnabled(
+                            recordKey = recordId,
+                            candidate = candidate,
+                            status = status,
+                            reasonText = reasonText
+                        )
+                    }
                     repository.recordOrderHistory(
                         finalUpdated.toOrderHistoryItem()
                     )
