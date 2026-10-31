@@ -8878,7 +8878,7 @@ private val processingTimeoutRunnable = Runnable {
         // Verification runs after the immediate Accept dispatch; the first click is not delayed.
         val verificationRecordId = pinnedRecordId
         serviceScope.launch(Dispatchers.IO) {
-            delay(40L)
+            delay(com.example.engine.RapidoPostAcceptCadence.INITIAL_DELAY_MS)
 
             var signal = com.example.engine.RapidoPostAcceptSignal.Result.UNKNOWN
             var currentRoot: AccessibilityNodeInfo? = null
@@ -8886,7 +8886,9 @@ private val processingTimeoutRunnable = Runnable {
 
             // Never trust the old offer root as accepted evidence. Read live
             // Rapido windows, including windows behind SmartDrivo's overlay.
-            for (poll in 0 until 12) {
+            // Higher-frequency READ ONLY checks; total observation span is
+            // kept at >= old 11*140ms to avoid premature UNCONFIRMED History.
+            for (poll in 0 until com.example.engine.RapidoPostAcceptCadence.POLL_SAMPLES) {
                 if (!rapidoVerifiedClickGuard.isCurrent(livePopupSession)) {
                     Log.i(TAG, "Old Rapido popup verification ended: newer offer active")
                     return@launch
@@ -8909,7 +8911,9 @@ private val processingTimeoutRunnable = Runnable {
                 // Never automatically re-click once a Rapido Accept action was sent.
                 // UNKNOWN can represent a delayed successful acceptance.
 
-                if (poll < 11) delay(140L)
+                if (poll < com.example.engine.RapidoPostAcceptCadence.POLL_SAMPLES - 1) {
+                    delay(com.example.engine.RapidoPostAcceptCadence.POLL_INTERVAL_MS)
+                }
             }
 
             if (!rapidoVerifiedClickGuard.isCurrent(livePopupSession)) return@launch
@@ -9984,9 +9988,14 @@ private val processingTimeoutRunnable = Runnable {
             return
         }
 
+        // RAPIDO_REJECT_TIMING_V1: instrumentation only. No additional
+        // validation, click, gesture, UI, or History path is changed.
+        val rejectLookupStartedNs = System.nanoTime()
         val rejectNode = findStrictRapidoRejectNode(rapidoRoot)
+        val rejectLookupMs = (System.nanoTime() - rejectLookupStartedNs) / 1_000_000L
 
         if (rejectNode == null) {
+            Log.i(TAG, "RAPIDO_REJECT_TIMING_V1 lookupMs=$rejectLookupMs result=BUTTON_NOT_FOUND")
             // Correct the provisional REJECTED state if no safe control exists.
             onOrderDecisionFast(
                 recordId = recordId,
@@ -10021,11 +10030,14 @@ private val processingTimeoutRunnable = Runnable {
             return
         }
 
+        val rejectDispatchStartedNs = System.nanoTime()
         val clicked =
             rejectNode.isClickable &&
                 rejectNode.performAction(
                     AccessibilityNodeInfo.ACTION_CLICK
                 )
+        val rejectDispatchMs = (System.nanoTime() - rejectDispatchStartedNs) / 1_000_000L
+        Log.i(TAG, "RAPIDO_REJECT_TIMING_V1 lookupMs=$rejectLookupMs dispatchMs=$rejectDispatchMs actionDispatched=$clicked")
 
         if (clicked) {
             if (!historyPreFinalized) {

@@ -37,14 +37,18 @@ class RapidoEarlyReadGateTest {
     }
 
     @Test fun retriesAreStrictlyBoundedAndKeepMasterOffDisabled() {
-        assertEquals(2, RapidoEarlyReadGate.MAX_FAST_RETRIES)
+        assertEquals(3, RapidoEarlyReadGate.MAX_FAST_RETRIES)
         assertTrue(RapidoEarlyReadGate.mayRetry(true, 0, true))
         assertTrue(RapidoEarlyReadGate.mayRetry(true, 1, true))
-        assertFalse(RapidoEarlyReadGate.mayRetry(true, 2, true))
+        assertTrue(RapidoEarlyReadGate.mayRetry(true, 2, true))
+        assertFalse(RapidoEarlyReadGate.mayRetry(true, 3, true))
         assertFalse(RapidoEarlyReadGate.mayRetry(true, 0, false))
         assertFalse(RapidoEarlyReadGate.mayRetry(false, 0, true))
-        assertEquals(30L, RapidoEarlyReadGate.retryDelayMs(1))
-        assertEquals(65L, RapidoEarlyReadGate.retryDelayMs(2))
-        assertEquals(0L, RapidoEarlyReadGate.retryDelayMs(3))
+        assertEquals(20L, RapidoEarlyReadGate.retryDelayMs(1))
+        assertEquals(45L, RapidoEarlyReadGate.retryDelayMs(2))
+        assertEquals(30L, RapidoEarlyReadGate.retryDelayMs(3))
+        assertEquals(0L, RapidoEarlyReadGate.retryDelayMs(4))
+        // The last recheck still occurs at the old ~95ms boundary.
+        assertEquals(95L, (1..3).sumOf(RapidoEarlyReadGate::retryDelayMs))
     }
 }
