@@ -672,7 +672,7 @@ private fun AcceptedOrderHistoryPopup(item: OrderHistoryItem, onDismiss: () -> U
                 Text("✅ " + item.platform.displayName.uppercase() + " ACCEPTED",
                     Modifier.weight(1f), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp,
                     maxLines = 1)
-                Text("⏳ 10:00", color = Color.White, fontSize = 12.sp)
+                Text(time, color = Color.White, fontSize = 12.sp)
                 Text("  ✕", Modifier.clickable(onClick = onDismiss), color = Color.White, fontSize = 22.sp)
             }
             Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
