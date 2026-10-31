@@ -54,6 +54,8 @@ class FloatingOverlayService : Service() {
         const val EXTRA_DROP_AREA = "extra_drop_area"
         const val EXTRA_TIME = "extra_time"
         const val EXTRA_PLATFORM = "extra_platform"
+        const val EXTRA_BASE_FARE = "extra_base_fare"
+        const val EXTRA_TIP = "extra_tip"
 
         fun show(
             context: Context,
@@ -64,7 +66,9 @@ class FloatingOverlayService : Service() {
             dropDist: Float,
             dropArea: String,
             time: String,
-            platform: String
+            platform: String,
+            baseFare: Float = 0f,
+            tipAmount: Float = 0f
         ) {
             // INSTANT_OVERLAY_FAST_PATH_V1
             // If service is already alive, bypass startService/startForegroundService.
@@ -79,7 +83,9 @@ class FloatingOverlayService : Service() {
                         dropDist = dropDist,
                         dropArea = dropArea,
                         time = time,
-                        platform = platform
+                        platform = platform,
+                        baseFare = baseFare,
+                        tipAmount = tipAmount
                     )
                 }
                 return
@@ -95,6 +101,8 @@ class FloatingOverlayService : Service() {
                 putExtra(EXTRA_DROP_AREA, dropArea)
                 putExtra(EXTRA_TIME, time)
                 putExtra(EXTRA_PLATFORM, platform)
+                putExtra(EXTRA_BASE_FARE, baseFare)
+                putExtra(EXTRA_TIP, tipAmount)
             }
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -167,7 +175,8 @@ class FloatingOverlayService : Service() {
             val time = intent.getStringExtra(EXTRA_TIME) ?: "Just Now"
             val platform = intent.getStringExtra(EXTRA_PLATFORM) ?: "Rapido"
 
-            showPopup(amount, pickup, pickupDist, drop, dropDist, dropArea, time, platform)
+            showPopup(amount, pickup, pickupDist, drop, dropDist, dropArea, time, platform,
+                intent.getFloatExtra(EXTRA_BASE_FARE, 0f), intent.getFloatExtra(EXTRA_TIP, 0f))
         }
         return START_NOT_STICKY
     }
@@ -230,7 +239,9 @@ class FloatingOverlayService : Service() {
         dropDist: Float,
         dropArea: String,
         time: String,
-        platform: String
+        platform: String,
+        baseFare: Float,
+        tipAmount: Float
     ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
             Log.w(TAG, "Cannot show overlay: 'Display over other apps' permission not granted.")
@@ -250,7 +261,7 @@ class FloatingOverlayService : Service() {
         }
 
         val displayWidth = resources.displayMetrics.widthPixels
-        val cardWidth = (displayWidth * 0.82f).toInt()
+        val cardWidth = (displayWidth * 0.91f).toInt()
             .coerceAtLeast(dpToPx(280))
             .coerceAtMost(displayWidth - dpToPx(20))
 
@@ -266,241 +277,264 @@ class FloatingOverlayService : Service() {
             x = ((displayWidth - cardWidth) / 2).coerceAtLeast(0)
             y = dpToPx(78)
             windowAnimations = 0 // INSTANT_OVERLAY_ANIMATION_V1
-        }        // Compact white floating card
+        }
+
+        // Final approved accepted-card layout: shared by bike, auto and car.
+        // Values are read from the confirmed offer; no sample fare/time is hard-coded.
+        fun rounded(
+            color: Int,
+            radius: Float = 17f,
+            stroke: Int = Color.TRANSPARENT,
+            strokeDp: Int = 0
+        ): GradientDrawable = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dpToPxf(radius)
+            setColor(color)
+            if (strokeDp > 0) setStroke(dpToPx(strokeDp), stroke)
+        }
+
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            val bgDrawable = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dpToPxf(16f)
-                setColor(Color.WHITE)
-                setStroke(dpToPx(1), 0xFF90CAF9.toInt())
-            }
-            background = bgDrawable
-            elevation = dpToPxf(10f)
+            background = rounded(Color.WHITE, 21f, 0xFF913AFF.toInt(), 2)
+            elevation = dpToPxf(12f)
             clipToOutline = true
-            setPadding(0, 0, 0, dpToPx(8))
+            setPadding(dpToPx(2), dpToPx(2), dpToPx(2), dpToPx(3))
         }
-        // --- COMPACT BLUE HEADER ---
+
         val headerView = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                setColor(0xFF1E88E5.toInt())
-            }
-
-            setPadding(dpToPx(10), dpToPx(4), dpToPx(7), dpToPx(4))
-
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dpToPx(46)
-            )
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(0xFF3326F5.toInt(), 0xFF0063F5.toInt(), 0xFF0922C6.toInt())
+            ).apply { cornerRadii = floatArrayOf(
+                dpToPxf(19f), dpToPxf(19f), dpToPxf(19f), dpToPxf(19f), 0f, 0f, 0f, 0f
+            ) }
+            setPadding(dpToPx(12), dpToPx(5), dpToPx(5), dpToPx(5))
         }
 
         val platformBadge = TextView(this).apply {
-            text = "✅ ${style.displayName} ACCEPTED"
+            text = "✅ " + style.displayName + " ACCEPTED"
             setTextColor(Color.WHITE)
-            textSize = 12.5f
+            textSize = 15f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
-            setSingleLine(true)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            layoutParams = LinearLayout.LayoutParams(0, dpToPx(46), 1f)
         }
         headerView.addView(platformBadge)
-
-        headerView.addView(View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
-        })
 
         val countdownBadge = TextView(this).apply {
             text = "⏳ 10:00"
             setTextColor(Color.WHITE)
-            textSize = 12f
+            textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            setPadding(dpToPx(8), dpToPx(4), dpToPx(8), dpToPx(4))
-
-            background = GradientDrawable().apply {
-                cornerRadius = dpToPxf(18f)
-                setColor(0x22FFFFFF)
-            }
+            setPadding(dpToPx(9), dpToPx(6), dpToPx(9), dpToPx(6))
+            background = rounded(0x443D9EFF, 20f, 0x6666B0FF, 1)
         }
         headerView.addView(countdownBadge)
 
         val closeBtn = TextView(this).apply {
             text = "✕"
             setTextColor(Color.WHITE)
-            textSize = 16f
+            textSize = 23f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            contentDescription = "Dismiss Overlay"
-
-            val size = dpToPx(38)
-            layoutParams = LinearLayout.LayoutParams(size, size).apply {
-                marginStart = dpToPx(5)
+            contentDescription = "Dismiss accepted order"
+            layoutParams = LinearLayout.LayoutParams(dpToPx(37), dpToPx(43)).apply {
+                marginStart = dpToPx(3)
             }
-
-            val circle = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(0x22FFFFFF)
-            }
-
-            background = RippleDrawable(
-                ColorStateList.valueOf(0x44FFFFFF),
-                circle,
-                null
-            )
-
             isClickable = true
             isFocusable = true
             setOnClickListener { removeCurrentOverlay() }
         }
-
         headerView.addView(closeBtn)
         card.addView(headerView)
-        // --- COMPACT FARE / PICKUP / DROP ---
-        val metrics = LinearLayout(this).apply {
+
+        val safeTotal = amount.takeIf { it.isFinite() && it > 0f } ?: 0f
+        val safeTip = tipAmount.takeIf {
+            it.isFinite() && it > 0f && it <= safeTotal
+        } ?: 0f
+        val safeBase = baseFare.takeIf {
+            it.isFinite() && it > 0f && it <= safeTotal
+        } ?: (safeTotal - safeTip).coerceAtLeast(0f)
+        val fareText = if (safeTotal > 0f) "₹" + safeTotal.toInt() else "₹--"
+        val baseText = if (safeBase > 0f) "Base: ₹" + safeBase.toInt() else "Base: --"
+        val tipText = if (safeTip > 0f) "Tip: +₹" + safeTip.toInt() else "Tip: ₹0"
+
+        val fareRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dpToPx(10), dpToPx(8), dpToPx(10), dpToPx(6))
+            setPadding(dpToPx(9), dpToPx(9), dpToPx(9), dpToPx(5))
         }
 
-        fun metricItem(
-            icon: String,
-            label: String,
+        fun fareCell(
             value: String,
-            weight: Float
-        ): LinearLayout {
-            return LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-
-                layoutParams = LinearLayout.LayoutParams(
-                    0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    weight
-                )
-
-                addView(TextView(this@FloatingOverlayService).apply {
-                    text = icon
-                    textSize = 16f
-                    gravity = Gravity.CENTER
-                    setPadding(0, 0, dpToPx(5), 0)
-                })
-
-                addView(LinearLayout(this@FloatingOverlayService).apply {
-                    orientation = LinearLayout.VERTICAL
-
-                    if(label.isNotBlank()){
-                        addView(TextView(this@FloatingOverlayService).apply {
-                            text = label
-                            textSize = 10f
-                            setTextColor(0xFF4B5563.toInt())
-                            setSingleLine(true)
-                        })
-                    }
-
-                    addView(TextView(this@FloatingOverlayService).apply {
-                        text = value
-                        textSize = if(label.isBlank()) 16f else 13.5f
-                        typeface = Typeface.DEFAULT_BOLD
-                        setTextColor(0xFF111827.toInt())
-                        setSingleLine(true)
-                    })
-                })
+            weight: Float,
+            bg: Int,
+            color: Int,
+            fontSize: Float
+        ): TextView = TextView(this).apply {
+            text = value
+            textSize = fontSize
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(color)
+            gravity = Gravity.CENTER
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            background = rounded(bg, 12f)
+            setPadding(dpToPx(2), 0, dpToPx(2), 0)
+            layoutParams = LinearLayout.LayoutParams(0, dpToPx(49), weight).apply {
+                marginStart = dpToPx(2)
+                marginEnd = dpToPx(2)
             }
         }
+        fareRow.addView(fareCell(fareText, 1.12f, 0xFFFFE5AC.toInt(), Color.BLACK, 25f))
+        fareRow.addView(fareCell(baseText, 1.0f, 0xFFF8F8FF.toInt(), 0xFF111827.toInt(), 12f))
+        fareRow.addView(fareCell(tipText, 1.0f, 0xFFD6FBE4.toInt(), 0xFF008421.toInt(), 12.5f))
+        card.addView(fareRow)
 
-        val fareValue =
-            if(amount > 0f) "₹${amount.toInt()}" else "₹--"
+        val pickupText = com.example.engine.PickupDistancePresentationV19.label(pickupDist)
+        val tripText = if (dropDist.isFinite() && dropDist > 0f) {
+            String.format(Locale.US, "%.1f km", dropDist)
+        } else "N/A"
 
-        val pickupValue =
-            com.example.engine.PickupDistancePresentationV19.label(pickupDist)
-
-        val dropValue =
-            if(dropDist > 0f)
-                String.format(Locale.US, "%.1f km", dropDist)
-            else
-                "N/A"
-
-        metrics.addView(metricItem("₹", "", fareValue, 0.9f))
-
-        fun dividerView(): View {
-            return View(this).apply {
-                setBackgroundColor(0xFFE5E7EB.toInt())
-
-                layoutParams = LinearLayout.LayoutParams(
-                    dpToPx(1),
-                    dpToPx(34)
-                ).apply {
-                    marginStart = dpToPx(4)
-                    marginEnd = dpToPx(4)
-                }
-            }
+        val routeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dpToPx(10), dpToPx(2), dpToPx(10), dpToPx(2))
         }
+        fun routeCell(icon: String, label: String, dist: String, color: Int): TextView =
+            TextView(this).apply {
+                text = icon + " " + label + "\n" + dist
+                textSize = 13.5f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(color)
+                gravity = Gravity.CENTER
+                maxLines = 2
+                background = rounded(0xFFF0F2FC.toInt(), 14f)
+                setPadding(dpToPx(2), dpToPx(7), dpToPx(2), dpToPx(7))
+                layoutParams = LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1.08f)
+            }
+        routeRow.addView(routeCell("📍", "Pickup", pickupText, 0xFF1249DF.toInt()))
+        routeRow.addView(TextView(this).apply {
+            text = "● - ➤ - ●"
+            setTextColor(0xFF1763F4.toInt())
+            textSize = 13f
+            gravity = Gravity.CENTER
+            maxLines = 1
+            layoutParams = LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0.8f)
+        })
+        routeRow.addView(routeCell("📍", "Trip", tripText, 0xFFE10A26.toInt()))
+        card.addView(routeRow)
 
-        metrics.addView(dividerView())
-        metrics.addView(metricItem("📍", "Pickup", pickupValue, 1.1f))
-        metrics.addView(dividerView())
-        metrics.addView(metricItem("🔴", "Drop", dropValue, 1.05f))
-
-        card.addView(metrics)
-
-        card.addView(View(this).apply {
-            setBackgroundColor(0xFFE5E7EB.toInt())
-
+        // Confirmation time is supplied at the confirmed ACCEPTED event, not
+        // the offer's detection timestamp or a simulated screenshot value.
+        card.addView(TextView(this).apply {
+            text = "✓ Accepted at " + time.trim().ifBlank { "time unavailable" }
+            textSize = 12.5f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF075B28.toInt())
+            gravity = Gravity.CENTER
+            background = rounded(0xFFDCFBE6.toInt(), 18f, 0xFF50DC7A.toInt(), 1)
+            setPadding(dpToPx(14), dpToPx(4), dpToPx(14), dpToPx(4))
             layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dpToPx(1)
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                marginStart = dpToPx(10)
-                marginEnd = dpToPx(10)
+                gravity = Gravity.CENTER_HORIZONTAL
+                topMargin = dpToPx(2)
+                bottomMargin = dpToPx(9)
             }
         })
 
         val cleanDrop = drop.trim()
-
         val finalDrop = when {
             cleanDrop.isBlank() ||
-            cleanDrop.equals("Drop Location", true) ||
-            cleanDrop.equals("Detected Drop Location", true) ->
-                "Location unavailable"
-
+                cleanDrop.equals("Drop Location", true) ||
+                cleanDrop.equals("Detected Drop Location", true) ->
+                dropArea.takeIf {
+                    it.isNotBlank() && !it.equals("City Area", true)
+                } ?: "Location unavailable"
             cleanDrop.startsWith("Drop:", true) ->
                 cleanDrop.substringAfter(":").trim()
-
             cleanDrop.startsWith("Drop -", true) ->
                 cleanDrop.substringAfter("-").trim()
-
             else -> cleanDrop
         }
 
         val addressRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.TOP
-            setPadding(dpToPx(10), dpToPx(7), dpToPx(10), dpToPx(2))
+            gravity = Gravity.CENTER_VERTICAL
+            background = rounded(0xFFEBE1FF.toInt(), 16f)
+            setPadding(dpToPx(9), dpToPx(9), dpToPx(9), dpToPx(9))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                marginStart = dpToPx(8)
+                marginEnd = dpToPx(8)
+                bottomMargin = dpToPx(6)
+            }
         }
 
         addressRow.addView(TextView(this).apply {
             text = "📍"
-            textSize = 14f
-            setPadding(0, 0, dpToPx(6), 0)
+            textSize = 21f
+            gravity = Gravity.TOP
+            setPadding(0, dpToPx(5), dpToPx(6), 0)
         })
-
-        addressRow.addView(TextView(this).apply {
-            text = "Drop: $finalDrop"
-            textSize = 11.5f
-            setTextColor(0xFF374151.toInt())
-            maxLines = 2
-            ellipsize = TextUtils.TruncateAt.END
-
+        addressRow.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
             )
+            addView(TextView(this@FloatingOverlayService).apply {
+                text = "Drop Address"
+                textSize = 15f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(0xFF4C16D8.toInt())
+            })
+            addView(TextView(this@FloatingOverlayService).apply {
+                text = finalDrop
+                textSize = 12.5f
+                setTextColor(0xFF111827.toInt())
+                maxLines = 5
+                ellipsize = TextUtils.TruncateAt.END
+            })
         })
-
+        addressRow.addView(TextView(this).apply {
+            text = "➤"
+            textSize = 26f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF4A18D5.toInt())
+            gravity = Gravity.CENTER
+            contentDescription = "Open drop address in Maps"
+            background = rounded(Color.WHITE, 13f, 0xFFB16AFF.toInt(), 1)
+            layoutParams = LinearLayout.LayoutParams(dpToPx(41), dpToPx(45)).apply {
+                marginStart = dpToPx(6)
+            }
+            isClickable = finalDrop != "Location unavailable"
+            isFocusable = isClickable
+            setOnClickListener {
+                if (finalDrop != "Location unavailable") {
+                    try {
+                        val mapUri = android.net.Uri.parse(
+                            "geo:0,0?q=" + android.net.Uri.encode(finalDrop)
+                        )
+                        startActivity(Intent(Intent.ACTION_VIEW, mapUri).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        })
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Unable to launch Maps for drop: " + e.message)
+                    }
+                }
+            }
+        })
         card.addView(addressRow)
 
         // ---------------------------------------------------------
