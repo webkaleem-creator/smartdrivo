@@ -2,7 +2,7 @@ name: Build SmartDrivo APK
 
 on:
   push:
-    branches: [ main, smartdrivo-device-lock-free-20261011-112401, perf/rapido-stage-a-safe-latency-20261031 ]
+    branches: [ main, smartdrivo-device-lock-free-20261011-112401, perf/rapido-stage-a-safe-latency-20261031, feature/ola-safe-engine-v1-20261101 ]
   workflow_dispatch:
 
 jobs:
