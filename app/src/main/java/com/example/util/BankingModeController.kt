@@ -11,7 +11,6 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.data.PreferencesManager
 import com.example.service.SmartDrivoAccessibilityService
-import com.example.service.BankingQuickTileService
 
 /**
  * User-invoked Accessibility OFF workflow. Does not bypass security checks,
@@ -61,7 +60,6 @@ object BankingModeController {
         // When it is not connected, user should confirm OFF in Settings.
         val requested = SmartDrivoAccessibilityService.requestBankingModeDisable()
         showReminder(context)
-        BankingQuickTileService.refresh(context)
         return StartResult(true, requested)
     }
 
@@ -76,7 +74,6 @@ object BankingModeController {
         if (!persistFinish(context)) return false
 
         cancelReminder(context)
-        BankingQuickTileService.refresh(context)
         SmartDrivoAccessibilityService.resumeFromBankingMode()
         val hasAccessibility = PermissionHelper.isAccessibilityPermissionGranted(context)
         val hasOverlay = PermissionHelper.isOverlayPermissionGranted(context)
