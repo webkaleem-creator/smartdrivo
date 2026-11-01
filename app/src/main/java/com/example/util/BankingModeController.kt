@@ -30,17 +30,28 @@ object BankingModeController {
         context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
             .getBoolean(KEY_ACTIVE, false)
 
+    // Tested independently from Firebase and the live AccessibilityService.
+    internal fun persistStart(context: Context, masterWasActive: Boolean): Boolean {
+        val storage = context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
+        if (storage.getBoolean(KEY_ACTIVE, false)) return true
+        return storage.edit()
+            .putBoolean(KEY_ACTIVE, true)
+            .putBoolean(KEY_RESTORE_MASTER, masterWasActive)
+            .commit()
+    }
+
+    internal fun previousMasterWasActive(context: Context): Boolean =
+        context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
+            .getBoolean(KEY_RESTORE_MASTER, false)
+
+    internal fun persistFinish(context: Context): Boolean =
+        context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
+            .edit().remove(KEY_ACTIVE).remove(KEY_RESTORE_MASTER).commit()
+
     /** Keep this snapshot even if Android kills the app process. */
     fun enter(context: Context, prefs: PreferencesManager): StartResult {
-        val storage = context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
-        if (!storage.getBoolean(KEY_ACTIVE, false)) {
-            val wasOn = prefs.appSettings.value.isAutoAcceptActive
-            if (!storage.edit()
-                    .putBoolean(KEY_ACTIVE, true)
-                    .putBoolean(KEY_RESTORE_MASTER, wasOn)
-                    .commit()) {
-                return StartResult(false, false)
-            }
+        if (!persistStart(context, prefs.appSettings.value.isAutoAcceptActive)) {
+            return StartResult(false, false)
         }
 
         prefs.isPendingAutoAcceptActivation = false
@@ -59,11 +70,8 @@ object BankingModeController {
             PermissionHelper.openAccessibilitySettings(context)
             return true
         }
-        val previouslyOn = storage.getBoolean(KEY_RESTORE_MASTER, false)
-        if (!storage.edit()
-                .remove(KEY_ACTIVE)
-                .remove(KEY_RESTORE_MASTER)
-                .commit()) return false
+        val previouslyOn = previousMasterWasActive(context)
+        if (!persistFinish(context)) return false
 
         cancelReminder(context)
         SmartDrivoAccessibilityService.resumeFromBankingMode()
