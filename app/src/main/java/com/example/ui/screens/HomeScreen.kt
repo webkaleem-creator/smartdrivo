@@ -97,6 +97,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.data.FirebaseRepository
 import com.example.data.PreferencesManager
+import com.example.model.AppThemeMode
 import com.example.model.FilterMode
 import com.example.model.OrderHistoryItem
 import com.example.model.OrderStatus
@@ -110,6 +111,12 @@ import com.example.service.SmartDrivoAccessibilityService
 import com.example.ui.components.SmartDrivoLogo
 import com.example.util.PermissionHelper
 import kotlinx.coroutines.launch
+import com.example.ui.theme.premiumPageBrush
+import com.example.ui.theme.premiumIsDark
+import com.example.ui.theme.premiumCardColor
+import com.example.ui.theme.premiumCardBorder
+import com.example.ui.theme.premiumTitleColor
+import com.example.ui.theme.premiumSubtextColor
 import com.example.ui.theme.BlueBorder
 import com.example.ui.theme.BlueContainer
 import com.example.ui.theme.BluePrimary
@@ -407,7 +414,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {},
-        containerColor = LightBackground
+        containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
@@ -415,7 +422,8 @@ val goToAreas by prefs.goToAreas.collectAsState()
                 .padding(innerPadding)
                 // SMARTDRIVO_KEYBOARD_SAFE_V2
                 .imePadding()
-                .padding(horizontal = 16.dp),
+                .background(premiumPageBrush())
+                .padding(horizontal = 14.dp),
             // SMARTDRIVO_KEYBOARD_GAP_V3
             // Keep normal scroll room; reduce it while typing.
             contentPadding = PaddingValues(
@@ -425,14 +433,56 @@ val goToAreas by prefs.goToAreas.collectAsState()
             ),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            item { Spacer(modifier = Modifier.height(2.dp)) }
-
+            // PREMIUM_HOME_HEADER_V1 - selected design; setting writes only theme preference.
+            item {
+                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    SmartDrivoLogo(size = 53.dp)
+                    Spacer(Modifier.width(9.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("SmartDrivo", fontSize = 24.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = premiumTitleColor(), maxLines = 1)
+                        Text("D R I V E R   A S S I S T A N T",
+                            fontSize = 8.sp, fontWeight = FontWeight.SemiBold,
+                            color = premiumSubtextColor(), maxLines = 1)
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = premiumCardColor(),
+                        border = BorderStroke(1.dp, premiumCardBorder()),
+                        shadowElevation = 3.dp
+                    ) {
+                        Row(Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text("☾", color = premiumTitleColor(), fontSize = 16.sp)
+                            Text("Dark", color = premiumTitleColor(), fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold)
+                            Switch(
+                                checked = premiumIsDark(),
+                                onCheckedChange = { dark ->
+                                    prefs.saveAppSettings(
+                                        prefs.appSettings.value.copy(
+                                            themeMode = if (dark) AppThemeMode.DARK else AppThemeMode.LIGHT
+                                        )
+                                    )
+                                },
+                                modifier = Modifier.size(width = 45.dp, height = 34.dp),
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = Color(0xFF0877EA),
+                                    uncheckedTrackColor = Color(0xFFCAD4E2)
+                                )
+                            )
+                        }
+                    }
+                }
+            }
             // HOME_MEMBERSHIP_PROFILE_CARD_V1
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFFF4FAFF)
+                        containerColor = Color(0xFFE0F3FF)
                     ),
                     shape = RoundedCornerShape(18.dp),
                     border = BorderStroke(
@@ -665,15 +715,16 @@ val goToAreas by prefs.goToAreas.collectAsState()
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, CardBorderDefault)
+                    colors = CardDefaults.cardColors(containerColor = premiumCardColor()),
+                    shape = RoundedCornerShape(22.dp),
+                    border = BorderStroke(1.dp, premiumCardBorder()),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
                 ) {
                     Column(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
                     ) {
                         Text(
-                            text = "Today's Performance",
+                            text = "▥  Today's Performance",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextDarkPrimary
@@ -886,13 +937,10 @@ val goToAreas by prefs.goToAreas.collectAsState()
 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(18.dp),
-                    border = BorderStroke(
-                        1.dp, Color(0xFFDCE6F2)
-                    )
+                    colors = CardDefaults.cardColors(containerColor = premiumCardColor()),
+                    shape = RoundedCornerShape(22.dp),
+                    border = BorderStroke(1.dp, premiumCardBorder()),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
                 ) {
                     Column(
                         modifier = Modifier.padding(12.dp),
@@ -913,9 +961,9 @@ val goToAreas by prefs.goToAreas.collectAsState()
 
                             Text(
                                 text = "SmartDrivo Assistant",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF15213A),
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = premiumTitleColor(),
                                 modifier = Modifier.weight(1f)
                             )
 
@@ -1128,8 +1176,8 @@ val goToAreas by prefs.goToAreas.collectAsState()
             // Same Fastest card and saved setting, now placed directly above Global Filter.
             item {
                 Text(
-                    text = "Fastest Mode",
-                    fontSize = 14.sp,
+                    text = "🚀 Fastest Mode",
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = BluePrimary,
                     modifier = Modifier.padding(start = 2.dp, bottom = 4.dp)
