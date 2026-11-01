@@ -48,48 +48,21 @@ class RideHistoryRepository(
             kotlin.math.abs(it.detectedAt - timestamp) <= 3_000L
         }
     }
-    private fun todayDateStr(): String =
-        SimpleDateFormat(
-            "dd/MM/yyyy",
-            Locale.ENGLISH
-        ).apply {
-            timeZone = TimeZone.getTimeZone("Asia/Kolkata")
-        }.format(Date())
-
-    suspend fun purgePreviousDaysSafe() =
+    /** Physically purge expired rows on an IO dispatcher. */
+    suspend fun purgeExpiredHistory(now: Long = System.currentTimeMillis()): Int =
         withContext(ioDispatcher) {
-            dao.deleteOtherDates(todayDateStr())
-        }
-
-    suspend fun restoreHistoryItems(
-        items: List<OrderHistoryItem>
-    ) = withContext(ioDispatcher) {
-        items.forEach { item ->
-            // Legacy import may never replace a newer real-time Room row.
-            dao.insertIfAbsent(
-                RideHistoryEntity.fromOrderHistoryItem(item)
+            dao.deleteOutsideRetention(
+                OrderHistoryRetention.startOfYesterdayMillis(now),
+                OrderHistoryRetention.startOfTomorrowMillis(now)
             )
         }
-    }
-    private fun startOfTodayMillis(): Long {
-        val calendar = java.util.Calendar.getInstance(
-            TimeZone.getTimeZone("Asia/Kolkata")
-        )
 
-        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
-        calendar.set(java.util.Calendar.MINUTE, 0)
-        calendar.set(java.util.Calendar.SECOND, 0)
-        calendar.set(java.util.Calendar.MILLISECOND, 0)
-
-        return calendar.timeInMillis
-    }
-
-    suspend fun purgePreviousDays() {
+    suspend fun restoreHistoryItems(items: List<OrderHistoryItem>) =
         withContext(ioDispatcher) {
-            dao.deleteOtherDates(todayDateStr())
+            val now = System.currentTimeMillis()
+            items.filter { OrderHistoryRetention.isRetained(it.timestamp, now) }
+                .forEach { dao.insertIfAbsent(RideHistoryEntity.fromOrderHistoryItem(it)) }
         }
-    }
-
 
     /**
      * Step 1: THE MOMENT an order candidate is detected:
