@@ -830,6 +830,7 @@ class FirebaseRepository(
 
     // --- Order History Sync ---
     fun recordOrderHistory(item: OrderHistoryItem) {
+        if (!com.example.data.db.OrderHistoryRetention.isRetained(item.timestamp)) return
         prefs.addOrderHistory(item)
         val uid = getCurrentUid()
         scope.launch {
