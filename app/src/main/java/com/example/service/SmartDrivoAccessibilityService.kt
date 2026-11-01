@@ -57,6 +57,7 @@ import java.util.regex.Pattern
 
 class SmartDrivoAccessibilityService : AccessibilityService() {
 
+    @Volatile private var bankingModeSuspended = false
     private lateinit var prefs: PreferencesManager
     private val preferencesManager: PreferencesManager get() = prefs
     private lateinit var repository: FirebaseRepository
@@ -412,13 +413,20 @@ private val processingTimeoutRunnable = Runnable {
         @Volatile private var liveBankingService: SmartDrivoAccessibilityService? = null
 
         /** Calls the official AccessibilityService.disableSelf(), never enables it. */
+        fun resumeFromBankingMode() {
+            val instance = liveBankingService ?: return
+            instance.bankingModeSuspended = false
+            OrderDecisionPopup.resumeAfterBanking()
+        }
+
         fun requestBankingModeDisable(): Boolean {
             val service = liveBankingService ?: return false
             service.handler.post {
                 if (!com.example.util.BankingModeController.isActive(service.applicationContext)) {
                     return@post
                 }
-                // Block pending banners before leaving the accessibility process.
+                // Block callbacks before leaving the accessibility process.
+                service.bankingModeSuspended = true
                 OrderDecisionPopup.pauseForBankingMode()
                 service.pauseAllLiveOrderWork()
                 try {
@@ -577,7 +585,8 @@ private val processingTimeoutRunnable = Runnable {
         super.onServiceConnected()
         liveBankingService = this
         prefs = PreferencesManager.getInstance(applicationContext)
-        if (com.example.util.BankingModeController.isActive(applicationContext)) {
+        bankingModeSuspended = com.example.util.BankingModeController.isActive(applicationContext)
+        if (bankingModeSuspended) {
             // A user can re-enable Accessibility while Banking Mode is active;
             // never read/click ride screens until they explicitly finish banking.
             prefs.setAutoAcceptActive(false)
@@ -663,6 +672,7 @@ private val processingTimeoutRunnable = Runnable {
         serviceScope.launch {
             prefs.appSettings.collectLatest { settings ->
                 if (
+                    !bankingModeSuspended &&
                     settings.isAutoAcceptActive &&
                     apkIntegrityAllowed &&
                     offlineSecurityAllowed
@@ -705,7 +715,7 @@ private val processingTimeoutRunnable = Runnable {
      */
     @Synchronized
     private fun canExecuteClick(): Boolean {
-        if (!preferencesManager.isAutoAcceptEnabled) {
+        if (bankingModeSuspended || !preferencesManager.isAutoAcceptEnabled) {
             Log.d(
                 TAG,
                 "⏸️ Click blocked because Auto Accept master is OFF"
@@ -2407,7 +2417,7 @@ private val processingTimeoutRunnable = Runnable {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null) return
+        if (event == null || bankingModeSuspended) return
 
         // APK_SIGNATURE_TAMPER_LOCK_V1
         // Single volatile Boolean read only. No hashing, PackageManager lookup,
