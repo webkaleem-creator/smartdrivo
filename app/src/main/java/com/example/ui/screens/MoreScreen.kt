@@ -1,6 +1,11 @@
 package com.example.ui.screens
 
 import android.content.Intent
+import android.content.ComponentName
+import android.graphics.drawable.Icon as AndroidIcon
+import android.os.Build
+import android.service.quicksettings.TileService
+import androidx.core.content.ContextCompat
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
@@ -40,6 +45,7 @@ import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.AccountBalance
 import com.example.util.BankingModeController
+import com.example.service.BankingQuickTileService
 import com.example.util.PermissionHelper
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.ReceiptLong
@@ -466,6 +472,50 @@ fun MoreScreen(
                                         Toast.LENGTH_LONG).show()
                                 }
                             } else showBankingDialog = true
+                        }
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                        color = CardBorderDefault
+                    )
+                    MoreCardRow(
+                        icon = Icons.Default.NotificationsActive,
+                        title = "Add Banking Quick Settings tile",
+                        subtitle = "Use notification panel instead of a floating icon",
+                        onClick = {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                try {
+                                    val manager = context.getSystemService(
+                                        android.app.StatusBarManager::class.java
+                                    )
+                                    manager.requestAddTileService(
+                                        ComponentName(context, BankingQuickTileService::class.java),
+                                        "SmartDrivo Banking",
+                                        AndroidIcon.createWithResource(
+                                            context, android.R.drawable.ic_lock_lock
+                                        ),
+                                        ContextCompat.getMainExecutor(context)
+                                    ) { result ->
+                                        val message = when (result) {
+                                            android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED ->
+                                                "Banking tile added. Turn OFF the old Accessibility Shortcut to hide the icon."
+                                            android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED ->
+                                                "Banking tile is already in Quick Settings."
+                                            else ->
+                                                "Open Quick Settings > Edit, then add SmartDrivo Banking."
+                                        }
+                                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                    }
+                                } catch (_: Exception) {
+                                    Toast.makeText(context,
+                                        "Open Quick Settings > Edit and add SmartDrivo Banking.",
+                                        Toast.LENGTH_LONG).show()
+                                }
+                            } else {
+                                Toast.makeText(context,
+                                    "Open Quick Settings > Edit and add SmartDrivo Banking.",
+                                    Toast.LENGTH_LONG).show()
+                            }
                         }
                     )
                     if (bankingModeActive) {
