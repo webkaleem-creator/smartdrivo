@@ -727,7 +727,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
                             text = "▥  Today's Performance",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
-                            color = TextDarkPrimary
+                            color = premiumTitleColor()
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -737,19 +737,24 @@ val goToAreas by prefs.goToAreas.collectAsState()
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1f)
+                                    .background(
+                                        if (premiumIsDark()) Color(0xFF203D65) else Color(0xFFE9F5FF),
+                                        RoundedCornerShape(15.dp)
+                                    )
+                                    .padding(vertical = 8.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
                                     text = todayOrders.size.toString(),
                                     fontSize = 20.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = BluePrimary
+                                    color = if (premiumIsDark()) Color(0xFF65B9FF) else BluePrimary
                                 )
                                 Text(
                                     text = "Total Orders",
                                     fontSize = 11.sp,
-                                    color = TextDarkSecondary,
+                                    color = premiumSubtextColor(),
                                     maxLines = 1
                                 )
                             }
@@ -757,11 +762,16 @@ val goToAreas by prefs.goToAreas.collectAsState()
                             VerticalDivider(
                                 modifier = Modifier.height(38.dp),
                                 thickness = 1.dp,
-                                color = CardBorderDefault
+                                color = premiumCardBorder()
                             )
 
                             Column(
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1f)
+                                    .background(
+                                        if (premiumIsDark()) Color(0xFF203D65) else Color(0xFFE9F5FF),
+                                        RoundedCornerShape(15.dp)
+                                    )
+                                    .padding(vertical = 8.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
@@ -773,7 +783,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                 Text(
                                     text = "Accepted",
                                     fontSize = 11.sp,
-                                    color = TextDarkSecondary,
+                                    color = premiumSubtextColor(),
                                     maxLines = 1
                                 )
                             }
@@ -781,23 +791,28 @@ val goToAreas by prefs.goToAreas.collectAsState()
                             VerticalDivider(
                                 modifier = Modifier.height(38.dp),
                                 thickness = 1.dp,
-                                color = CardBorderDefault
+                                color = premiumCardBorder()
                             )
 
                             Column(
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1f)
+                                    .background(
+                                        if (premiumIsDark()) Color(0xFF203D65) else Color(0xFFE9F5FF),
+                                        RoundedCornerShape(15.dp)
+                                    )
+                                    .padding(vertical = 8.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
                                     text = "₹$earningsAssisted",
                                     fontSize = 20.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = BlueSecondary
+                                    color = if (premiumIsDark()) Color(0xFF65B9FF) else BlueSecondary
                                 )
                                 Text(
                                     text = "Today Earning",
                                     fontSize = 11.sp,
-                                    color = TextDarkSecondary,
+                                    color = premiumSubtextColor(),
                                     maxLines = 1
                                 )
                             }
