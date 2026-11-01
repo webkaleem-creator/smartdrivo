@@ -74,7 +74,18 @@ object AreaRulesEngine {
             ) {
                 DecisionResult.Accept("Mode: Fastest | Pickup ${pickup}km <= ${maximum}km")
             } else {
-                DecisionResult.Reject("Mode: Fastest | Pickup unknown, invalid or exceeds saved max ${maximum}km")
+                // Same reject decision as before; only record the real reason.
+                val reason = when {
+                    pickup == null ->
+                        "Mode: Fastest | Pickup distance unknown (saved max ${maximum}km)"
+                    !pickup.isFinite() || pickup < 0f ->
+                        "Mode: Fastest | Pickup distance invalid (saved max ${maximum}km)"
+                    !maximum.isFinite() || maximum <= 0f ->
+                        "Mode: Fastest | Saved pickup max invalid (${maximum}km)"
+                    else ->
+                        "Mode: Fastest | Pickup ${pickup}km exceeds saved max ${maximum}km"
+                }
+                DecisionResult.Reject(reason)
             }
         }
 

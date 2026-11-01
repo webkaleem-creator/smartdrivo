@@ -38,6 +38,19 @@ class RapidoFastestIsolationV12Test {
         assertTrue(AreaRulesEngine.evaluateRide(ride(0.1f), settings = fastest.copy(maxPickupDistanceKm = 0f)) is DecisionResult.Reject)
     }
 
+    @Test fun fastestRejectReasonsArePreciseWithoutChangingOutcomes() {
+        val over = AreaRulesEngine.evaluateRide(ride(1.2f), settings = fastest)
+        assertTrue(over is DecisionResult.Reject)
+        assertTrue((over as DecisionResult.Reject).reason.contains("Pickup 1.2km exceeds saved max 0.6km"))
+        val missing = AreaRulesEngine.evaluateRide(ride(null), settings = fastest)
+        assertTrue((missing as DecisionResult.Reject).reason.contains("Pickup distance unknown"))
+        val invalid = AreaRulesEngine.evaluateRide(ride(Float.NaN), settings = fastest)
+        assertTrue((invalid as DecisionResult.Reject).reason.contains("Pickup distance invalid"))
+        val badLimit = AreaRulesEngine.evaluateRide(ride(0.3f), settings = fastest.copy(maxPickupDistanceKm = 0f))
+        assertTrue((badLimit as DecisionResult.Reject).reason.contains("Saved pickup max invalid"))
+        assertTrue(AreaRulesEngine.evaluateRide(ride(0.6f), settings = fastest) is DecisionResult.Accept)
+    }
+
     @Test fun bundleOffRemainsManualSafetyGate() {
         assertTrue(AreaRulesEngine.evaluateRide(ride(0.1f, bundled = true), settings = fastest) is DecisionResult.Ignore)
     }
