@@ -165,5 +165,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "SmartDrivo $TAG" \
-            --notes-file "RELEASE_NOTES_v1.0.8.md" \
+            --notes-file "RELEASE_NOTES_v1.0.9.md" \
             --latest

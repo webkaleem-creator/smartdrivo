@@ -64,6 +64,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import com.example.model.VehicleType
+import com.example.model.MembershipDisplay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -1129,10 +1130,7 @@ fun ReadOnlyDriverProfileScreen(
 
                         ReadOnlyProfileRow(
                             "Current Plan",
-                            if (profile.isAdmin) "Admin Access"
-                            else profile.plan.takeIf {
-                                it.isNotBlank() && it != "NONE"
-                            } ?: "No Plan"
+                            MembershipDisplay.of(profile).plan
                         )
                     }
                 }

@@ -97,6 +97,7 @@ import com.example.data.FirebaseRepository
 import com.example.data.PreferencesManager
 import com.example.model.PaymentStatus
 import com.example.model.PaymentSubmission
+import com.example.model.MembershipDisplay
 import com.example.model.UserProfile
 import com.example.model.VehicleType
 import com.example.ui.components.QrCodeView
@@ -1023,14 +1024,9 @@ private fun DriverUserCard(
 
                 // Plan info pill
                 Column(horizontalAlignment = Alignment.End) {
-                    val planDisplayName = when (user.plan.uppercase()) {
-                        "3DAYS" -> "3 Days Pass (₹59)"
-                        "7DAYS" -> "7 Days Pass (₹129)"
-                        "15DAYS" -> "15 Days Pass (₹199)"
-                        "1MONTH", "30DAYS" -> "1 Month Pass (₹329)"
-                        "1YEAR" -> "1 Year Pass (₹2999)"
-                        else -> user.plan
-                    }
+                    val display = MembershipDisplay.of(user)
+                    val planDisplayName = display.plan +
+                        (if (!user.isAdmin && user.planPrice > 0) " (₹" + user.planPrice + ")" else "")
                     Text(
                         text = planDisplayName,
                         fontWeight = FontWeight.Bold,
@@ -1039,8 +1035,9 @@ private fun DriverUserCard(
                     )
                     Text(
                         text = if (user.isAdmin) "No expiration (Admin)"
-                        else if (isExpired) "Plan Expired"
-                        else "$daysRemaining days remaining",
+                            else if (display.status == "Expired") "Plan Expired"
+                            else if (display.active) display.days
+                            else display.status,
                         fontSize = 8.sp,
                         color = if (isExpired && !user.isAdmin) AccentRed else MaterialTheme.colorScheme.onSurfaceVariant
                     )

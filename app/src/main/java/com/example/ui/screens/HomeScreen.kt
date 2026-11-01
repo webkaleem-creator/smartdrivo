@@ -100,6 +100,7 @@ import com.example.data.PreferencesManager
 import com.example.model.FilterMode
 import com.example.model.OrderHistoryItem
 import com.example.model.OrderStatus
+import com.example.model.MembershipDisplay
 import com.example.model.Platform
 import kotlinx.coroutines.delay
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -386,75 +387,19 @@ val goToAreas by prefs.goToAreas.collectAsState()
         }
     }
 
-    // HOME_MEMBERSHIP_PROFILE_CARD_V1
-    // UI-only values for the new Home membership/profile card.
-    val membershipIsActive =
-        userProfile.isAdmin || userProfile.isPlanValid
-
-    val membershipTitle =
-        if (membershipIsActive)
-            "Membership Active"
-        else
-            "Membership Inactive"
-
-    val membershipPlanText =
-        when (userProfile.plan.uppercase(Locale.ROOT)) {
-            "FREE_TRIAL" -> "1-Day Free Trial"
-            "3DAYS" -> "3 Days Plan"
-            "7DAYS" -> "7 Days Plan"
-            "15DAYS" -> "15 Days Plan"
-            "1MONTH", "30DAYS" -> "Monthly Plan"
-            "NONE", "" -> "No Active Plan"
-            else ->
-                userProfile.plan
-                    .replace("_", " ")
-                    .lowercase(Locale.ROOT)
-                    .replaceFirstChar {
-                        if (it.isLowerCase()) it.titlecase(Locale.ROOT)
-                        else it.toString()
-                    }
+    // Display-only: actual Firestore-synced plan and admin role.
+    var membershipNow by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L)
+            membershipNow = System.currentTimeMillis()
         }
-
-    val membershipDaysText =
-        remember(
-            userProfile.planExpireMillis,
-            userProfile.isAdmin,
-            membershipIsActive
-        ) {
-            when {
-                userProfile.isAdmin ->
-                    "Unlimited"
-
-                userProfile.planExpireMillis <= 0L ->
-                    "Not activated"
-
-                userProfile.planExpireMillis > System.currentTimeMillis() -> {
-                    val millisLeft =
-                        userProfile.planExpireMillis -
-                            System.currentTimeMillis()
-
-                    val daysLeft =
-                        kotlin.math.ceil(
-                            millisLeft / 86_400_000.0
-                        ).toInt().coerceAtLeast(1)
-
-                    "$daysLeft ${if (daysLeft == 1) "day" else "days"} left"
-                }
-
-                else -> {
-                    val millisExpired =
-                        System.currentTimeMillis() -
-                            userProfile.planExpireMillis
-
-                    val daysAgo =
-                        kotlin.math.ceil(
-                            millisExpired / 86_400_000.0
-                        ).toInt().coerceAtLeast(1)
-
-                    "Expired $daysAgo ${if (daysAgo == 1) "day" else "days"} ago"
-                }
-            }
-        }
+    }
+    val membership = MembershipDisplay.of(userProfile, membershipNow)
+    val membershipIsActive = membership.active
+    val membershipTitle = if (membershipIsActive) "Membership Active" else "Membership Inactive"
+    val membershipPlanText = membership.plan
+    val membershipDaysText = membership.days
 
     Scaffold(
         // SMARTDRIVO_ALL_PAGES_UP_V3
@@ -671,10 +616,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
 
                                         Text(
                                             text =
-                                                if (membershipIsActive)
-                                                    "Active"
-                                                else
-                                                    "Inactive",
+                                                membership.status,
                                             color =
                                                 if (membershipIsActive)
                                                     StatusActiveGreen
