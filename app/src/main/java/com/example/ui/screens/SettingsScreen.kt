@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -58,6 +60,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import androidx.compose.ui.platform.testTag
 import com.example.ui.theme.LightSurface
 import androidx.compose.ui.text.font.FontWeight
@@ -65,6 +72,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.PreferencesManager
+import com.example.data.OlaDiagnosticStore
 import com.example.ui.theme.BlueContainer
 import com.example.ui.theme.BluePrimary
 import com.example.ui.theme.BlueSecondary
@@ -89,6 +97,7 @@ fun SettingsScreen(
     onBack: () -> Unit
 ) {
     val settings by prefs.appSettings.collectAsState()
+    val diagnosticContext = LocalContext.current
 
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -495,6 +504,33 @@ fun SettingsScreen(
                 }
             }
 
+            item {
+                SectionHeader("4. OLA DIAGNOSTICS")
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = CardBackground),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, CardBorderDefault),
+                    modifier = Modifier.fillMaxWidth().testTag("ola_diagnostics_card")
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Ola Order Debug Report", fontWeight = FontWeight.Bold, color = TextDarkPrimary)
+                        Text("No Developer Options or USB needed. Only event codes; no passenger details or addresses.", fontSize = 12.sp, color = TextDarkSecondary)
+                        Button(onClick = {
+                            val clip = diagnosticContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clip.setPrimaryClip(ClipData.newPlainText("Ola Report", OlaDiagnosticStore.export(diagnosticContext)))
+                        }, modifier = Modifier.fillMaxWidth().testTag("copy_ola_report")) { Text("Copy Ola Report") }
+                        OutlinedButton(onClick = {
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, "SmartDrivo Ola Report")
+                                putExtra(Intent.EXTRA_TEXT, OlaDiagnosticStore.export(diagnosticContext))
+                            }
+                            diagnosticContext.startActivity(Intent.createChooser(intent, "Share Ola Report"))
+                        }, modifier = Modifier.fillMaxWidth().testTag("share_ola_report")) { Text("Share Ola Report") }
+                        TextButton(onClick = { OlaDiagnosticStore.clear(diagnosticContext) }) { Text("Clear Ola Logs") }
+                    }
+                }
+            }
             item {
                 Spacer(modifier = Modifier.height(24.dp))
             }
