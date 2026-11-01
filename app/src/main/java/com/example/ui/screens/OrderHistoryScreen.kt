@@ -67,6 +67,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.db.OrderHistoryRetention
 import com.example.data.PreferencesManager
 import com.example.model.AppSettings
 import com.example.model.OrderHistoryItem
@@ -113,22 +114,23 @@ fun OrderHistoryScreen(
     val historyEntities by viewModel.history.collectAsStateWithLifecycle()
     val userProfile by prefs.userProfile.collectAsStateWithLifecycle()
     val appSettings by prefs.appSettings.collectAsStateWithLifecycle()
-    // INSTANT_HISTORY_V7
-    // PROCESSING is an internal transient state only.
-    // Do not show a yellow card while the final decision is being written.
-    val history = remember(historyEntities) {
-        historyEntities
-            .asSequence()
-            .filter {
-                it.status != OrderStatus.PROCESSING.name
-            }
-            .sortedByDescending {
-                it.detectedAt
-            }
-            .map {
-                it.toOrderHistoryItem()
-            }
-            .toList()
+    var historyClock by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(60_000L)
+            historyClock = System.currentTimeMillis()
+        }
+    }
+    val yesterdayStart = OrderHistoryRetention.startOfYesterdayMillis(historyClock)
+    val todayStart = OrderHistoryRetention.startOfTodayMillis(historyClock)
+    val tomorrowStart = OrderHistoryRetention.startOfTomorrowMillis(historyClock)
+    // Hide expired records while asynchronous physical deletion completes.
+    val history = remember(historyEntities, yesterdayStart, tomorrowStart) {
+        historyEntities.asSequence()
+            .filter { it.status != OrderStatus.PROCESSING.name &&
+                it.detectedAt >= yesterdayStart && it.detectedAt < tomorrowStart }
+            .sortedByDescending { it.detectedAt }
+            .map { it.toOrderHistoryItem() }.toList()
     }
     val totalAccepted by viewModel.acceptedCount.collectAsStateWithLifecycle()
 
@@ -138,18 +140,6 @@ fun OrderHistoryScreen(
     var selectedDateRange by remember { mutableStateOf("Today") } // Today by default; user can switch to Yesterday/All
     val historyListState = rememberLazyListState()
 
-    val todayStr = remember {
-        SimpleDateFormat("dd/MM/yyyy", Locale.ENGLISH).apply {
-            timeZone = TimeZone.getTimeZone("Asia/Kolkata")
-        }.format(Date())
-    }
-    val yesterdayStr = remember {
-        SimpleDateFormat("dd/MM/yyyy", Locale.ENGLISH).apply {
-            timeZone = TimeZone.getTimeZone("Asia/Kolkata")
-        }.format(Date(System.currentTimeMillis() - 86400000L))
-    }
-    val sevenDaysAgo = remember { System.currentTimeMillis() - 7 * 86400000L }
-
     // HISTORY_DATE_FILTER_FINAL_V1
     // First filter by date + platform. Tab counts/stats are based on this
     // same base list, so the numbers always match what the user selected.
@@ -157,9 +147,9 @@ fun OrderHistoryScreen(
         history,
         selectedPlatformFilter,
         selectedDateRange,
-        todayStr,
-        yesterdayStr,
-        sevenDaysAgo
+        yesterdayStart,
+        todayStart,
+        tomorrowStart
     ) {
         derivedStateOf {
             history.filter { item ->
@@ -170,13 +160,10 @@ fun OrderHistoryScreen(
                 val matchDate =
                     when (selectedDateRange) {
                         "Today" ->
-                            item.dateStr == todayStr
+                            item.timestamp >= todayStart && item.timestamp < tomorrowStart
 
                         "Yesterday" ->
-                            item.dateStr == yesterdayStr
-
-                        "Last 7 Days" ->
-                            item.timestamp >= sevenDaysAgo
+                            item.timestamp >= yesterdayStart && item.timestamp < todayStart
 
                         else ->
                             true
