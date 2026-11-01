@@ -2,6 +2,7 @@ package com.example.service
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -286,22 +287,27 @@ object OrderDecisionPopup {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        header.addView(TextView(context).apply {
-            text = platform.uppercase(java.util.Locale.ROOT) +
-                "  •  " + OrderPopupStatusPolicy.statusTitle(status)
+        val titleText = platform.uppercase(java.util.Locale.ROOT) +
+            "  •  " + OrderPopupStatusPolicy.statusTitle(status)
+        val headerTitle = TextView(context).apply {
+            text = titleText
             setTextColor(style.accent)
             textSize = 12.5f
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
-            layoutParams = LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        })
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        header.addView(headerTitle)
         header.addView(TextView(context).apply {
             text = "●"
             setTextColor(style.accent)
             textSize = 12f
             gravity = Gravity.CENTER
+            setPadding(dp(5), 0, 0, 0)
         })
         root.addView(header)
 
@@ -329,22 +335,27 @@ object OrderDecisionPopup {
             gravity = Gravity.CENTER_VERTICAL
             orientation = LinearLayout.HORIZONTAL
         }
+        val fareLabel = if (fare.isFinite() && fare > 0f) "₹" + fare.toInt() else "₹--"
         fareRow.addView(TextView(context).apply {
-            text = if (fare.isFinite() && fare > 0f) "₹" + fare.toInt() else "₹--"
+            text = fareLabel
             setTextColor(0xFF7AF0A3.toInt())
             typeface = Typeface.DEFAULT_BOLD
             textSize = 23f
             maxLines = 1
         })
-        fareRow.addView(TextView(context).apply {
-            text = "  |  " + location
+        val locationText = "  |  " + location
+        val locationLabel = TextView(context).apply {
+            text = locationText
             setTextColor(0xFFE4EAF5.toInt())
             textSize = 12.5f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
-            layoutParams = LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        })
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        fareRow.addView(locationLabel)
         root.addView(fareRow)
 
         val distances = mutableListOf<String>()
@@ -383,12 +394,36 @@ object OrderDecisionPopup {
                     .TYPE_PHONE
             }
 
+        // Measure actual visible labels instead of reserving a 288dp-wide
+        // row with weight(1f). Long reasons get two lines, long areas truncate.
+        val scaledDensity = context.resources.displayMetrics.scaledDensity
+        fun labelWidth(text: String, sp: Float, bold: Boolean = false): Int {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                textSize = sp * scaledDensity
+                if (bold) typeface = Typeface.DEFAULT_BOLD
+            }
+            return kotlin.math.ceil(paint.measureText(text).toDouble()).toInt()
+        }
+        val desiredContentWidth = maxOf(
+            labelWidth(titleText, 12.5f, true) + dp(20), // status dot
+            labelWidth(friendlyReason.take(29), 12f),
+            labelWidth(fareLabel, 23f, true) +
+                labelWidth(locationText.take(21), 12.5f),
+            labelWidth(details.take(39), 11f)
+        )
+        val popupWidth = OrderPopupWidthPolicy.resolveWidthPx(
+            context.resources.displayMetrics.widthPixels,
+            density,
+            desiredContentWidth
+        )
+        val contentWidth = (popupWidth - dp(24)).coerceAtLeast(1)
+        headerTitle.maxWidth = (contentWidth - dp(20)).coerceAtLeast(1)
+        locationLabel.maxWidth = (contentWidth -
+            labelWidth(fareLabel, 23f, true)).coerceAtLeast(1)
+
         val params =
             WindowManager.LayoutParams(
-                minOf(
-                    dp(288),
-                    context.resources.displayMetrics.widthPixels - dp(24)
-                ),
+                popupWidth,
                 WindowManager.LayoutParams
                     .WRAP_CONTENT,
                 type,
