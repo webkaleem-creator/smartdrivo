@@ -59,6 +59,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -276,8 +277,8 @@ fun OrderHistoryScreen(
                     Text(
                         text = "Order History ($allCount)",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
-                        color = TextDarkPrimary
+                        fontSize = 20.sp,
+                        color = Color.White
                     )
                 },
                 navigationIcon = {
@@ -285,7 +286,7 @@ fun OrderHistoryScreen(
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = TextDarkPrimary
+                            tint = Color.White
                         )
                     }
                 },
@@ -304,143 +305,112 @@ fun OrderHistoryScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.White,
-                    titleContentColor = TextDarkPrimary
+                    containerColor = Color(0xFF17264D),
+                    titleContentColor = Color.White
                 )
             )
         },
-        containerColor = LightBackground
+        containerColor = Color(0xFFCAD8EF)
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color(0xFF8BA0C5),
+                            Color(0xFFE7ECF9),
+                            Color(0xFFF3F6FC)
+                        )
+                    )
+                )
         ) {
-            // 1. Four Tabs: Accepted, Ignored, Rejected, All
+            // PREMIUM_HISTORY_TABS_V1 - compact four-way tabs keep every
+            // count and the original filters, while fitting phone widths.
             val tabs = HistoryTab.entries
-
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    .padding(horizontal = 8.dp, vertical = 7.dp)
+                    .background(Color(0xDFFFFFFF), RoundedCornerShape(19.dp))
+                    .padding(5.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 tabs.forEach { tab ->
-
                     val selected = selectedTab == tab
-
                     val count = when (tab) {
                         HistoryTab.ALL -> allCount
                         HistoryTab.ACCEPTED -> acceptedCount
                         HistoryTab.IGNORED -> ignoredCount
                         HistoryTab.REJECTED -> rejectedCount
                     }
-
                     val icon = when (tab) {
                         HistoryTab.ALL -> Icons.Outlined.ListAlt
                         HistoryTab.ACCEPTED -> Icons.Outlined.CheckCircle
                         HistoryTab.IGNORED -> Icons.Outlined.Schedule
                         HistoryTab.REJECTED -> Icons.Outlined.Cancel
                     }
-
                     val accent = when (tab) {
-                        HistoryTab.ALL -> BluePrimary
-                        HistoryTab.ACCEPTED -> StatusActiveGreen
-                        HistoryTab.IGNORED -> Color(0xFFF59E0B)
-                        HistoryTab.REJECTED -> StatusInactiveRed
+                        HistoryTab.ALL -> Color(0xFF075AE0)
+                        HistoryTab.ACCEPTED -> Color(0xFF0B9568)
+                        HistoryTab.IGNORED -> Color(0xFFBA7600)
+                        HistoryTab.REJECTED -> Color(0xFFCE202C)
                     }
-
                     val softBg = when (tab) {
-                        HistoryTab.ALL -> Color(0xFFEAF5FF)
-                        HistoryTab.ACCEPTED -> Color(0xFFECFBF4)
-                        HistoryTab.IGNORED -> Color(0xFFFFF8E7)
-                        HistoryTab.REJECTED -> Color(0xFFFFF0F1)
+                        HistoryTab.ALL -> Color(0xFFE4EDFF)
+                        HistoryTab.ACCEPTED -> Color(0xFFE5F8F1)
+                        HistoryTab.IGNORED -> Color(0xFFFFF3E4)
+                        HistoryTab.REJECTED -> Color(0xFFFFE9EC)
                     }
-
                     Card(
                         modifier = Modifier
                             .weight(1f)
-                            .clickable {
-                                selectedTab = tab
-                            },
-                        shape = RoundedCornerShape(10.dp),
+                            .clickable { selectedTab = tab },
+                        shape = RoundedCornerShape(14.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor =
-                                if (selected) softBg
-                                else Color.White
+                            containerColor = if (selected) softBg else Color(0xFFF7F9FF)
                         ),
                         border = BorderStroke(
-                            width = if (selected) 1.5.dp else 1.dp,
-                            color =
-                                if (selected) accent
-                                else accent.copy(alpha = 0.18f)
+                            if (selected) 1.6.dp else 0.8.dp,
+                            if (selected) accent else accent.copy(alpha = 0.20f)
                         )
                     ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(
-                                    horizontal = 3.dp,
-                                    vertical = 8.dp
-                                ),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                                .padding(horizontal = 1.dp, vertical = 7.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
-
-                            Box(
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .background(
-                                        accent.copy(alpha = 0.12f),
-                                        CircleShape
-                                    ),
-                                contentAlignment = Alignment.Center
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
                             ) {
                                 Icon(
                                     imageVector = icon,
-                                    contentDescription = tab.label,
+                                    contentDescription = null,
                                     tint = accent,
-                                    modifier = Modifier.size(15.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
-                            }
-
-                            Spacer(
-                                modifier = Modifier.height(2.dp)
-                            )
-
-                            Text(
-                                text = tab.label,
-                                fontSize = 10.sp,
-                                fontWeight =
-                                    if (selected)
-                                        FontWeight.Bold
-                                    else
-                                        FontWeight.SemiBold,
-                                color = TextDarkPrimary,
-                                maxLines = 1
-                            )
-
-                            Spacer(
-                                modifier = Modifier.height(2.dp)
-                            )
-
-                            Box(
-                                modifier = Modifier
-                                    .background(
-                                        accent.copy(alpha = 0.12f),
-                                        RoundedCornerShape(8.dp)
-                                    )
-                                    .padding(
-                                        horizontal = 9.dp,
-                                        vertical = 2.dp
-                                    )
-                            ) {
+                                Spacer(Modifier.width(3.dp))
                                 Text(
-                                    text = count.toString(),
-                                    fontSize = 12.sp,
+                                    text = tab.label,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = accent
+                                    color = Color(0xFF15233E),
+                                    maxLines = 1
                                 )
                             }
+                            Text(
+                                text = count.toString(),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = accent,
+                                modifier = Modifier
+                                    .background(accent.copy(alpha = 0.12f), RoundedCornerShape(9.dp))
+                                    .padding(horizontal = 9.dp, vertical = 3.dp)
+                            )
                         }
                     }
                 }
@@ -1221,6 +1191,13 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                                     lineHeight = 15.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = TextDarkPrimary
+                                )
+                                Spacer(modifier = Modifier.height(5.dp))
+                                Text(
+                                    text = "Tap this Accepted card to view the premium details popup",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF5220C9)
                                 )
                             }
                         }
