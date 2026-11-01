@@ -67,7 +67,7 @@ object BankingModeController {
     fun finishAndOpenSettings(context: Context, prefs: PreferencesManager): Boolean {
         val storage = context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
         if (!storage.getBoolean(KEY_ACTIVE, false)) {
-            PermissionHelper.openAccessibilitySettings(context)
+            PermissionHelper.openSmartDrivoAccessibilitySettings(context)
             return true
         }
         val previouslyOn = previousMasterWasActive(context)
@@ -90,7 +90,7 @@ object BankingModeController {
             }
         }
         if (!hasAccessibility) {
-            PermissionHelper.openAccessibilitySettings(context)
+            PermissionHelper.openSmartDrivoAccessibilitySettings(context)
         } else if (!hasOverlay) {
             PermissionHelper.openOverlaySettings(context)
         }
