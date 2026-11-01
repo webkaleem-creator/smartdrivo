@@ -61,6 +61,26 @@
                 android:value="Overlay popup showing accepted ride details for drivers" />
         </service>
 
+        <!-- Optional Quick Settings tile. Users add this in Android's notification shade.
+             It does not use or display an Accessibility floating button. -->
+        <service
+            android:name=".service.BankingQuickTileService"
+            android:label="SmartDrivo Banking"
+            android:icon="@drawable/smartdrivo_brand_logo"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- A user-confirmed Banking Mode prompt, not a background activity. -->
+        <activity
+            android:name=".ui.screens.BankingQuickTileActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.MyApplication" />
+
         <!-- Boot Receiver for Autostart feature on device boot -->
         <receiver
             android:name=".receiver.BootReceiver"
