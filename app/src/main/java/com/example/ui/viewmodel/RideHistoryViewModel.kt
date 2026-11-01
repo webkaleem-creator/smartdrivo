@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.PreferencesManager
+import com.example.data.db.OrderHistoryRetention
 import com.example.data.db.RideHistoryRepository
 import com.example.data.db.entity.RideHistoryEntity
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,15 +25,15 @@ class RideHistoryViewModel(
     // RECOVER_TODAY_HISTORY_V1
     init {
         viewModelScope.launch {
-            // HISTORY_PERSIST_ALL_DAYS_V2
-            // History supports Today / Yesterday / Last 7 Days.
-            // Opening History must never delete previous-day rows.
-            // Live Room is authoritative. Restore old JSON only for a new DB;
-            // never replay stale copies on every History screen opening.
+            val prefs = PreferencesManager.getInstance(getApplication<Application>())
+            var lastCutoff = OrderHistoryRetention.startOfYesterdayMillis()
+            repository.purgeExpiredHistory()
+            prefs.purgeExpiredLegacyHistory()
+            // Restore only retained legacy JSON into an empty Room database.
             if (repository.getAllHistoryDirect().isEmpty()) {
-                val legacyHistory = PreferencesManager(
-                    getApplication<Application>()
-                ).orderHistory.value
+                val legacyHistory = prefs.orderHistory.value.filter {
+                    OrderHistoryRetention.isRetained(it.timestamp)
+                }
                 if (legacyHistory.isNotEmpty()) {
                     repository.restoreHistoryItems(legacyHistory)
                 }
@@ -49,7 +50,13 @@ class RideHistoryViewModel(
             // This is only a fallback for interrupted/abnormal cases.
             while (true) {
                 delay(2_000L)
-
+                val now = System.currentTimeMillis()
+                val cutoff = OrderHistoryRetention.startOfYesterdayMillis(now)
+                if (cutoff != lastCutoff) {
+                    repository.purgeExpiredHistory(now)
+                    prefs.purgeExpiredLegacyHistory(now)
+                    lastCutoff = cutoff
+                }
                 repository.finalizeAllStaleProcessing(
                     timeoutMs = 30_000L
                 )
