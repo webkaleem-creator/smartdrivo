@@ -39,6 +39,17 @@ object OrderDecisionPopup {
     private var activeView: View? = null
     private var activeWindowManager: WindowManager? = null
     private var dismissRunnable: Runnable? = null
+    @Volatile private var bankingPaused = false
+
+    fun pauseForBankingMode() {
+        bankingPaused = true
+        latestOrderKey = ""
+        mainHandler.post { removeActive() }
+    }
+
+    fun resumeAfterBanking() {
+        bankingPaused = false
+    }
     // Accessed on the UI thread only. Preserve confirmed status over queued uncertainty.
     private val shownStates = mutableMapOf<String, Pair<OrderStatus, Long>>()
 
@@ -47,6 +58,7 @@ object OrderDecisionPopup {
     private var latestOrderKey: String = ""
 
     fun onNewOrderDetected(recordKey: String) {
+        if (bankingPaused) return
         val key = recordKey.trim()
         if (key.isBlank() || key == latestOrderKey) return
 
@@ -139,7 +151,7 @@ object OrderDecisionPopup {
         destination: String = "",
         tipAmount: Float? = null
     ) {
-        if (status == OrderStatus.PROCESSING) {
+        if (bankingPaused || status == OrderStatus.PROCESSING) {
             return
         }
 
@@ -177,6 +189,7 @@ object OrderDecisionPopup {
             context.applicationContext
 
         mainHandler.post {
+            if (bankingPaused) return@post
             if (
                 key.isNotBlank() &&
                 latestOrderKey.isNotBlank() &&
@@ -220,6 +233,7 @@ object OrderDecisionPopup {
         destination: String,
         tipAmount: Float?
     ) {
+        if (bankingPaused) return
         if (
             Build.VERSION.SDK_INT >=
                 Build.VERSION_CODES.M &&
