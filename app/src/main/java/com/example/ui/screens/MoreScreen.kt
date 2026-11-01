@@ -38,6 +38,9 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.HeadsetMic
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.AccountBalance
+import com.example.util.BankingModeController
+import com.example.util.PermissionHelper
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.School
@@ -104,8 +107,10 @@ fun MoreScreen(
     val userProfile by prefs.userProfile.collectAsState()
     val settings by prefs.appSettings.collectAsState()
     var showTutorialDialog by remember { mutableStateOf(false) }
+    var showBankingDialog by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
+    var bankingModeActive by remember { mutableStateOf(BankingModeController.isActive(context)) }
     val links by prefs.communityLinks.collectAsState()
 
     fun openSupportLink(url: String) {
@@ -430,6 +435,51 @@ fun MoreScreen(
                 }
             }
 
+            // BANKING_MODE_SAFE_V1
+            item {
+                SectionHeader("BANKING & PRIVACY")
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (bankingModeActive) Color(0xFFFFF7E8)
+                        else CardBackground
+                    ),
+                    border = BorderStroke(1.dp,
+                        if (bankingModeActive) Color(0xFFE6AF4F) else CardBorderDefault)
+                ) {
+                    MoreCardRow(
+                        icon = Icons.Default.AccountBalance,
+                        title = if (bankingModeActive) "Banking Mode is ON"
+                            else "Banking Mode",
+                        subtitle = if (bankingModeActive)
+                            "Orders paused. Finish banking to restore SmartDrivo."
+                        else "Safely turn OFF Accessibility for banking or UPI",
+                        onClick = {
+                            if (bankingModeActive) {
+                                val done = BankingModeController.finishAndOpenSettings(context, prefs)
+                                if (done) {
+                                    bankingModeActive = false
+                                } else {
+                                    Toast.makeText(context,
+                                        "Unable to save Banking Mode state",
+                                        Toast.LENGTH_LONG).show()
+                                }
+                            } else showBankingDialog = true
+                        }
+                    )
+                    if (bankingModeActive) {
+                        Text(
+                            "After tapping, enable SmartDrivo manually in Android Accessibility Settings. " +
+                                "You may need to return to SmartDrivo to resume orders.",
+                            modifier = Modifier.padding(start = 15.dp, end = 15.dp, bottom = 12.dp),
+                            fontSize = 12.sp,
+                            color = TextDarkSecondary
+                        )
+                    }
+                }
+            }
+
             // 3. NOTIFICATIONS
             item {
                 SectionHeader("NOTIFICATIONS")
@@ -616,6 +666,54 @@ fun MoreScreen(
             }
         }
     }
+    if (showBankingDialog) {
+        AlertDialog(
+            onDismissRequest = { showBankingDialog = false },
+            title = {
+                Text("Turn ON Banking Mode?",
+                    fontWeight = FontWeight.Bold, color = TextDarkPrimary)
+            },
+            text = {
+                Text(
+                    "SmartDrivo will stop monitoring and clicking ride orders, hide its " +
+                        "floating popups and request Android to disable its Accessibility Service. " +
+                        "After banking, you must manually re-enable Accessibility in Settings. " +
+                        "Your saved filters, History and membership will remain.",
+                    color = TextDarkSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showBankingDialog = false
+                    val result = BankingModeController.enter(context, prefs)
+                    if (result.saved) {
+                        bankingModeActive = true
+                        Toast.makeText(context,
+                            if (result.requestedServiceDisable)
+                                "Banking Mode started. Check Accessibility is OFF before paying."
+                            else
+                                "Orders paused. Confirm Accessibility is OFF in Settings.",
+                            Toast.LENGTH_LONG).show()
+                        if (!result.requestedServiceDisable &&
+                            PermissionHelper.isAccessibilityPermissionGranted(context)) {
+                            PermissionHelper.openAccessibilitySettings(context)
+                        }
+                    } else {
+                        Toast.makeText(context,
+                            "Banking Mode could not save state", Toast.LENGTH_LONG).show()
+                    }
+                }) {
+                    Text("Turn ON Banking Mode")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBankingDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     // Complete SmartDrivo Driver Guide
     if (showTutorialDialog) {
 
