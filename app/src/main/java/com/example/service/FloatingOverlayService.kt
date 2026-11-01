@@ -261,7 +261,7 @@ class FloatingOverlayService : Service() {
         }
 
         val displayWidth = resources.displayMetrics.widthPixels
-        val cardWidth = (displayWidth * 0.91f).toInt()
+        val cardWidth = (displayWidth * 0.89f).toInt()
             .coerceAtLeast(dpToPx(280))
             .coerceAtMost(displayWidth - dpToPx(20))
 
@@ -321,7 +321,7 @@ class FloatingOverlayService : Service() {
             gravity = Gravity.CENTER_VERTICAL
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
-            layoutParams = LinearLayout.LayoutParams(0, dpToPx(46), 1f)
+            layoutParams = LinearLayout.LayoutParams(0, dpToPx(40), 1f)
         }
         headerView.addView(platformBadge)
 
@@ -367,7 +367,7 @@ class FloatingOverlayService : Service() {
         val fareRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dpToPx(9), dpToPx(9), dpToPx(9), dpToPx(5))
+            setPadding(dpToPx(7), dpToPx(6), dpToPx(7), dpToPx(3))
         }
 
         fun fareCell(
@@ -386,12 +386,12 @@ class FloatingOverlayService : Service() {
             ellipsize = TextUtils.TruncateAt.END
             background = rounded(bg, 12f)
             setPadding(dpToPx(2), 0, dpToPx(2), 0)
-            layoutParams = LinearLayout.LayoutParams(0, dpToPx(49), weight).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dpToPx(42), weight).apply {
                 marginStart = dpToPx(2)
                 marginEnd = dpToPx(2)
             }
         }
-        fareRow.addView(fareCell(fareText, 1.12f, 0xFFFFE5AC.toInt(), Color.BLACK, 25f))
+        fareRow.addView(fareCell(fareText, 1.12f, 0xFFFFE5AC.toInt(), Color.BLACK, 23f))
         fareRow.addView(fareCell(baseText, 1.0f, 0xFFF8F8FF.toInt(), 0xFF111827.toInt(), 12f))
         fareRow.addView(fareCell(tipText, 1.0f, 0xFFD6FBE4.toInt(), 0xFF008421.toInt(), 12.5f))
         card.addView(fareRow)
@@ -415,7 +415,7 @@ class FloatingOverlayService : Service() {
                 gravity = Gravity.CENTER
                 maxLines = 2
                 background = rounded(0xFFF0F2FC.toInt(), 14f)
-                setPadding(dpToPx(2), dpToPx(7), dpToPx(2), dpToPx(7))
+                setPadding(dpToPx(2), dpToPx(4), dpToPx(2), dpToPx(4))
                 layoutParams = LinearLayout.LayoutParams(0,
                     LinearLayout.LayoutParams.WRAP_CONTENT, 1.08f)
             }
@@ -448,7 +448,7 @@ class FloatingOverlayService : Service() {
             ).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
                 topMargin = dpToPx(2)
-                bottomMargin = dpToPx(9)
+                bottomMargin = dpToPx(5)
             }
         })
 
@@ -471,7 +471,7 @@ class FloatingOverlayService : Service() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = rounded(0xFFEBE1FF.toInt(), 16f)
-            setPadding(dpToPx(9), dpToPx(9), dpToPx(9), dpToPx(9))
+            setPadding(dpToPx(7), dpToPx(6), dpToPx(7), dpToPx(6))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -501,9 +501,9 @@ class FloatingOverlayService : Service() {
             })
             addView(TextView(this@FloatingOverlayService).apply {
                 text = finalDrop
-                textSize = 12.5f
+                textSize = 12f
                 setTextColor(0xFF111827.toInt())
-                maxLines = 5
+                maxLines = 6
                 ellipsize = TextUtils.TruncateAt.END
             })
         })

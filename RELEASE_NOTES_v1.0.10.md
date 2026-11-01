@@ -1,11 +1,15 @@
-# SmartDrivo v1.0.10 — Premium History UI
+# SmartDrivo v1.0.10 — Premium UI test candidate
 
-- Dark navy History title bar and soft blue-to-white screen gradient.
-- Compact four-tab history selector with original All, Accepted, Ignored and Rejected counts preserved.
-- Clearly labeled interaction: tap an Accepted order card for the premium Accepted details popup.
-- Existing history retention, date/platform filters, counts, fare data, order processing and accessibility acceptance code unchanged.
-- Existing countdown/minimize floating accepted popup unchanged.
+- Home: SmartDrivo branded header and Dark Mode toggle, membership, performance, Assistant and Fastest Mode
+- Filters: navy header, premium background, original rule controls unchanged
+- Areas: navy header/background, original Go-To No-Go Fix Area controls unchanged
+- History: navy header, four compact tabs, premium background, Accepted detail popup
+- More: navy header and premium background, original navigation unchanged
+- Shared bottom navigation: rounded premium card, membership lock behavior preserved
+- Theme: Material3 Light Dark and System colors now select correctly
+- Accepted dialog: shorter, responsive, capped at 70% display height, scroll-safe address and center acceptance time
+- Floating accepted popup: compact spacing, full address, countdown/drag/minimize unchanged
 
-The overlay details popup was introduced in v1.0.9. This release makes the History list visually distinct and its details popup discoverable.
+Source scope: MainActivity, screens, theme and FloatingOverlayService only. Rapido/Uber/Ola engines, filter evaluation, Room DB, acceptance logic and saved data remain untouched.
 
-Verification: GitHub Actions unit tests, signed release APK, SHA-256 signing-certificate match and manifest package/version checks are required before publication.
+CI build/test/signature validation is required. Device visual verification remains outstanding.
