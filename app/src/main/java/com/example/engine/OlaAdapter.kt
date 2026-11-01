@@ -1017,34 +1017,11 @@ object OlaAdapter {
         Pattern.CASE_INSENSITIVE
     )
 
-    fun isAcceptText(text: String?): Boolean {
-        if (text.isNullOrBlank()) return false
-        val lower = text.trim().lowercase()
-        if (lower.contains("don't accept") || lower.contains("do not accept") || lower.contains("cannot accept")) return false
-        if (lower.contains("reject") || lower.contains("decline") || lower.contains("cancel") || lower.contains("skip")) return false
+    fun isAcceptText(text: String?): Boolean =
+        OlaOfferSafety.isAcceptLabel(text)
 
-        if (lower.contains("accept") || lower.contains("slide to") || lower.contains("swipe to") || lower.contains("tap to accept")) {
-            return true
-        }
-        if (ACCEPT_TEXTS.any { lower.contains(it.lowercase()) }) return true
-        if (text.contains("स्वीकार") || text.contains("ಸ್ವೀಕರಿಸಿ") || text.contains("ஏற்க") || text.contains("అంగీకరించు") || text.contains("स्वीकारा") || text.contains("গ্রহণ")) return true
-        if (ACCEPT_REGEX.matcher(text.trim()).find()) return true
-        return false
-    }
-
-    fun isAcceptDesc(desc: String?): Boolean {
-        if (desc.isNullOrBlank()) return false
-        val lower = desc.trim().lowercase()
-        if (lower.contains("don't accept") || lower.contains("do not accept") || lower.contains("cannot accept")) return false
-        if (lower.contains("reject") || lower.contains("decline") || lower.contains("cancel") || lower.contains("skip")) return false
-
-        if (lower.contains("accept") || lower.contains("slide to") || lower.contains("swipe to") || lower.contains("tap to accept")) {
-            return true
-        }
-        if (ACCEPT_CONTENT_DESCRIPTIONS.any { lower.contains(it.lowercase()) }) return true
-        if (desc.contains("स्वीकार") || desc.contains("ಸ್ವೀಕರಿಸಿ") || desc.contains("ஏற்க") || desc.contains("అంగీకరించు") || desc.contains("स्वीकारा")) return true
-        return false
-    }
+    fun isAcceptDesc(desc: String?): Boolean =
+        OlaOfferSafety.isAcceptLabel(desc)
 
     fun isSlideOrSwipe(node: AccessibilityNodeInfo): Boolean {
         val txt = node.text?.toString().orEmpty()
@@ -1079,10 +1056,16 @@ object OlaAdapter {
         )) {
             val list = root.findAccessibilityNodeInfosByText(q)
             if (!list.isNullOrEmpty()) {
-                val target = resolveClickableTarget(list[0])
-                for (i in 1 until list.size) list[i].recycle()
-                Log.i(TAG, "✓ Ola Accept detected via text query '$q'")
-                return target
+                val matched = list.firstOrNull { node ->
+                    node.isVisibleToUser && node.isEnabled &&
+                        (isAcceptText(node.text?.toString()) ||
+                            isAcceptDesc(node.contentDescription?.toString()))
+                }
+                if (matched != null) {
+                    val target = resolveClickableTarget(matched)
+                    Log.i(TAG, "✓ Ola Accept detected via text query '$q'")
+                    return target
+                }
             }
         }
 
