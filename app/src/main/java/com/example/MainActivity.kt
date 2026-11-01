@@ -13,6 +13,7 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.History
@@ -30,6 +32,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -686,9 +689,16 @@ fun SmartDrivoApp(
                         color = if (isDarkNavyScreen) Color(0xFF1E324F) else CardBorderDefault,
                         thickness = 1.dp
                     )
+                    Surface(
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(30.dp),
+                        shadowElevation = 7.dp,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        color = MaterialTheme.colorScheme.surface
+                    ) {
                     NavigationBar(
-                        containerColor = if (isDarkNavyScreen) Color(0xFF0A1628) else Color.White,
-                        contentColor = if (isDarkNavyScreen) Color.White else TextDarkPrimary,
+                        containerColor = if (isDarkNavyScreen) Color(0xFF0A1628) else MaterialTheme.colorScheme.surface,
+                        contentColor = if (isDarkNavyScreen) Color.White else MaterialTheme.colorScheme.onSurface,
                         tonalElevation = 0.dp
                     ) {
                         bottomNavItems.forEach { item ->
@@ -723,7 +733,7 @@ fun SmartDrivoApp(
                                         text = item.label,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                         fontSize = 12.sp,
-                                        color = if (isSelected) BluePrimary else if (isDarkNavyScreen) Color(0xFF94A3B8) else TextDarkTertiary
+                                        color = if (isSelected) BluePrimary else if (isDarkNavyScreen) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 },
                                 selected = isSelected,
@@ -760,17 +770,18 @@ fun SmartDrivoApp(
                                 colors = NavigationBarItemDefaults.colors(
                                     selectedIconColor = BluePrimary,
                                     selectedTextColor = BluePrimary,
-                                    indicatorColor = if (isDarkNavyScreen) Color(0xFF132238) else BlueContainer,
-                                    unselectedIconColor = if (isDarkNavyScreen) Color(0xFF94A3B8) else TextDarkTertiary,
-                                    unselectedTextColor = if (isDarkNavyScreen) Color(0xFF94A3B8) else TextDarkTertiary
+                                    indicatorColor = if (isDarkNavyScreen) Color(0xFF132238) else MaterialTheme.colorScheme.primaryContainer,
+                                    unselectedIconColor = if (isDarkNavyScreen) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    unselectedTextColor = if (isDarkNavyScreen) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             )
                         }
                     }
+                    }
                 }
             }
         },
-        containerColor = if (isDarkNavyScreen) Color(0xFF0A1628) else Color.White
+        containerColor = if (isDarkNavyScreen) Color(0xFF0A1628) else MaterialTheme.colorScheme.background
     ) { innerPadding ->
         Box(
             modifier = Modifier
