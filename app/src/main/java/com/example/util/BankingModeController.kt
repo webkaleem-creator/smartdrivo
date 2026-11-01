@@ -75,12 +75,25 @@ object BankingModeController {
 
         cancelReminder(context)
         SmartDrivoAccessibilityService.resumeFromBankingMode()
+        val hasAccessibility = PermissionHelper.isAccessibilityPermissionGranted(context)
+        val hasOverlay = PermissionHelper.isOverlayPermissionGranted(context)
         if (previouslyOn) {
-            // MainActivity only resumes the master after the user manually
-            // restores Accessibility AND overlay permissions.
-            prefs.isPendingAutoAcceptActivation = true
+            if (hasAccessibility && hasOverlay) {
+                // The user has ALREADY re-enabled Accessibility in Settings.
+                // Restoring the app's master switch is not an OS permission grant.
+                prefs.isPendingAutoAcceptActivation = false
+                prefs.setAutoAcceptActive(true)
+            } else {
+                // MainActivity will restore the previous master switch only
+                // after the user manually enables the missing permission.
+                prefs.isPendingAutoAcceptActivation = true
+            }
         }
-        PermissionHelper.openAccessibilitySettings(context)
+        if (!hasAccessibility) {
+            PermissionHelper.openAccessibilitySettings(context)
+        } else if (!hasOverlay) {
+            PermissionHelper.openOverlaySettings(context)
+        }
         return true
     }
 
