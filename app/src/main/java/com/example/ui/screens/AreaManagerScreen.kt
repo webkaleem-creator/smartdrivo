@@ -230,12 +230,13 @@ fun AreaManagerScreen(
                         Text(
                             "Area Preferences",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
+                            fontSize = 20.sp,
+                            color = Color.White
                         )
                         Text(
                             "Preferred destinations and blocked areas",
-                            fontSize = 10.sp,
-                            color = Color(0xFF64748B)
+                            fontSize = 11.sp,
+                            color = Color(0xFFBBD6FF)
                         )
                     }
                 },
@@ -243,12 +244,13 @@ fun AreaManagerScreen(
                     IconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
+                            contentDescription = "Back",
+                            tint = Color.White
                         )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.White
+                    containerColor = Color(0xFF17264D)
                 )
             )
         },
@@ -267,12 +269,13 @@ fun AreaManagerScreen(
                 }
             }
         },
-        containerColor = Color(0xFFF8FAFC)
+        containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background
     ) { inner ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(inner)
+                .background(com.example.ui.theme.premiumPageBrush())
                 .padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {

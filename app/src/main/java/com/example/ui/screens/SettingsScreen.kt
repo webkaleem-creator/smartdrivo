@@ -59,6 +59,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import com.example.ui.theme.premiumPageBrush
 import com.example.ui.theme.LightSurface
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -212,12 +213,12 @@ fun SettingsScreen(
                             text = "Smart Filter",
                             fontWeight = FontWeight.Bold,
                             fontSize = 20.sp,
-                            color = TextDarkPrimary
+                            color = Color.White
                         )
                         Text(
                             text = "Configure order and bundle filters",
-                            fontSize = 14.sp,
-                            color = TextDarkSecondary
+                            fontSize = 12.sp,
+                            color = Color(0xFFBBD6FF)
                         )
                     }
                 },
@@ -226,23 +227,24 @@ fun SettingsScreen(
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = TextDarkPrimary
+                            tint = Color.White
                         )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.White,
-                    titleContentColor = TextDarkPrimary
+                    containerColor = Color(0xFF17264D),
+                    titleContentColor = Color.White
                 )
             )
         },
-        containerColor = LightBackground
+        containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp),
+                .background(premiumPageBrush())
+                .padding(horizontal = 14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item { Spacer(modifier = Modifier.height(2.dp)) }

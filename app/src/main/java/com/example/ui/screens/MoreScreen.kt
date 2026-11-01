@@ -82,6 +82,7 @@ import com.example.ui.theme.BlueContainer
 import com.example.ui.theme.BluePrimary
 import com.example.ui.theme.CardBackground
 import com.example.ui.theme.CardBorderDefault
+import com.example.ui.theme.premiumPageBrush
 import com.example.ui.theme.LightBackground
 import com.example.ui.theme.StatusActiveGreen
 import com.example.ui.theme.StatusActiveGreenBg
@@ -166,12 +167,12 @@ fun MoreScreen(
                                 text = "More Options",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 20.sp,
-                                color = TextDarkPrimary
+                                color = Color.White
                             )
                             Text(
                                 text = "Account, membership & settings",
-                                fontSize = 14.sp,
-                                color = TextDarkSecondary
+                                fontSize = 12.sp,
+                                color = Color(0xFFBBD6FF)
                             )
                         }
                     }
@@ -181,23 +182,24 @@ fun MoreScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = TextDarkPrimary
+                            tint = Color.White
                         )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.White,
-                    titleContentColor = TextDarkPrimary
+                    containerColor = Color(0xFF17264D),
+                    titleContentColor = Color.White
                 )
             )
         },
-        containerColor = LightBackground
+        containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp),
+                .background(premiumPageBrush())
+                .padding(horizontal = 14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item { Spacer(modifier = Modifier.height(2.dp)) }
