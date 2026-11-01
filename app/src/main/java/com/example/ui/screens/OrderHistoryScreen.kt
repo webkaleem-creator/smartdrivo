@@ -1684,6 +1684,7 @@ private fun formatRejectedReason(
             rawReason
         )
 
+    FastestHistoryReason.clarify(raw, item.pickupDistKm)?.let { return it }
     formatGenericFilterFailureV7(raw)
         ?.let {
             return it
@@ -1760,6 +1761,7 @@ private fun formatIgnoredFilters(
             rawReason
         )
 
+    FastestHistoryReason.clarify(normalizedReason, item.pickupDistKm)?.let { return it }
     formatGenericFilterFailureV7(
         normalizedReason
     )?.let {
