@@ -203,8 +203,13 @@ class PreferencesManager(private val context: Context) {
         // Keep _sharedOrderHistory reactively synced with Room database
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             try {
-                com.example.data.db.RideHistoryRepository.getInstance(context).allHistory.collect { entities ->
+                val repo = com.example.data.db.RideHistoryRepository.getInstance(context)
+                repo.purgeExpiredHistory()
+                purgeExpiredLegacyHistory()
+                repo.allHistory.collect { entities ->
+                    val now = System.currentTimeMillis()
                     val items = entities.map { it.toOrderHistoryItem() }
+                        .filter { com.example.data.db.OrderHistoryRetention.isRetained(it.timestamp, now) }
                     _sharedOrderHistory.value = items
                     val accepted = items.count { it.status == OrderStatus.ACCEPTED }
                     val stored = prefs.getInt(KEY_TOTAL_ACCEPTED, 0)
@@ -1415,7 +1420,26 @@ class PreferencesManager(private val context: Context) {
     }
 
     // --- Order History ---
+    fun purgeExpiredLegacyHistory(now: Long = System.currentTimeMillis()) {
+        val retained = loadOrderHistory()
+        val raw = prefs.getString(KEY_ORDER_HISTORY, null)
+        val previousCount = try { if (raw == null) 0 else JSONArray(raw).length() }
+            catch (_: Exception) { -1 }
+        if (previousCount != retained.size) saveOrderHistory(retained)
+        val lastTime = prefs.getLong(KEY_LAST_ACCEPTED_TIMESTAMP, 0L)
+        val lastJson = prefs.getString(KEY_LAST_ACCEPTED, null)
+        val lastJsonTime = try { if (lastJson == null) 0L else JSONObject(lastJson).optLong("timestamp") }
+            catch (_: Exception) { 0L }
+        if ((lastTime > 0L && !com.example.data.db.OrderHistoryRetention.isRetained(lastTime, now)) ||
+            (lastJson != null && !com.example.data.db.OrderHistoryRetention.isRetained(lastJsonTime, now))) {
+            prefs.edit().remove(KEY_LAST_ACCEPTED).remove(KEY_LAST_ACCEPTED_PLATFORM)
+                .remove(KEY_LAST_ACCEPTED_TIMESTAMP).remove(KEY_LAST_ACCEPTED_FARE).apply()
+            _lastAcceptedRide.value = null
+        }
+    }
+
     fun addOrderHistory(item: OrderHistoryItem) {
+        if (!com.example.data.db.OrderHistoryRetention.isRetained(item.timestamp)) return
         val current = loadOrderHistory().toMutableList()
         val existingIndex = current.indexOfFirst {
             it.id == item.id || (item.bookingId.isNotBlank() && it.bookingId == item.bookingId)
@@ -1539,7 +1563,8 @@ class PreferencesManager(private val context: Context) {
         } catch (e: Exception) {
             e.printStackTrace()
         }
-        return list
+        val now = System.currentTimeMillis()
+        return list.filter { com.example.data.db.OrderHistoryRetention.isRetained(it.timestamp, now) }
     }
 
     private fun saveLastAccepted(item: OrderHistoryItem) {
@@ -1588,7 +1613,7 @@ class PreferencesManager(private val context: Context) {
                 baseFare = obj.optDouble("baseFare", 0.0).toFloat(),
                 tipAmount = obj.optDouble("tipAmount", 0.0).toFloat(),
                 timesClicked = obj.optInt("timesClicked", 1)
-            )
+            ).takeIf { com.example.data.db.OrderHistoryRetention.isRetained(it.timestamp) }
         } catch (e: Exception) { null }
     }
 
