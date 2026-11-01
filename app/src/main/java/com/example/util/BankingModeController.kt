@@ -66,6 +66,7 @@ object BankingModeController {
                 .commit()) return false
 
         cancelReminder(context)
+        SmartDrivoAccessibilityService.resumeFromBankingMode()
         if (previouslyOn) {
             // MainActivity only resumes the master after the user manually
             // restores Accessibility AND overlay permissions.
