@@ -63,6 +63,7 @@ import com.example.data.FirebaseRepository
 import com.example.data.PreferencesManager
 import com.google.firebase.FirebaseApp
 import com.example.util.PermissionHelper
+import com.example.util.BankingModeController
 import com.example.model.MembershipPlan
 import com.example.model.PaymentSubmission
 import com.example.ui.screens.AdminPanelScreen
@@ -197,7 +198,9 @@ class MainActivity : ComponentActivity() {
 
     private fun checkAndApplyAutoAcceptOnResume() {
         try {
-            if (::preferencesManager.isInitialized && preferencesManager.isPendingAutoAcceptActivation) {
+            if (::preferencesManager.isInitialized &&
+                !BankingModeController.isActive(applicationContext) &&
+                preferencesManager.isPendingAutoAcceptActivation) {
                 val hasAccessibility = PermissionHelper.isAccessibilityPermissionGranted(applicationContext)
                 val hasOverlay = PermissionHelper.isOverlayPermissionGranted(applicationContext)
 
