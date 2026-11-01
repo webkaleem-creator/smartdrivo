@@ -408,6 +408,28 @@ private val processingTimeoutRunnable = Runnable {
 
     companion object {
         private const val TAG = "SmartDrivoService"
+
+        @Volatile private var liveBankingService: SmartDrivoAccessibilityService? = null
+
+        /** Calls the official AccessibilityService.disableSelf(), never enables it. */
+        fun requestBankingModeDisable(): Boolean {
+            val service = liveBankingService ?: return false
+            service.handler.post {
+                if (!com.example.util.BankingModeController.isActive(service.applicationContext)) {
+                    return@post
+                }
+                // Block pending banners before leaving the accessibility process.
+                OrderDecisionPopup.pauseForBankingMode()
+                service.pauseAllLiveOrderWork()
+                try {
+                    service.disableSelf()
+                    Log.i(TAG, "Banking Mode requested Accessibility disableSelf()")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Banking Mode disableSelf failed; open Android Settings", e)
+                }
+            }
+            return true
+        }
         const val ACCEPT_CLICK_SPEED_MS = 20L
 
         val ALLOWED_PACKAGES = setOf(
@@ -553,7 +575,16 @@ private val processingTimeoutRunnable = Runnable {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        liveBankingService = this
         prefs = PreferencesManager.getInstance(applicationContext)
+        if (com.example.util.BankingModeController.isActive(applicationContext)) {
+            // A user can re-enable Accessibility while Banking Mode is active;
+            // never read/click ride screens until they explicitly finish banking.
+            prefs.setAutoAcceptActive(false)
+            OrderDecisionPopup.pauseForBankingMode()
+        } else {
+            OrderDecisionPopup.resumeAfterBanking()
+        }
 
         // OFFLINE_GRACE_LOCK_V1
         val connectedProfile =
@@ -10909,6 +10940,7 @@ private val processingTimeoutRunnable = Runnable {
     }
 
     override fun onDestroy() {
+        if (liveBankingService === this) liveBankingService = null
         handler.removeCallbacks(
             offlineSecurityCheckRunnable
         )
