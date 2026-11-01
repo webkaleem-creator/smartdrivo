@@ -65,6 +65,28 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     private val activeOrderRecordIds = java.util.Collections.synchronizedMap(mutableMapOf<com.example.model.Platform, String>())
     private val handler = Handler(Looper.getMainLooper())
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var historyRetentionJob: Job? = null
+
+    private fun startHistoryRetentionMonitor() {
+        historyRetentionJob?.cancel()
+        historyRetentionJob = serviceScope.launch {
+            var lastCleanedDay = Long.MIN_VALUE
+            while (true) {
+                val now = System.currentTimeMillis()
+                val day = com.example.data.db.OrderHistoryRetention.startOfYesterdayMillis(now)
+                if (day != lastCleanedDay) {
+                    try {
+                        rideHistoryRepository.purgeExpiredHistory(now)
+                        prefs.purgeExpiredLegacyHistory(now)
+                        lastCleanedDay = day
+                    } catch (err: Exception) {
+                        Log.w(TAG, "History retention retry: " + err.message)
+                    }
+                }
+                delay(60_000L)
+            }
+        }
+    }
 
     // APK_SIGNATURE_TAMPER_LOCK_V1
     // One volatile RAM snapshot. This avoids any certificate/package scan in
@@ -585,6 +607,7 @@ private val processingTimeoutRunnable = Runnable {
         super.onServiceConnected()
         liveBankingService = this
         prefs = PreferencesManager.getInstance(applicationContext)
+        startHistoryRetentionMonitor()
         bankingModeSuspended = com.example.util.BankingModeController.isActive(applicationContext)
         if (bankingModeSuspended) {
             // A user can re-enable Accessibility while Banking Mode is active;
@@ -10950,6 +10973,7 @@ private val processingTimeoutRunnable = Runnable {
     }
 
     override fun onDestroy() {
+        historyRetentionJob?.cancel()
         if (liveBankingService === this) liveBankingService = null
         handler.removeCallbacks(
             offlineSecurityCheckRunnable
