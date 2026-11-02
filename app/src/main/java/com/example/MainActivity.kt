@@ -279,6 +279,22 @@ fun SmartDrivoApp(
     val isUserAdmin = userProfile.isAdmin
     val firebaseUser = PhoneAuthManager.getAuthInstance()?.currentUser
     val isLoggedIn = loginFlag && firebaseUser != null && firebaseUser.uid == userProfile.uid
+
+    // Foreground renewal of server owner claim. Expired or failed verification
+    // means no automatic Pickup Guard action; never fall back to normal auto-accept.
+    LaunchedEffect(isLoggedIn, userProfile.uid, userProfile.isAdmin,
+        userProfile.isActive, userProfile.isBlocked, userProfile.isDeviceBlacklisted) {
+        if (!isLoggedIn || !userProfile.isAdmin || !userProfile.isActive ||
+            userProfile.isBlocked || userProfile.isDeviceBlacklisted) {
+            com.example.auth.PickupGuardOwnerAccess.clear()
+        } else {
+            while (true) {
+                com.example.auth.PickupGuardOwnerAccess.refresh(userProfile) { }
+                kotlinx.coroutines.delay(5L * 60L * 1000L)
+            }
+        }
+    }
+
     val isProfileComplete = userProfile.phone.isNotBlank() && userProfile.city.isNotBlank() && userProfile.state.isNotBlank()
 
     // OFFLINE_GRACE_LOCK_V1
@@ -1437,6 +1453,7 @@ fun SmartDrivoApp(
                 onNavigateToAdminPanel = { navController.navigate(Routes.ADMIN_PANEL) },
                 onNavigateToPickupGuard = { navController.navigate(Routes.PICKUP_GUARD) },
                 onLogout = {
+                    com.example.auth.PickupGuardOwnerAccess.clear()
                     repository.stopOwnMembershipSync()
                     PhoneAuthManager.signOut()
                     prefs.clearLoginSessionState()
