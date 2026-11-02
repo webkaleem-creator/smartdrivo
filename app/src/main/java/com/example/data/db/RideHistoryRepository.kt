@@ -73,20 +73,23 @@ class RideHistoryRepository(
     suspend fun onOrderDetected(
         candidate: RideCandidate,
         initialReasonCode: String = "DETECTING",
-        initialReasonText: String = "Evaluating ride filters..."
+        initialReasonText: String = "Evaluating ride filters...",
+        olaRecordId: String? = null
     ): RideHistoryEntity = withContext(ioDispatcher) {
         mutex.withLock {
+            require(olaRecordId == null || (candidate.platform == Platform.OLA && olaRecordId.startsWith("ola_offer_")))
             val now = System.currentTimeMillis()
             val detectedTime = if (candidate.detectionTimeMs > 0L) candidate.detectionTimeMs else now
             val fingerprint = generateFingerprint(candidate)
 
             // Check duplicate by bookingId (if available)
-            val byBookingId = if (!candidate.bookingId.isNullOrBlank()) {
+            val byBookingId = if (olaRecordId != null) dao.getById(olaRecordId)
+            else if (!candidate.bookingId.isNullOrBlank()) {
                 dao.getByBookingId(candidate.bookingId)
             } else null
 
             // Check duplicate by fingerprint
-            val byFingerprint = if (byBookingId == null) {
+            val byFingerprint = if (olaRecordId == null && byBookingId == null) {
                 dao.getByFingerprint(fingerprint)?.takeIf { previous ->
                     val oldDrop = previous.dropAddress.trim().lowercase(Locale.ROOT)
                     val newDrop = candidate.dropAddress?.trim()?.lowercase(Locale.ROOT).orEmpty()
@@ -243,7 +246,7 @@ class RideHistoryRepository(
             }
 
             // Create new record
-            val recordId =
+            val recordId = olaRecordId ?:
                 if (!candidate.bookingId.isNullOrBlank()) {
                     candidate.bookingId
                 } else {

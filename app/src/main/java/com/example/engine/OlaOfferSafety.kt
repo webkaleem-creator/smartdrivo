@@ -8,6 +8,29 @@ import kotlin.math.abs
  * Fail closed on ambiguous offers: a UI click is never proof of acceptance.
  */
 object OlaOfferSafety {
+    // Require an explicit label and an identifier containing a digit. Never parse prose.
+    fun bookingId(text: String): String? = Regex(
+        """\b(?:CRN|booking\s*(?:id|number|no\.?)|order\s*(?:id|number|no\.?))\s*[:#-]?\s*([A-Z0-9-]{3,32})\b""",
+        RegexOption.IGNORE_CASE
+    ).findAll(text).map { it.groupValues[1] }
+        .firstOrNull { id -> id.any { it.isDigit() } }
+
+    fun routesToOla(eventPackage: String, rootPackages: List<String>): Boolean =
+        isDriverPackage(eventPackage) || rootPackages.any { isDriverPackage(it) }
+
+    fun internalId(): String = "ola_offer_" + java.util.UUID.randomUUID().toString()
+
+    /** Missing or changed decision inputs fail closed, even for the same booking. */
+    fun sameOffer(old: com.example.model.RideCandidate, live: com.example.model.RideCandidate): Boolean {
+        val genuineId = old.bookingId?.takeUnless { it.startsWith("ola_offer_") }
+        if (genuineId != null && genuineId != live.bookingId) return false
+        fun address(value: String?) = value.orEmpty().trim().lowercase(Locale.ROOT)
+        return old.fare != null && old.fare == live.fare &&
+            old.pickupDistKm == live.pickupDistKm && old.dropDistKm == live.dropDistKm &&
+            address(old.pickupAddress) == address(live.pickupAddress) &&
+            address(old.dropAddress) == address(live.dropAddress) && old.vehicleType == live.vehicleType
+    }
+
     private val driverPackages = setOf(
         "com.olacabs.oladriver",
         "com.olacabs.driver",

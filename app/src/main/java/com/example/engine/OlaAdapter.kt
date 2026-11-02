@@ -857,8 +857,7 @@ object OlaAdapter {
         }
 
         val bookingId =
-            OrderDataExtractor
-                .extractBookingId(fullText)
+            OlaOfferSafety.bookingId(fullText)
 
         var baseFare =
             fareParts.base
