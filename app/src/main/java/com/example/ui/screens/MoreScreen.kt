@@ -106,6 +106,15 @@ fun MoreScreen(
     onBack: () -> Unit = {}
 ) {
     val userProfile by prefs.userProfile.collectAsState()
+    var pickupGuardOwnerAllowed by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(userProfile.uid, userProfile.isAdmin, userProfile.isActive) {
+        pickupGuardOwnerAllowed = false
+        if (userProfile.isAdmin && userProfile.isActive && userProfile.uid.isNotBlank()) {
+            com.example.auth.PickupGuardOwnerAccess.refresh(userProfile) { allowed ->
+                pickupGuardOwnerAllowed = allowed
+            }
+        }
+    }
     val settings by prefs.appSettings.collectAsState()
     var showTutorialDialog by remember { mutableStateOf(false) }
     var showBankingDialog by remember { mutableStateOf(false) }
@@ -615,6 +624,16 @@ fun MoreScreen(
                             subtitle = "Manage users, subscriptions & system settings",
                             onClick = onNavigateToAdminPanel
                         )
+                        if (pickupGuardOwnerAllowed &&
+                            com.example.auth.PickupGuardOwnerAccess.authorized(userProfile)
+                        ) {
+                            MoreCardRow(
+                                icon = Icons.Default.AdminPanelSettings,
+                                title = "Pickup Guard",
+                                subtitle = "Owner-only manual choice & No-Go protection",
+                                onClick = onNavigateToPickupGuard
+                            )
+                        }
                     }
                 }
             }
