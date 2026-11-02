@@ -1243,7 +1243,7 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                             )
                             Spacer(modifier = Modifier.height(1.dp))
                             Text(
-                                text = "Accept button action was sent. Check Rapido for the final trip result.",
+                                text = "Accept button action was sent. Check ${item.platform.displayName} for the final trip result.",
                                 fontSize = 11.sp,
                                 lineHeight = 15.sp,
                                 color = TextDarkPrimary
@@ -1822,6 +1822,9 @@ private fun formatIgnoredFilters(
         )
 
     FastestHistoryReason.clarify(normalizedReason, item.pickupDistKm)?.let { return it }
+    if (item.platform == Platform.OLA) {
+        OlaHistoryReasonSummary.summarize(normalizedReason)?.let { return it }
+    }
     formatGenericFilterFailureV7(
         normalizedReason
     )?.let {
