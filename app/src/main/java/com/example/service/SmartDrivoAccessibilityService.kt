@@ -1043,6 +1043,118 @@ private val processingTimeoutRunnable = Runnable {
      * - If filterMode == "distance_only" -> skip fare checks completely
      * - If filterMode == "both" -> check both fare and distance filters
      */
+    // OWNER_PICKUP_GUARD_V1: dedicated priority path, isolated from all saved acceptance modes.
+    // Each platform enters here only after its existing genuine-offer gate.
+    private fun handleOwnerPickupGuard(
+        root: AccessibilityNodeInfo,
+        candidate: RideCandidate,
+        recordId: String
+    ): Boolean {
+        val guard = prefs.pickupGuardSettings.value
+        if (!guard.enabled) return false
+
+        fun finish(reasonCode: String, reason: String) {
+            onOrderDecisionFast(
+                recordId, candidate, OrderStatus.IGNORED, reasonCode, reason
+            )
+            if (candidate.platform == Platform.OLA) setOlaState(OlaState.IDLE)
+            else resetProcessing()
+        }
+
+        // Never continue into normal Auto-Accept when Guard is ON but authorization expires.
+        val owner = prefs.userProfile.value
+        val settings = prefs.appSettings.value
+        val platformOn = when (candidate.platform) {
+            Platform.RAPIDO -> settings.rapidoEnabled
+            Platform.OLA -> settings.olaEnabled
+            Platform.UBER -> settings.uberEnabled
+        }
+        if (!com.example.auth.PickupGuardOwnerAccess.authorized(owner) ||
+            !platformOn || !preferencesManager.isAutoAcceptEnabled || bankingModeSuspended) {
+            finish("PICKUP_GUARD_NOT_AUTHORIZED", "Pickup Guard unavailable; no automatic action")
+            return true
+        }
+
+        val decision = com.example.engine.PickupGuardEngine.evaluate(
+            offer = candidate,
+            guard = guard,
+            noGoAreas = prefs.noGoAreas.value,
+            noGoEnabled = settings.isNoGoEnabled || prefs.isNoGoEnabled
+        )
+        when (decision) {
+            is com.example.engine.PickupGuardEngine.Result.ManualChoice -> {
+                finish("PICKUP_GUARD_MANUAL", decision.reason)
+            }
+            is com.example.engine.PickupGuardEngine.Result.IgnoreUnreadable -> {
+                finish("PICKUP_GUARD_UNREADABLE", decision.reason)
+            }
+            is com.example.engine.PickupGuardEngine.Result.AutoReject -> {
+                // Recheck owner, master, current window and current saved Guard before action.
+                val freshGuard = prefs.pickupGuardSettings.value
+                val rootPkg = root.packageName?.toString().orEmpty()
+                val validPlatform = when (candidate.platform) {
+                    Platform.RAPIDO -> isRapidoPackage(rootPkg)
+                    Platform.OLA -> isOlaPackage(rootPkg)
+                    Platform.UBER -> isUberPackage(rootPkg)
+                }
+                val stillCurrent = com.example.auth.PickupGuardOwnerAccess.authorized(owner) &&
+                    freshGuard == guard && preferencesManager.isAutoAcceptEnabled &&
+                    validPlatform && !bankingModeSuspended
+
+                if (!stillCurrent) {
+                    finish("PICKUP_GUARD_STALE", "Pickup Guard: offer/settings changed; no action")
+                    return true
+                }
+
+                // No gesture fallback, guessed position or clickable-ancestor substitution.
+                // Uber requires an explicit visible Reject/Decline/Skip label.
+                val rejectNode = when (candidate.platform) {
+                    Platform.RAPIDO -> findStrictRapidoRejectNode(root)
+                    Platform.OLA -> OlaAdapter.findRejectNode(root)
+                    Platform.UBER -> findPickupGuardNamedReject(root)
+                }
+                val bounds = Rect()
+                rejectNode?.getBoundsInScreen(bounds)
+                val nodePkg = rejectNode?.packageName?.toString().orEmpty()
+                val nodeOwned = when (candidate.platform) {
+                    Platform.RAPIDO -> isRapidoPackage(nodePkg)
+                    Platform.OLA -> isOlaPackage(nodePkg)
+                    Platform.UBER -> isUberPackage(nodePkg)
+                }
+                val verified = rejectNode != null && nodeOwned &&
+                    rejectNode.isEnabled && rejectNode.isVisibleToUser &&
+                    rejectNode.isClickable &&
+                    rejectNode.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK } &&
+                    bounds.width() > 0 && bounds.height() > 0
+
+                if (!verified) {
+                    finish("PICKUP_GUARD_REJECT_UNAVAILABLE",
+                        "${decision.reason} | Safe Reject/X control not verified; no click")
+                    return true
+                }
+                val clicked = rejectNode!!.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                // Android ACTION_CLICK_OK does not prove rejection reached the platform.
+                finish(if (clicked) "PICKUP_GUARD_REJECT_SENT" else "PICKUP_GUARD_REJECT_FAILED",
+                    "${decision.reason} | " +
+                    if (clicked) "Reject action sent; final result unverified"
+                    else "Reject action not acknowledged; no gesture fallback")
+            }
+        }
+        return true
+    }
+
+    private fun findPickupGuardNamedReject(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (node == null) return null
+        val labels = setOf("reject", "decline", "skip", "pass")
+        val text = node.text?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        val desc = node.contentDescription?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        if (text in labels || desc in labels) return node
+        for (i in 0 until node.childCount) {
+            findPickupGuardNamedReject(node.getChild(i))?.let { return it }
+        }
+        return null
+    }
+
     private fun evaluateDirectRideFilters(candidate: RideCandidate): DirectFilterResult {
         // V12_FASTEST_DIRECT_FALLBACK: only pickup decides a Rapido Fastest
         // filter. Full strict popup validation and click safety remain elsewhere.
@@ -4107,6 +4219,8 @@ private val processingTimeoutRunnable = Runnable {
             val recordId = onOrderDetectedFast(candidate)
             Log.i(TAG, "⚡ Uber order detected & inserted to Room [PROCESSING]: Fare=₹${candidate.fare}, pickup=${candidate.pickupAddress}")
 
+            if (handleOwnerPickupGuard(uberOrderRoot, candidate, recordId)) return
+
             // Direct SharedPreferences Filter Evaluation before evaluating ANY ride
             val directResult = evaluateDirectRideFilters(candidate)
             when (directResult.status) {
@@ -4212,6 +4326,10 @@ private val processingTimeoutRunnable = Runnable {
         waitRound: Int = 0,
         clickLockNotified: Boolean = false
     ) {
+        if (prefs.pickupGuardSettings.value.enabled) {
+            resetProcessing()
+            return
+        }
         val directResult =
             evaluateDirectRideFilters(candidate)
 
@@ -5714,6 +5832,8 @@ private val processingTimeoutRunnable = Runnable {
             olaDiag(OlaDiagnosticStore.Stage.HISTORY_DETECTED)
             Log.i(TAG, "Ola offer detected; history queued")
 
+            if (handleOwnerPickupGuard(root, candidate, recordId)) return
+
             // Direct SharedPreferences Filter Evaluation before evaluating ANY ride
             val directResult = evaluateDirectRideFilters(candidate)
             when (directResult.status) {
@@ -6133,6 +6253,7 @@ private val processingTimeoutRunnable = Runnable {
     }
 
     private fun olaActionsAllowed(session: com.example.engine.OlaSessionOwner.Session? = null): Boolean =
+        !prefs.pickupGuardSettings.value.enabled &&
         (session == null || olaSessions.isCurrent(session)) &&
         !isProcessing && !isRapidoEventProcessing && !isClickInProgress &&
         System.currentTimeMillis() >= clickBlockedUntilTimestamp &&
@@ -7914,7 +8035,8 @@ private val processingTimeoutRunnable = Runnable {
         // RAPIDO_COMPLETE_HISTORY_V4
         // Wait for the complete card before inserting History.
         // This prevents Trip:N/A + a second full row for the same offer.
-        if (candidate.dropDistKm == null || candidate.dropDistKm <= 0f) {
+        if (!prefs.pickupGuardSettings.value.enabled &&
+            (candidate.dropDistKm == null || candidate.dropDistKm <= 0f)) {
             Log.d(
                 TAG,
                 "Rapido popup incomplete - waiting for Trip km before History insert"
@@ -7979,6 +8101,8 @@ private val processingTimeoutRunnable = Runnable {
 
         val recordId = onOrderDetectedFast(candidate)
         Log.i(TAG, "⚡ Rapido order detected & inserted to Room [PROCESSING]: Fare=₹${candidate.fare}, pickup=${candidate.pickupAddress}")
+
+        if (handleOwnerPickupGuard(root, candidate, recordId)) return
 
         // Auto-Accept and Auto-Reject are independent.
         // BOTH OFF -> manual mode.
@@ -8449,6 +8573,10 @@ private val processingTimeoutRunnable = Runnable {
         verifiedPopupSession: Long? = null,
         eventUptimeMs: Long = 0L
     ) {
+        if (prefs.pickupGuardSettings.value.enabled) {
+            resetProcessing()
+            return
+        }
         // HISTORY_PINNED_RECORD_V2
         // Keep every retry/final status attached to the same real ride.
         val pinnedRecordId =
