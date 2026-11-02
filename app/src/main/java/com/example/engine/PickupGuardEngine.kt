@@ -21,6 +21,11 @@ object PickupGuardEngine {
         val pickup = offer.pickupDistKm
         if (pickup == null || !pickup.isFinite() || pickup < 0f)
             return Result.IgnoreUnreadable("Pickup Guard: pickup distance missing/invalid")
+        // Pickup alone is a conclusive veto even when destination is not yet
+        // rendered. Missing destination only blocks the within-range manual path.
+        if (pickup > maximum)
+            return Result.AutoReject("Pickup Guard: pickup ${pickup} km exceeds ${maximum} km")
+
         val activeNoGo = noGoEnabled && noGoAreas.any { group ->
             group.isEnabled && group.keywords.any { it.isNotBlank() && !it.equals(group.name, ignoreCase = true) }
         }
@@ -37,8 +42,6 @@ object PickupGuardEngine {
             )
             if (matched != null) return Result.AutoReject("Pickup Guard: $matched")
         }
-        return if (pickup > maximum)
-            Result.AutoReject("Pickup Guard: pickup ${pickup} km exceeds ${maximum} km")
-        else Result.ManualChoice("Pickup Guard: pickup ${pickup} km within ${maximum} km; manual choice")
+        return Result.ManualChoice("Pickup Guard: pickup ${pickup} km within ${maximum} km; manual choice")
     }
 }

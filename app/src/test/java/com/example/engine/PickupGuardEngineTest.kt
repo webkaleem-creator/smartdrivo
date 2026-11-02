@@ -23,6 +23,9 @@ class PickupGuardEngineTest {
     @Test fun pickupOutsideRejects() {
         assertTrue(eval(offer(0.7f)) is PickupGuardEngine.Result.AutoReject)
     }
+    @Test fun outOfRangeDoesNotDependOnDestination() {
+        assertTrue(eval(offer(0.7f, null)) is PickupGuardEngine.Result.AutoReject)
+    }
     @Test fun noGoWinsEvenInsideLimit() {
         assertTrue(eval(offer(0.2f, "Shivaji Nagar")) is PickupGuardEngine.Result.AutoReject)
     }
