@@ -737,6 +737,9 @@ private val processingTimeoutRunnable = Runnable {
      */
     @Synchronized
     private fun canExecuteClick(): Boolean {
+        // Old automation paths may never send Accept while owner's manual Guard is active.
+        // The Guard's independently verified Reject/X action does not use this method.
+        if (prefs.pickupGuardSettings.value.enabled) return false
         if (bankingModeSuspended || !preferencesManager.isAutoAcceptEnabled) {
             Log.d(
                 TAG,
@@ -1103,6 +1106,34 @@ private val processingTimeoutRunnable = Runnable {
 
                 if (!stillCurrent) {
                     finish("PICKUP_GUARD_STALE", "Pickup Guard: offer/settings changed; no action")
+                    return true
+                }
+
+                // Re-read the present offer before touching a button. A changed
+                // fare/pickup/drop must not inherit the previous Guard's Reject result.
+                val live = when (candidate.platform) {
+                    Platform.OLA -> OlaAdapter.extractCandidate(
+                        root, prefs.userProfile.value.vehicleType
+                    )
+                    Platform.RAPIDO, Platform.UBER -> OrderDataExtractor.extractCandidate(
+                        root, candidate.platform, prefs.userProfile.value.vehicleType
+                    )
+                }
+                val sameVisibleOffer =
+                    live.fare == candidate.fare &&
+                    live.pickupDistKm == candidate.pickupDistKm &&
+                    live.dropDistKm == candidate.dropDistKm &&
+                    live.dropAddress?.trim() == candidate.dropAddress?.trim() &&
+                    (candidate.bookingId.isNullOrBlank() ||
+                        live.bookingId == candidate.bookingId)
+                val liveDecision = com.example.engine.PickupGuardEngine.evaluate(
+                    live, guard, prefs.noGoAreas.value,
+                    settings.isNoGoEnabled || prefs.isNoGoEnabled
+                )
+                if (!sameVisibleOffer ||
+                    liveDecision !is com.example.engine.PickupGuardEngine.Result.AutoReject) {
+                    finish("PICKUP_GUARD_OFFER_CHANGED",
+                        "Pickup Guard: live offer changed before Reject; no action")
                     return true
                 }
 
@@ -4096,6 +4127,36 @@ private val processingTimeoutRunnable = Runnable {
         return true
     }
 
+    // Only owner Guard needs this additional Uber ID-less same-visible-offer protection.
+    private var guardUberVisibleSignature: String? = null
+    private var guardUberMissingAt: Long? = null
+
+    private fun guardUberIsRepeat(candidate: RideCandidate): Boolean {
+        val signature = candidate.bookingId?.takeIf { it.isNotBlank() }
+            ?: listOf(
+                candidate.fare, candidate.pickupDistKm, candidate.dropDistKm,
+                candidate.dropAddress, candidate.dropArea
+            ).joinToString("|")
+        if (signature == guardUberVisibleSignature) {
+            guardUberMissingAt = null
+            return true
+        }
+        guardUberVisibleSignature = signature
+        guardUberMissingAt = null
+        return false
+    }
+
+    private fun guardUberMissingOffer() {
+        if (!prefs.pickupGuardSettings.value.enabled) return
+        val now = System.currentTimeMillis()
+        val first = guardUberMissingAt
+        if (first == null) guardUberMissingAt = now
+        else if (now - first >= 1_500L) {
+            guardUberVisibleSignature = null
+            guardUberMissingAt = null
+        }
+    }
+
     private fun handleUberOrder(root: AccessibilityNodeInfo?, pkgName: String = "com.ubercab") {
         if (root == null) return
 // Uber offer cards may be in a separate accessibility
@@ -4175,11 +4236,17 @@ private val processingTimeoutRunnable = Runnable {
                     "UBER FALSE SCREEN BLOCKED - no genuine ride offer. " +
                         "No history, no filters, no click."
                 )
-
+                guardUberMissingOffer()
                 resetProcessing()
                 return
             }
 
+            // Owner manual guard: a continuously visible identical Uber offer
+            // is one decision, even if it lacks a booking ID.
+            if (prefs.pickupGuardSettings.value.enabled && guardUberIsRepeat(candidate)) {
+                resetProcessing()
+                return
+            }
             // Duplicate protection for Uber.
             // Exception: Trip Radar "Match" can redispatch the SAME ride
             // with the final Accept button.

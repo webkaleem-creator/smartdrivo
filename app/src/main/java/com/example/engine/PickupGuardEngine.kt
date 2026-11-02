@@ -24,7 +24,12 @@ object PickupGuardEngine {
         val activeNoGo = noGoEnabled && noGoAreas.any { group ->
             group.isEnabled && group.keywords.any { it.isNotBlank() && !it.equals(group.name, ignoreCase = true) }
         }
-        if (activeNoGo && offer.dropAddress.isNullOrBlank() && offer.dropArea.isNullOrBlank())
+        val destination = offer.dropAddress.orEmpty().trim() + " " + offer.dropArea.orEmpty().trim()
+        val missingDestination = destination.trim().isEmpty() ||
+            destination.trim().equals("Address unavailable", ignoreCase = true) ||
+            destination.trim().equals("Drop Location", ignoreCase = true) ||
+            destination.trim().equals("Detected Drop Location", ignoreCase = true)
+        if (activeNoGo && missingDestination)
             return Result.IgnoreUnreadable("Pickup Guard: destination missing; cannot verify No-Go")
         if (activeNoGo) {
             val matched = AreaRulesEngine.firstNoGoDestinationMatch(
