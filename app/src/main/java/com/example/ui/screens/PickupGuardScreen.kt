@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.auth.PickupGuardOwnerAccess
 import com.example.data.PreferencesManager
@@ -31,6 +33,7 @@ import com.example.data.PreferencesManager
 fun PickupGuardScreen(prefs: PreferencesManager, onBack: () -> Unit) {
     val owner by prefs.userProfile.collectAsState()
     val current by prefs.pickupGuardSettings.collectAsState()
+    val context = LocalContext.current
     if (!PickupGuardOwnerAccess.authorized(owner)) return
     var input by remember(owner.uid) { mutableStateOf(current.maxPickupKm.toString()) }
     var message by remember { mutableStateOf("") }
@@ -53,10 +56,21 @@ fun PickupGuardScreen(prefs: PreferencesManager, onBack: () -> Unit) {
                         Switch(checked = current.enabled, onCheckedChange = { checked ->
                             if (!checked || isValid) {
                                 val maximum = if (isValid) parsed!! else current.maxPickupKm
-                                message = if (prefs.savePickupGuardSettings(
+                                val saved = prefs.savePickupGuardSettings(
                                     current.copy(enabled = checked, maxPickupKm = maximum)
-                                )) "Saved" else "Owner authorization expired"
-                            } else message = "Enter a valid maximum"
+                                )
+                                message = if (saved) "" else "Owner authorization expired"
+                                Toast.makeText(
+                                    context,
+                                    if (!saved) "Owner authorization expired"
+                                    else if (checked) "Pickup Guard ON ✓"
+                                    else "Pickup Guard OFF",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            } else {
+                                message = "Enter a valid maximum"
+                                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                            }
                         })
                     }
                     OutlinedTextField(
