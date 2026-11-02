@@ -27,7 +27,7 @@ import java.util.concurrent.ConcurrentHashMap
  * - dark compact card
  * - status color strip/badge
  * - only platform + fare + final reason
- * - auto hides after 8 seconds; a new order immediately replaces the old one
+ * - auto hides after 13 seconds; a new order immediately replaces the old one
  */
 object OrderDecisionPopup {
 
@@ -73,7 +73,7 @@ object OrderDecisionPopup {
         }
     }
 
-    private const val DISPLAY_MS = 8000L
+    private const val DISPLAY_MS = 13_000L
     private const val DEDUPE_MS = 5000L
 
     private data class Style(
