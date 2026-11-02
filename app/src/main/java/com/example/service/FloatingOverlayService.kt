@@ -295,8 +295,8 @@ class FloatingOverlayService : Service() {
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = rounded(Color.WHITE, 21f, 0xFF913AFF.toInt(), 2)
-            elevation = dpToPxf(12f)
+            background = rounded(Color.WHITE, 18f, 0xFF913AFF.toInt(), 2)
+            elevation = dpToPxf(8f)
             clipToOutline = true
             setPadding(dpToPx(2), dpToPx(2), dpToPx(2), dpToPx(3))
         }
@@ -310,13 +310,13 @@ class FloatingOverlayService : Service() {
             ).apply { cornerRadii = floatArrayOf(
                 dpToPxf(19f), dpToPxf(19f), dpToPxf(19f), dpToPxf(19f), 0f, 0f, 0f, 0f
             ) }
-            setPadding(dpToPx(9), dpToPx(4), dpToPx(4), dpToPx(4))
+            setPadding(dpToPx(7), dpToPx(2), dpToPx(3), dpToPx(2))
         }
 
         val platformBadge = TextView(this).apply {
             text = "✅ " + style.displayName + " ACCEPTED"
             setTextColor(Color.WHITE)
-            textSize = 13f
+            textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
             maxLines = 1
@@ -328,10 +328,10 @@ class FloatingOverlayService : Service() {
         val countdownBadge = TextView(this).apply {
             text = "⏳ 10:00"
             setTextColor(Color.WHITE)
-            textSize = 11.5f
+            textSize = 10.5f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            setPadding(dpToPx(7), dpToPx(5), dpToPx(7), dpToPx(5))
+            setPadding(dpToPx(5), dpToPx(2), dpToPx(5), dpToPx(2))
             background = rounded(0x443D9EFF, 20f, 0x6666B0FF, 1)
         }
         headerView.addView(countdownBadge)
@@ -339,12 +339,12 @@ class FloatingOverlayService : Service() {
         val closeBtn = TextView(this).apply {
             text = "✕"
             setTextColor(Color.WHITE)
-            textSize = 21f
+            textSize = 19f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             contentDescription = "Dismiss accepted order"
-            layoutParams = LinearLayout.LayoutParams(dpToPx(33), dpToPx(37)).apply {
-                marginStart = dpToPx(3)
+            layoutParams = LinearLayout.LayoutParams(dpToPx(30), dpToPx(32)).apply {
+                marginStart = dpToPx(2)
             }
             isClickable = true
             isFocusable = true
@@ -364,91 +364,102 @@ class FloatingOverlayService : Service() {
         val baseText = if (safeBase > 0f) "Base: ₹" + safeBase.toInt() else "Base: --"
         val tipText = if (safeTip > 0f) "Tip: +₹" + safeTip.toInt() else "Tip: ₹0"
 
-        val fareRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dpToPx(7), dpToPx(5), dpToPx(7), dpToPx(3))
-        }
-
-        fun fareCell(
-            value: String,
-            weight: Float,
-            bg: Int,
-            color: Int,
-            fontSize: Float
-        ): TextView = TextView(this).apply {
-            text = value
-            textSize = fontSize
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(color)
-            gravity = Gravity.CENTER
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-            background = rounded(bg, 12f)
-            setPadding(dpToPx(2), 0, dpToPx(2), 0)
-            layoutParams = LinearLayout.LayoutParams(0, dpToPx(AcceptedOverlayCompactPolicy.FARE_CELL_HEIGHT_DP), weight).apply {
-                marginStart = dpToPx(2)
-                marginEnd = dpToPx(2)
-            }
-        }
-        fareRow.addView(fareCell(fareText, 1.12f, 0xFFFFE5AC.toInt(), Color.BLACK, 22f))
-        fareRow.addView(fareCell(baseText, 1.0f, 0xFFF8F8FF.toInt(), 0xFF111827.toInt(), 10.5f))
-        fareRow.addView(fareCell(tipText, 1.0f, 0xFFD6FBE4.toInt(), 0xFF008421.toInt(), 11f))
-        card.addView(fareRow)
-
+        // COMPACT_ACCEPTED_OVERLAY_V2: fare, tip, pickup and trip share one row.
+        // This only changes presentation; all amounts and distance values remain live.
         val pickupText = com.example.engine.PickupDistancePresentationV19.label(pickupDist)
         val tripText = if (dropDist.isFinite() && dropDist > 0f) {
             String.format(Locale.US, "%.1f km", dropDist)
         } else "N/A"
 
-        val routeRow = LinearLayout(this).apply {
+        val summaryRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dpToPx(8), dpToPx(1), dpToPx(8), dpToPx(1))
+            setPadding(dpToPx(6), dpToPx(3), dpToPx(6), dpToPx(2))
         }
-        fun routeCell(icon: String, label: String, dist: String, color: Int): TextView =
-            TextView(this).apply {
-                text = icon + " " + label + "\n" + dist
-                textSize = 11.5f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(color)
-                gravity = Gravity.CENTER
-                maxLines = 2
-                background = rounded(0xFFF0F2FC.toInt(), 12f)
-                setPadding(dpToPx(2), dpToPx(3), dpToPx(2), dpToPx(3))
-                layoutParams = LinearLayout.LayoutParams(0,
-                    dpToPx(AcceptedOverlayCompactPolicy.ROUTE_CELL_HEIGHT_DP), 1.08f)
+
+        val fareCell = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = rounded(0xFFFFE5AC.toInt(), 11f)
+            setPadding(dpToPx(3), dpToPx(2), dpToPx(3), dpToPx(2))
+            layoutParams = LinearLayout.LayoutParams(
+                0, dpToPx(AcceptedOverlayCompactPolicy.FARE_CELL_HEIGHT_DP), 1.45f
+            ).apply {
+                marginStart = dpToPx(2)
+                marginEnd = dpToPx(2)
             }
-        routeRow.addView(routeCell("📍", "Pickup", pickupText, 0xFF1249DF.toInt()))
-        routeRow.addView(TextView(this).apply {
-            text = "● - ➤ - ●"
-            setTextColor(0xFF1763F4.toInt())
-            textSize = 11f
+        }
+        fareCell.addView(TextView(this).apply {
+            text = fareText
+            textSize = 19f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.BLACK)
             gravity = Gravity.CENTER
             maxLines = 1
-            layoutParams = LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 0.8f)
         })
-        routeRow.addView(routeCell("📍", "Trip", tripText, 0xFFE10A26.toInt()))
-        card.addView(routeRow)
+        fareCell.addView(TextView(this).apply {
+            text = "$baseText  •  $tipText"
+            textSize = 8.5f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF374151.toInt())
+            gravity = Gravity.CENTER
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        })
+        summaryRow.addView(fareCell)
+
+        fun distanceCell(label: String, distance: String, color: Int): LinearLayout =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                background = rounded(0xFFF0F2FC.toInt(), 11f)
+                setPadding(dpToPx(2), dpToPx(2), dpToPx(2), dpToPx(2))
+                layoutParams = LinearLayout.LayoutParams(
+                    0, dpToPx(AcceptedOverlayCompactPolicy.ROUTE_CELL_HEIGHT_DP), 0.85f
+                ).apply {
+                    marginStart = dpToPx(2)
+                    marginEnd = dpToPx(2)
+                }
+                addView(TextView(this@FloatingOverlayService).apply {
+                    text = label
+                    textSize = 10f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(color)
+                    gravity = Gravity.CENTER
+                    maxLines = 1
+                })
+                addView(TextView(this@FloatingOverlayService).apply {
+                    text = distance
+                    textSize = 14f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(color)
+                    gravity = Gravity.CENTER
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                })
+            }
+
+        summaryRow.addView(distanceCell("Pickup", pickupText, 0xFF1249DF.toInt()))
+        summaryRow.addView(distanceCell("Trip", tripText, 0xFFE10A26.toInt()))
+        card.addView(summaryRow)
 
         // Confirmation time is supplied at the confirmed ACCEPTED event, not
         // the offer's detection timestamp or a simulated screenshot value.
         card.addView(TextView(this).apply {
             text = "✓ Accepted at " + time.trim().ifBlank { "time unavailable" }
-            textSize = 11.5f
+            textSize = 10.5f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(0xFF075B28.toInt())
             gravity = Gravity.CENTER
             background = rounded(0xFFDCFBE6.toInt(), 18f, 0xFF50DC7A.toInt(), 1)
-            setPadding(dpToPx(11), dpToPx(3), dpToPx(11), dpToPx(3))
+            setPadding(dpToPx(8), dpToPx(1), dpToPx(8), dpToPx(1))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
-                topMargin = dpToPx(2)
-                bottomMargin = dpToPx(5)
+                topMargin = dpToPx(1)
+                bottomMargin = dpToPx(2)
             }
         })
 
@@ -471,20 +482,20 @@ class FloatingOverlayService : Service() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = rounded(0xFFEBE1FF.toInt(), 13f)
-            setPadding(dpToPx(7), dpToPx(6), dpToPx(7), dpToPx(6))
+            setPadding(dpToPx(6), dpToPx(3), dpToPx(6), dpToPx(3))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                marginStart = dpToPx(7)
-                marginEnd = dpToPx(7)
-                bottomMargin = dpToPx(5)
+                marginStart = dpToPx(6)
+                marginEnd = dpToPx(6)
+                bottomMargin = dpToPx(3)
             }
         }
 
         addressRow.addView(TextView(this).apply {
             text = "📍"
-            textSize = 17f
+            textSize = 14f
             gravity = Gravity.TOP
             setPadding(0, dpToPx(3), dpToPx(4), 0)
         })
@@ -495,13 +506,13 @@ class FloatingOverlayService : Service() {
             )
             addView(TextView(this@FloatingOverlayService).apply {
                 text = "Drop Address"
-                textSize = 12.5f
+                textSize = 10.5f
                 typeface = Typeface.DEFAULT_BOLD
                 setTextColor(0xFF4C16D8.toInt())
             })
             addView(TextView(this@FloatingOverlayService).apply {
                 text = finalDrop
-                textSize = 11.5f
+                textSize = 10.5f
                 setTextColor(0xFF111827.toInt())
                 maxLines = AcceptedOverlayCompactPolicy.MAX_DROP_ADDRESS_LINES
                 ellipsize = TextUtils.TruncateAt.END
@@ -509,14 +520,14 @@ class FloatingOverlayService : Service() {
         })
         addressRow.addView(TextView(this).apply {
             text = "➤"
-            textSize = 22f
+            textSize = 18f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(0xFF4A18D5.toInt())
             gravity = Gravity.CENTER
             contentDescription = "Open drop address in Maps"
             background = rounded(Color.WHITE, 13f, 0xFFB16AFF.toInt(), 1)
-            layoutParams = LinearLayout.LayoutParams(dpToPx(37), dpToPx(40)).apply {
-                marginStart = dpToPx(5)
+            layoutParams = LinearLayout.LayoutParams(dpToPx(32), dpToPx(34)).apply {
+                marginStart = dpToPx(3)
             }
             isClickable = finalDrop != "Location unavailable"
             isFocusable = isClickable
@@ -546,7 +557,7 @@ class FloatingOverlayService : Service() {
         // Timer continues while minimized
         // ---------------------------------------------------------
 
-        val bubbleSize = dpToPx(62)
+        val bubbleSize = dpToPx(56)
 
         val minimizedBubble = TextView(this).apply {
             text =
