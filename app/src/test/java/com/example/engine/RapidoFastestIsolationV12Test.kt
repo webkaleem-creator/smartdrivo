@@ -51,8 +51,8 @@ class RapidoFastestIsolationV12Test {
         assertTrue(AreaRulesEngine.evaluateRide(ride(0.6f), settings = fastest) is DecisionResult.Accept)
     }
 
-    @Test fun bundleOffRemainsManualSafetyGate() {
-        assertTrue(AreaRulesEngine.evaluateRide(ride(0.1f, bundled = true), settings = fastest) is DecisionResult.Ignore)
+    @Test fun bundleOffCannotOverrideRapidoFastestPickupLimit() {
+        assertTrue(AreaRulesEngine.evaluateRide(ride(0.1f, bundled = true), settings = fastest) is DecisionResult.Accept)
     }
 
     @Test fun autoPriorityUsesFastestDecisionNotFixAreaOrAmount() {
@@ -63,5 +63,30 @@ class RapidoFastestIsolationV12Test {
         assertTrue(RapidoAutoPriorityFilterEngine.evaluate(
             ride(1.0f), settings = fastest
         ) is DecisionResult.Reject)
+    }
+    @Test fun normalAndOtherPlatformsKeepBundleVeto() {
+        assertTrue(AreaRulesEngine.evaluateRide(ride(0.1f, true),
+            settings = fastest.copy(isFastestModeEnabled = false)) is DecisionResult.Ignore)
+        for (platform in listOf(Platform.OLA, Platform.UBER)) {
+            assertTrue(AreaRulesEngine.evaluateRide(ride(0.1f, true).copy(platform = platform),
+                settings = fastest) is DecisionResult.Ignore)
+        }
+        assertTrue(AreaRulesEngine.evaluateRide(ride(1f, true), settings = fastest) is DecisionResult.Reject)
+    }
+
+    @Test fun fastestDecisionMicrobenchmark() {
+        // JVM filter-cost experiment only; no threshold or claim about phone latency.
+        val candidate = ride(0.1f, true)
+        repeat(2000) { AreaRulesEngine.evaluateRide(candidate, settings = fastest) }
+        fun elapsed(rechecks: Int): Long {
+            val start = System.nanoTime()
+            repeat(10000) {
+                repeat(rechecks) {
+                    assertTrue(AreaRulesEngine.evaluateRide(candidate, settings = fastest) is DecisionResult.Accept)
+                }
+            }
+            return System.nanoTime() - start
+        }
+        println("RAPIDO_JVM_FILTER_EXPERIMENT iterations=10000 duplicateNs=${elapsed(2)} singleNs=${elapsed(1)}")
     }
 }

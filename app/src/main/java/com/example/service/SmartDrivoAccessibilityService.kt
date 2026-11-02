@@ -8252,7 +8252,7 @@ private val processingTimeoutRunnable = Runnable {
 
                 // Mandatory bundle and Go-To restrictions must be checked
                 // before a +Amount match dispatches an Accept click.
-                if (candidate.isBundledOrder && !settings.isBundleOrderEnabled) {
+                if (!settings.isFastestModeEnabled && candidate.isBundledOrder && !settings.isBundleOrderEnabled) {
                     handleRapidoFilterFailure(
                         root = root,
                         candidate = candidate,
@@ -8318,7 +8318,7 @@ private val processingTimeoutRunnable = Runnable {
         // OFF + Auto-Reject ON  -> automatically skip/reject using existing safe Rapido reject logic.
         // OFF + Auto-Reject OFF -> leave order for manual action.
         // ON -> continue normally through GO TO / NO GO / Fare / Distance / Both filters.
-        if (candidate.isBundledOrder && !settings.isBundleOrderEnabled) {
+        if (!settings.isFastestModeEnabled && candidate.isBundledOrder && !settings.isBundleOrderEnabled) {
             handleRapidoFilterFailure(
                 root = root,
                 candidate = candidate,
@@ -8590,7 +8590,7 @@ private val processingTimeoutRunnable = Runnable {
         val finalNoGoRequired = !finalSettings.isFastestModeEnabled &&
             (finalSettings.isNoGoEnabled || prefs.isNoGoEnabled)
 
-        if (candidate.isBundledOrder && !finalSettings.isBundleOrderEnabled) {
+        if (!finalSettings.isFastestModeEnabled && candidate.isBundledOrder && !finalSettings.isBundleOrderEnabled) {
             onOrderDecisionFast(
                 recordId = pinnedRecordId,
                 candidate = candidate,
@@ -8646,7 +8646,8 @@ private val processingTimeoutRunnable = Runnable {
         // Fix Area, +Amount or legacy routes are OR alternatives by design;
         // Fastest ON uses pickup only. This check reads cached settings and
         // candidate data, never an additional Accessibility tree or address.
-        if (candidate.platform == Platform.RAPIDO) {
+        // Fastest already passed the pickup-only gate above using this settings snapshot.
+        if (candidate.platform == Platform.RAPIDO && !finalSettings.isFastestModeEnabled) {
             val canonicalMatch = AreaRulesEngine.evaluateRide(
                 candidate = candidate,
                 areas = finalGoToGroups + finalNoGoGroups,
