@@ -1163,6 +1163,11 @@ private val processingTimeoutRunnable = Runnable {
                         "${decision.reason} | Safe Reject/X control not verified; no click")
                     return true
                 }
+                // One action per continuously observed Ola offer, even if later
+                // events show the same card with partially updated fields.
+                if (candidate.platform == Platform.OLA) {
+                    olaVisibleOffer.markAttempted(candidate)
+                }
                 val clicked = rejectNode!!.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 // Android ACTION_CLICK_OK does not prove rejection reached the platform.
                 finish(if (clicked) "PICKUP_GUARD_REJECT_SENT" else "PICKUP_GUARD_REJECT_FAILED",
