@@ -1456,6 +1456,7 @@ fun SmartDrivoApp(
                     com.example.auth.PickupGuardOwnerAccess.clear()
                     repository.stopOwnMembershipSync()
                     PhoneAuthManager.signOut()
+                    com.example.auth.PickupGuardOwnerAccess.clear()
                     prefs.clearLoginSessionState()
                     prefs.isLoggedIn = false
                     prefs.setAutoAcceptActive(false)

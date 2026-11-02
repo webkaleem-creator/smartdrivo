@@ -1139,11 +1139,9 @@ private val processingTimeoutRunnable = Runnable {
 
                 // No gesture fallback, guessed position or clickable-ancestor substitution.
                 // Uber requires an explicit visible Reject/Decline/Skip label.
-                val rejectNode = when (candidate.platform) {
-                    Platform.RAPIDO -> findStrictRapidoRejectNode(root)
-                    Platform.OLA -> OlaAdapter.findRejectNode(root)
-                    Platform.UBER -> findPickupGuardNamedReject(root)
-                }
+                // Guard cannot use the legacy Rapido geometric fallback or
+                // Ola's non-clickable text-match ancestor. Explicit controls only.
+                val rejectNode = findPickupGuardNamedReject(root)
                 val bounds = Rect()
                 rejectNode?.getBoundsInScreen(bounds)
                 val nodePkg = rejectNode?.packageName?.toString().orEmpty()
@@ -1184,7 +1182,14 @@ private val processingTimeoutRunnable = Runnable {
         val labels = setOf("reject", "decline", "skip", "pass")
         val text = node.text?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
         val desc = node.contentDescription?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
-        if (text in labels || desc in labels) return node
+        val resourceName = node.viewIdResourceName?.substringAfterLast("/")?.lowercase(Locale.ROOT).orEmpty()
+        val explicitResource = Regex("^(?:btn_|button_|action_)?(?:reject|decline|skip|pass)(?:_button|_btn)?$")
+            .matches(resourceName)
+        val explicitlyNamed = text in labels || desc in labels || explicitResource
+        val directClick = node.isClickable && node.isEnabled && node.isVisibleToUser &&
+            node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }
+        // Never return a text child then walk up to a guessed clickable parent.
+        if (explicitlyNamed && directClick) return node
         for (i in 0 until node.childCount) {
             findPickupGuardNamedReject(node.getChild(i))?.let { return it }
         }
