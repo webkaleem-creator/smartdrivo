@@ -55,4 +55,16 @@ class OlaHistoryOwnershipTest {
         assertEquals(160f, history.getById(next.id)!!.fare, 0.01f)
         assertEquals(2, history.getAllHistoryDirect().size)
     }
+    @Test fun twentyRepeatedDetectionsReuseOneRowIncludingNoClickOutcome() = runBlocking {
+        val tracker = com.example.engine.OlaVisibleOffer()
+        val candidate = offer()
+        val id = tracker.observe(candidate)
+        repeat(20) { history.onOrderDetected(candidate, olaRecordId = tracker.observe(candidate)) }
+        history.onOrderDecision(id, OrderStatus.IGNORED, "OLA_READY_CONTROL_UNAVAILABLE", "No verified control")
+        assertEquals(1, history.getAllHistoryDirect().size)
+        val row = history.getById(id)!!
+        assertEquals(OrderStatus.IGNORED.name, row.status)
+        assertEquals(0, row.timesClicked)
+        assertEquals(0L, row.actionCompletedAt)
+    }
 }

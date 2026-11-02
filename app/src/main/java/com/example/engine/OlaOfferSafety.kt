@@ -31,6 +31,20 @@ object OlaOfferSafety {
             address(old.dropAddress) == address(live.dropAddress) && old.vehicleType == live.vehicleType
     }
 
+    /** Replacement requires positive identity evidence, never missing render fields. */
+    fun isDifferentOffer(old: com.example.model.RideCandidate, live: com.example.model.RideCandidate): Boolean {
+        fun id(v: String?) = v?.takeUnless { it.startsWith("ola_offer_") || it.isBlank() }
+        val a = id(old.bookingId); val b = id(live.bookingId)
+        if (a != null && b != null) return a != b
+        fun address(v: String?): String? = normalize(v).takeUnless {
+            it.isBlank() || it == "address unavailable" || it.endsWith(" location")
+        }
+        val oldPickup = address(old.pickupAddress); val newPickup = address(live.pickupAddress)
+        val oldDrop = address(old.dropAddress); val newDrop = address(live.dropAddress)
+        return oldPickup != null && newPickup != null && oldDrop != null && newDrop != null &&
+            oldPickup != newPickup && oldDrop != newDrop
+    }
+
     private val driverPackages = setOf(
         "com.olacabs.oladriver",
         "com.olacabs.driver",

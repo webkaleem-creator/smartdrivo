@@ -5618,6 +5618,9 @@ private val processingTimeoutRunnable = Runnable {
      * Ola detection: scan window with package ola.cabs, find clickable accept button.
      * States: OLA_DETECTED → OLA_CLICK_ATTEMPTED → OLA_ACCEPTED
      */
+    private val olaVisibleOffer = com.example.engine.OlaVisibleOffer()
+    private var olaLastEvaluated: RideCandidate? = null
+    private var olaLastRecordId: String? = null
     private val olaSessionLock = Any()
     private val olaSessions = com.example.engine.OlaSessionOwner()
 
@@ -5678,9 +5681,7 @@ private val processingTimeoutRunnable = Runnable {
                             prefs.userProfile.value.vehicleType
                     )
 
-            val candidate = parsedCandidate.copy(
-                bookingId = parsedCandidate.bookingId ?: OlaOfferSafety.internalId()
-            )
+            val candidate = parsedCandidate
 
             // OLA PARSED VALUES V2
             Log.i(
@@ -5710,20 +5711,13 @@ private val processingTimeoutRunnable = Runnable {
                 return
             }
 
-            // Duplicate protection for Ola
-            val bookingId = candidate.bookingId
-            if (!bookingId.isNullOrBlank() && isDuplicateOlaBookingId(bookingId)) {
-                Log.i(TAG, "⏭️ Duplicate Ola order skipped (bookingId: $bookingId)")
-                RideDiagnosticsManager.recordDuplicateEvent(bookingId)
-                setOlaState(OlaState.IDLE)
-                return
-            }
-            if (!bookingId.isNullOrBlank()) {
-                recordOlaBookingId(bookingId)
-            }
-
-            // PART B/E: Detection-First Insert: IMMEDIATELY create one History record with PROCESSING status in Room
-            val recordId = onOrderDetectedFast(candidate, OlaOfferSafety.internalId())
+            val stableId = olaVisibleOffer.observe(candidate)
+            if (olaLastRecordId == stableId && olaLastEvaluated?.let {
+                    OlaOfferSafety.sameOffer(it, candidate)
+                } == true) return
+            olaLastEvaluated = candidate
+            olaLastRecordId = stableId
+            val recordId = onOrderDetectedFast(candidate, stableId)
             olaDiag(OlaDiagnosticStore.Stage.HISTORY_DETECTED)
             Log.i(TAG, "⚡ Ola order detected & inserted to Room [PROCESSING]: Fare=₹${candidate.fare}, pickup=${candidate.pickupAddress}")
 
@@ -5931,6 +5925,13 @@ private val processingTimeoutRunnable = Runnable {
             System.currentTimeMillis() + 180_000L
 
         var clickAttempts = 0
+        val progress = com.example.engine.OlaWatchProgress()
+        fun ended(code: String, reason: String) {
+            if (clickAttempts == 0) onOrderDecisionFast(recordId, candidate,
+                OrderStatus.IGNORED, code, reason)
+            else onOrderActionCompletedFast(recordId, candidate, OrderStatus.UNCONFIRMED,
+                code, reason, false, clickAttempts)
+        }
 
         try {
             while (
@@ -5942,7 +5943,12 @@ private val processingTimeoutRunnable = Runnable {
                     findBestLiveOlaRoot()
 
                 if (freshRoot == null) {
-                    delay(30L)
+                    if (progress.observe(System.currentTimeMillis(), false, false, false)) {
+                        ended("OLA_OFFER_DISAPPEARED", "Ola offer no longer visible")
+                        synchronized(olaSessionLock) { olaVisibleOffer.disappeared() }
+                        return
+                    }
+                    delay(200L)
                     continue
                 }
 
@@ -5977,21 +5983,8 @@ private val processingTimeoutRunnable = Runnable {
 
                 if (negativeReason != null) {
 
-                    onOrderActionCompletedFast(
-                        recordId = recordId,
-                        candidate = candidate,
-                        status = OrderStatus.FAILED,
-                        reasonCode = "OLA_ORDER_ENDED",
-                        reasonText = negativeReason,
-                        actionSucceeded = false,
-                        timesClicked = clickAttempts,
-                        buttonFound = false,
-                        buttonDetails = "Ola order ended before final Accept",
-                        clickMethod = "Ola V5 final-ready watcher",
-                        errorMsg = negativeReason
-                    )
-
-                        setOlaState(OlaState.IDLE)
+                    ended("OLA_ORDER_ENDED", negativeReason)
+                    synchronized(olaSessionLock) { olaVisibleOffer.disappeared() }
                     return
                 }
 
@@ -6008,10 +6001,14 @@ private val processingTimeoutRunnable = Runnable {
                 val liveOffer = OlaAdapter.extractCandidate(freshRoot, candidate.vehicleType)
                 if (OlaOfferSafety.hasUsableOffer(liveOffer.fare, liveOffer.pickupDistKm,
                         liveOffer.dropDistKm, liveOffer.pickupAddress, liveOffer.dropAddress) &&
-                    !OlaOfferSafety.sameOffer(candidate, liveOffer)) {
+                    !OlaOfferSafety.sameOffer(candidate, liveOffer) &&
+                    liveOffer.fare != null && liveOffer.pickupDistKm != null &&
+                    liveOffer.dropDistKm != null &&
+                    !liveOffer.dropAddress.isNullOrBlank() && liveOffer.dropAddress != "Address unavailable") {
                     replacementRoot = freshRoot
-                    onOrderActionCompletedFast(recordId, candidate, OrderStatus.FAILED,
-                        "OLA_OFFER_CHANGED", "Offer replaced; reevaluating", false, clickAttempts)
+                    if (OlaOfferSafety.isDifferentOffer(candidate, liveOffer)) {
+                        ended("OLA_OFFER_REPLACED", "Offer replaced; reevaluating")
+                    }
                     return
                 }
 
@@ -6024,8 +6021,8 @@ private val processingTimeoutRunnable = Runnable {
 
                 if (countdown != null && countdown > 0) {
                     olaDiag(OlaDiagnosticStore.Stage.COUNTDOWN_WAIT, countdown)
-                    Log.d(TAG, "OLA V5 waiting: Accept in $countdown")
-                    delay(30L)
+                    progress.observe(System.currentTimeMillis(), true, true, false)
+                    delay(200L)
                     continue
                 }
 
@@ -6034,9 +6031,16 @@ private val processingTimeoutRunnable = Runnable {
 
                 if (readyNode == null) {
                     olaDiag(OlaDiagnosticStore.Stage.READY_BUTTON_MISSING)
-                    delay(30L)
+                    val visible = findOlaAcceptButton(freshRoot) != null
+                    if (progress.observe(System.currentTimeMillis(), visible, false, false)) {
+                        ended("OLA_READY_CONTROL_UNAVAILABLE", "No enabled verified final Accept control; no automatic action")
+                        if (!visible) synchronized(olaSessionLock) { olaVisibleOffer.disappeared() }
+                        return
+                    }
+                    delay(200L)
                     continue
                 }
+                progress.observe(System.currentTimeMillis(), true, false, true)
 
                 // Five attempts maximum; never hammer an unresponsive UI.
                 if (clickAttempts >= 5) {
@@ -6146,24 +6150,12 @@ private val processingTimeoutRunnable = Runnable {
             }
 
             val cancelled = !olaSessions.isCurrent(session) || !olaMonitoringEnabled()
-            onOrderActionCompletedFast(
-                recordId = recordId,
-                candidate = candidate,
-                status = OrderStatus.FAILED,
-                reasonCode = if (cancelled) "OLA_WATCH_CANCELLED" else "OLA_FINAL_ACCEPT_TIMEOUT",
-                reasonText = if (cancelled) "Ola watcher cancelled" else "Ola final Accept did not become confirmed within the live watch window",
-                actionSucceeded = false,
-                timesClicked = clickAttempts,
-                buttonFound = false,
-                buttonDetails = "Final exact Ola Accept was not confirmed",
-                clickMethod = "Ola V5 final-ready watcher",
-                errorMsg = "180-second Ola live watcher expired"
-            )
+            ended(if (cancelled) "OLA_WATCH_CANCELLED" else "OLA_WATCH_TIMEOUT",
+                if (cancelled) "Ola watcher cancelled" else "Ola observation window ended without confirmed acceptance")
 
         } catch (e: Exception) {
             Log.e(TAG, "OLA V5 watcher error", e)
-            onOrderActionCompletedFast(recordId, candidate, OrderStatus.FAILED,
-                "OLA_WATCH_ERROR", "Ola watcher stopped: ${e.javaClass.simpleName}", false, clickAttempts)
+            ended("OLA_WATCH_ERROR", "Ola observation stopped: ${e.javaClass.simpleName}")
         } finally {
             synchronized(olaSessionLock) {
                 if (!olaSessions.finish(session)) return
