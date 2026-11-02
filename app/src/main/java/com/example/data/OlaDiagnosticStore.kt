@@ -20,7 +20,10 @@ object OlaDiagnosticStore {
         WATCH_NO_ROOT, COUNTDOWN_WAIT, READY_BUTTON_MISSING,
         READY_BUTTON_FOUND, OFFER_CHANGED, CLICK_ATTEMPT,
         ACTION_CLICK_OK, ACTION_CLICK_FAILED, GESTURE_DISPATCHED,
-        ACCEPT_CONFIRMED, ORDER_ENDED, WATCH_TIMEOUT, WATCH_ERROR
+        ACCEPT_CONFIRMED, ORDER_ENDED, WATCH_TIMEOUT, WATCH_ERROR,
+        TARGET_FLAGS, TARGET_WINDOW, ROOT_WINDOW, TARGET_LEFT, TARGET_TOP,
+        TARGET_WIDTH, TARGET_HEIGHT, PARENT_FLAGS, POST_CLICK_STATE,
+        ACTION_ALREADY_ATTEMPTED, VERIFICATION_TIMEOUT, OVERLAY_COUNT
     }
 
     private const val PREF = "smartdrivo_ola_diagnostics_v1"
@@ -68,6 +71,8 @@ object OlaDiagnosticStore {
             appendLine("SmartDrivo Ola Diagnostics v1")
             appendLine("Privacy: no addresses, passenger details, booking IDs or screen text.")
             appendLine("Values: ROOT_SELECTED=window score; OFFER_PARSED_FARE=rupees; COUNTDOWN_WAIT=seconds; CLICK_ATTEMPT=attempt number.")
+            appendLine("TARGET_FLAGS bits: visible=1 enabled=2 clickable=4 click-action=8 driver-package=16 same-window=32.")
+            appendLine("PARENT_FLAGS: clickable=1 enabled=2. POST_CLICK_STATE: confirmed-text=1 ready-control=2. Window IDs are ephemeral; OVERLAY_COUNT counts accessibility overlays only.")
             appendLine("Missing events can mean no Ola accessibility events were delivered.")
             appendLine("Events: " + items.size + " of max " + MAX_EVENTS)
             appendLine("---")

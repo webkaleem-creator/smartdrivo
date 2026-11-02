@@ -6,6 +6,19 @@ import com.example.model.RideCandidate
 class OlaVisibleOffer {
     private var observed: RideCandidate? = null
     private var id: String? = null
+    private val attempted = ArrayDeque<RideCandidate>()
+    private var attemptedVisibleId: String? = null
+    @Synchronized fun wasAttempted(live: RideCandidate): Boolean =
+        (id != null && id == attemptedVisibleId && observed?.let {
+            !OlaOfferSafety.isDifferentOffer(it, live)
+        } == true) || attempted.any {
+        (it.bookingId != null && it.bookingId == live.bookingId) || OlaOfferSafety.sameOffer(it, live)
+    }
+    @Synchronized fun markAttempted(live: RideCandidate) {
+        attemptedVisibleId = id
+        attempted.addLast(live)
+        if (attempted.size > 32) attempted.removeFirst()
+    }
     @Synchronized fun observe(live: RideCandidate): String {
         val old = observed
         if (old == null || OlaOfferSafety.isDifferentOffer(old, live)) {

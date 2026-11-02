@@ -45,6 +45,12 @@ object OlaOfferSafety {
             oldPickup != newPickup && oldDrop != newDrop
     }
 
+    fun isSafeDirectTarget(label: String?, description: String?, visible: Boolean,
+        enabled: Boolean, clickable: Boolean, clickAction: Boolean,
+        driverPackage: Boolean, sameWindow: Boolean, validBounds: Boolean): Boolean =
+        visible && enabled && clickable && clickAction && driverPackage && sameWindow && validBounds &&
+            (isReadyLabel(label) || isReadyLabel(description))
+
     private val driverPackages = setOf(
         "com.olacabs.oladriver",
         "com.olacabs.driver",
