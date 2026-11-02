@@ -102,6 +102,7 @@ fun MoreScreen(
     onNavigateToCommunity: () -> Unit = {},
     onNavigateToReadOnlyProfile: () -> Unit = {},
     onNavigateToAdminPanel: () -> Unit = {},
+    onNavigateToPickupGuard: () -> Unit = {},
     onLogout: () -> Unit,
     onBack: () -> Unit = {}
 ) {

@@ -1453,7 +1453,6 @@ fun SmartDrivoApp(
                 onNavigateToAdminPanel = { navController.navigate(Routes.ADMIN_PANEL) },
                 onNavigateToPickupGuard = { navController.navigate(Routes.PICKUP_GUARD) },
                 onLogout = {
-                    com.example.auth.PickupGuardOwnerAccess.clear()
                     repository.stopOwnMembershipSync()
                     PhoneAuthManager.signOut()
                     com.example.auth.PickupGuardOwnerAccess.clear()

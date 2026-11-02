@@ -6,6 +6,7 @@ import com.example.engine.FixAreaSettings
 import android.content.Context
 import android.content.SharedPreferences
 import com.example.model.AppSettings
+import com.example.model.PickupGuardSettings
 import com.example.model.AppThemeMode
 import com.example.model.AreaGroup
 import com.example.model.AreaType
