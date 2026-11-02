@@ -374,7 +374,7 @@ class FloatingOverlayService : Service() {
         val summaryRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dpToPx(6), dpToPx(3), dpToPx(6), dpToPx(2))
+            setPadding(dpToPx(5), dpToPx(1), dpToPx(5), dpToPx(1))
         }
 
         val fareCell = LinearLayout(this).apply {
@@ -459,7 +459,7 @@ class FloatingOverlayService : Service() {
             ).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
                 topMargin = dpToPx(1)
-                bottomMargin = dpToPx(2)
+                bottomMargin = dpToPx(1)
             }
         })
 
@@ -482,14 +482,14 @@ class FloatingOverlayService : Service() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = rounded(0xFFEBE1FF.toInt(), 13f)
-            setPadding(dpToPx(6), dpToPx(3), dpToPx(6), dpToPx(3))
+            setPadding(dpToPx(6), dpToPx(2), dpToPx(6), dpToPx(2))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
                 marginStart = dpToPx(6)
                 marginEnd = dpToPx(6)
-                bottomMargin = dpToPx(3)
+                bottomMargin = dpToPx(2)
             }
         }
 

@@ -651,7 +651,7 @@ private fun AcceptedOrderHistoryPopup(item: OrderHistoryItem, onDismiss: () -> U
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
-            Modifier.fillMaxWidth(0.85f)
+            Modifier.fillMaxWidth(0.96f)
                 .background(Color.White, RoundedCornerShape(19.dp))
                 .border(2.dp, Color(0xFF8B38FF), RoundedCornerShape(19.dp))
                 .padding(2.dp)
@@ -684,14 +684,14 @@ private fun AcceptedOrderHistoryPopup(item: OrderHistoryItem, onDismiss: () -> U
 
             // Compact single summary row: fare/base/tip and pickup/trip.
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 5.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 3.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(
-                    modifier = Modifier.weight(1.5f).height(54.dp)
+                    modifier = Modifier.weight(1.5f).height(46.dp)
                         .background(Color(0xFFFFE5B0), RoundedCornerShape(11.dp))
-                        .padding(horizontal = 2.dp, vertical = 3.dp),
+                        .padding(horizontal = 2.dp, vertical = 2.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
@@ -715,7 +715,7 @@ private fun AcceptedOrderHistoryPopup(item: OrderHistoryItem, onDismiss: () -> U
                     Triple("📍 Trip", tripText, Color(0xFFE01228))
                 ).forEach { (label, value, color) ->
                     Column(
-                        modifier = Modifier.weight(0.95f).height(54.dp)
+                        modifier = Modifier.weight(0.95f).height(46.dp)
                             .background(Color(0xFFF0F2FC), RoundedCornerShape(11.dp))
                             .padding(horizontal = 2.dp, vertical = 3.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -732,14 +732,14 @@ private fun AcceptedOrderHistoryPopup(item: OrderHistoryItem, onDismiss: () -> U
             }
 
             Box(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     "✓ Accepted at " + time,
                     modifier = Modifier.background(Color(0xFFDEFBE5), RoundedCornerShape(18.dp))
                         .border(1.dp, Color(0xFF4BE478), RoundedCornerShape(18.dp))
-                        .padding(horizontal = 10.dp, vertical = 2.dp),
+                        .padding(horizontal = 10.dp, vertical = 1.dp),
                     color = Color(0xFF085C29), fontSize = 10.5.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -747,9 +747,9 @@ private fun AcceptedOrderHistoryPopup(item: OrderHistoryItem, onDismiss: () -> U
 
             Row(
                 modifier = Modifier.fillMaxWidth()
-                    .padding(start = 6.dp, end = 6.dp, bottom = 6.dp, top = 3.dp)
+                    .padding(start = 6.dp, end = 6.dp, bottom = 4.dp, top = 2.dp)
                     .background(Color(0xFFECE0FF), RoundedCornerShape(12.dp))
-                    .padding(6.dp),
+                    .padding(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("📍", fontSize = 14.sp)
