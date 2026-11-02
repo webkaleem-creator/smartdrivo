@@ -2,12 +2,12 @@ package com.example.ui.screens
 
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedTextField
@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.auth.PickupGuardOwnerAccess
 import com.example.data.PreferencesManager
@@ -55,9 +56,12 @@ fun PickupGuardScreen(prefs: PreferencesManager, onBack: () -> Unit) {
                         Text("Manual Choice Mode")
                         Switch(checked = current.enabled, onCheckedChange = { checked ->
                             if (!checked || isValid) {
-                                val maximum = if (isValid) parsed!! else current.maxPickupKm
+                                // Read the latest persisted settings so a recent
+                                // numeric auto-save cannot be overwritten by the toggle.
+                                val latest = prefs.pickupGuardSettings.value
+                                val maximum = if (isValid) parsed!! else latest.maxPickupKm
                                 val saved = prefs.savePickupGuardSettings(
-                                    current.copy(enabled = checked, maxPickupKm = maximum)
+                                    latest.copy(enabled = checked, maxPickupKm = maximum)
                                 )
                                 message = if (saved) "" else "Owner authorization expired"
                                 Toast.makeText(
@@ -74,16 +78,38 @@ fun PickupGuardScreen(prefs: PreferencesManager, onBack: () -> Unit) {
                         })
                     }
                     OutlinedTextField(
-                        value = input, onValueChange = { input = it },
+                        value = input,
+                        onValueChange = { draft ->
+                            input = draft
+                            val maximum = draft.toFloatOrNull()
+                            if (maximum != null && maximum.isFinite() &&
+                                maximum > 0f && maximum <= 30f
+                            ) {
+                                // Save every valid edited value immediately. No Save button
+                                // or delayed job that could be lost when Back is pressed.
+                                val latest = prefs.pickupGuardSettings.value
+                                if (maximum != latest.maxPickupKm) {
+                                    val saved = prefs.savePickupGuardSettings(
+                                        latest.copy(maxPickupKm = maximum)
+                                    )
+                                    message = if (saved) "" else "Owner authorization expired"
+                                    if (!saved) {
+                                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    message = ""
+                                }
+                            } else {
+                                // Invalid/partial keyboard drafts never overwrite saved limits.
+                                message = if (draft.isBlank()) "" else "Enter a valid pickup maximum"
+                            }
+                        },
                         label = { Text("Max Pickup (km)") },
-                        singleLine = true, isError = input.isNotBlank() && !isValid,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        isError = input.isNotBlank() && !isValid,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Button(onClick = {
-                        if (isValid) message = if (prefs.savePickupGuardSettings(
-                            current.copy(maxPickupKm = parsed!!)
-                        )) "Saved" else "Owner authorization expired"
-                    }, enabled = isValid, modifier = Modifier.fillMaxWidth()) { Text("SAVE") }
                     Text("Pickup within max and No-Go clear: manual choice, never auto-accept.")
                     Text("Out-of-range or No-Go: verified Reject/X only. Missing data: no action.")
                     Text("Platform offer countdown continues normally.")
