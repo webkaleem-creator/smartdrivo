@@ -3,6 +3,7 @@ package com.example.engine
 import androidx.compose.runtime.Immutable
 import com.example.model.AreaGroup
 import com.example.model.AppSettings
+import com.example.model.Platform
 import com.example.model.FilterMode
 import com.example.model.RideCandidate
 
@@ -62,8 +63,9 @@ object AreaRulesEngine {
     ): DecisionResult {
         // V12_FASTEST_PICKUP_ONLY_DECISION
         // The Fastest filter has precedence over all destination/numeric rule engines.
-        // Bundle OFF remains a separate, intentional safety/manual-action policy.
-        if (candidate.isBundledOrder && !settings.isBundleOrderEnabled) {
+        // Rapido Fastest eligibility is pickup-only; other platforms retain Bundle policy.
+        if (candidate.isBundledOrder && !settings.isBundleOrderEnabled &&
+            !(candidate.platform == Platform.RAPIDO && settings.isFastestModeEnabled)) {
             return DecisionResult.Ignore("Bundle Order OFF  |  Manual action")
         }
         if (settings.isFastestModeEnabled) {
