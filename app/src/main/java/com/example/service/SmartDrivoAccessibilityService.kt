@@ -2420,6 +2420,14 @@ private val processingTimeoutRunnable = Runnable {
             baseFare = orderData.baseFare.takeIf { it > 0f },
             tipAmount = orderData.tipAmount.takeIf { it > 0f }
         )
+        if (prefs.adminPickupBlockSettings.value.enabled) {
+            val veto = adminPickupBlockDecision(filterRoot, filteredCandidate)
+            if (veto !is com.example.engine.AdminPickupBlockPolicy.Decision.Allow) {
+                val vetoId = onOrderDetectedFast(filteredCandidate)
+                handleAdminPickupBlock(filterRoot, filteredCandidate, vetoId)
+                return true
+            }
+        }
         val priorityDecision = com.example.engine.RapidoAutoPriorityFilterEngine.evaluate(
             candidate = filteredCandidate,
             settings = settings,
@@ -2495,6 +2503,16 @@ private val processingTimeoutRunnable = Runnable {
             return true
         }
         val matchedFilterReason = decision.reason
+
+        // Final admin pickup check immediately before priority's strict click.
+        if (prefs.adminPickupBlockSettings.value.enabled) {
+            val veto = adminPickupBlockDecision(filterRoot, filteredCandidate)
+            if (veto !is com.example.engine.AdminPickupBlockPolicy.Decision.Allow) {
+                val vetoId = onOrderDetectedFast(filteredCandidate)
+                handleAdminPickupBlock(filterRoot, filteredCandidate, vetoId)
+                return true
+            }
+        }
 
         rapidoAutoPriorityFastBusy =
             true
@@ -4478,6 +4496,7 @@ private val processingTimeoutRunnable = Runnable {
             val recordId = onOrderDetectedFast(candidate)
             Log.i(TAG, "⚡ Uber order detected & inserted to Room [PROCESSING]: Fare=₹${candidate.fare}, pickup=${candidate.pickupAddress}")
 
+            if (handleAdminPickupBlock(uberOrderRoot, candidate, recordId)) return
             if (handleOwnerPickupGuard(uberOrderRoot, candidate, recordId)) return
 
             // Direct SharedPreferences Filter Evaluation before evaluating ANY ride
@@ -4585,6 +4604,11 @@ private val processingTimeoutRunnable = Runnable {
         waitRound: Int = 0,
         clickLockNotified: Boolean = false
     ) {
+        if (prefs.adminPickupBlockSettings.value.enabled) {
+            val recordId = activeOrderRecordIds[Platform.UBER]
+                ?: onOrderDetectedFast(candidate)
+            if (handleAdminPickupBlock(root, candidate, recordId)) return
+        }
         if (prefs.pickupGuardSettings.value.enabled) {
             resetProcessing()
             return
@@ -6103,6 +6127,7 @@ private val processingTimeoutRunnable = Runnable {
             olaDiag(OlaDiagnosticStore.Stage.HISTORY_DETECTED)
             Log.i(TAG, "Ola offer detected; history queued")
 
+            if (handleAdminPickupBlock(root, candidate, recordId)) return
             if (handleOwnerPickupGuard(root, candidate, recordId)) return
 
             if (olaOwnerTesting) {
@@ -6300,6 +6325,11 @@ private val processingTimeoutRunnable = Runnable {
             return
         }
 
+        if (prefs.adminPickupBlockSettings.value.enabled) {
+            val record = historyRecordId ?: onOrderDetectedFast(candidate,
+                com.example.engine.OlaOfferSafety.internalId())
+            if (handleAdminPickupBlock(root, candidate, record)) return
+        }
         val ownerMode = prefs.olaAdminFilterSettings.value.enabled
         val directResult = if (ownerMode) {
             when (val decision = evaluateOlaOwnerDecision(candidate)) {
@@ -6581,6 +6611,10 @@ private val processingTimeoutRunnable = Runnable {
     }
 
     private fun olaFinalFiltersMatch(candidate: RideCandidate, root: AccessibilityNodeInfo): Boolean {
+        if (prefs.adminPickupBlockSettings.value.enabled) {
+            if (adminPickupBlockDecision(root, candidate)
+                !is com.example.engine.AdminPickupBlockPolicy.Decision.Allow) return false
+        }
         if (prefs.olaAdminFilterSettings.value.enabled) {
             // Re-read Ola settings, owner claim and shared safety on the fresh offer.
             return evaluateOlaOwnerDecision(candidate) is DecisionResult.Accept
@@ -8486,6 +8520,7 @@ private val processingTimeoutRunnable = Runnable {
         Log.i(TAG, "⚡ Rapido order detected & inserted to Room [PROCESSING]: Fare=₹${candidate.fare}, pickup=${candidate.pickupAddress}")
 
         rapidoMiss("HISTORY_QUEUED")
+        if (handleAdminPickupBlock(root, candidate, recordId)) return
         if (handleOwnerPickupGuard(root, candidate, recordId)) return
 
         // Auto-Accept and Auto-Reject are independent.
@@ -8968,6 +9003,17 @@ private val processingTimeoutRunnable = Runnable {
             historyRecordId
                 ?: activeOrderRecordIds[candidate.platform]
                 ?: onOrderDetectedFast(candidate)
+        if (prefs.adminPickupBlockSettings.value.enabled) {
+            val pickupRoot = orderRoot ?: getRapidoOrderRootNode()
+            if (pickupRoot == null) {
+                onOrderDecisionFast(pinnedRecordId, candidate, OrderStatus.IGNORED,
+                    "ADMIN_PICKUP_ROOT_UNAVAILABLE",
+                    "Pickup Shield ON: live Rapido offer unavailable; no auto-accept")
+                resetProcessing()
+                return
+            }
+            if (handleAdminPickupBlock(pickupRoot, candidate, pinnedRecordId)) return
+        }
         val dropAddress = candidate.dropAddress?.trim().orEmpty()
         val hasValidDropAddress = dropAddress.isNotEmpty() &&
             !dropAddress.equals("Address unavailable", ignoreCase = true) &&
