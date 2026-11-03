@@ -51,6 +51,18 @@ object OlaOfferSafety {
         visible && enabled && clickable && clickAction && driverPackage && sameWindow && validBounds &&
             (isReadyLabel(label) || isReadyLabel(description))
 
+    /** Presence only; never includes passenger text or identifiers. */
+    fun fieldFlags(candidate: com.example.model.RideCandidate): Int {
+        fun finite(v: Float?) = v != null && v.isFinite() && v >= 0f
+        fun address(v: String?) = !v.isNullOrBlank() && normalize(v) !in
+            setOf("address unavailable", "pickup location", "drop location")
+        return (if (candidate.fare?.let { it.isFinite() && it > 0f } == true) 1 else 0) or
+            (if (finite(candidate.pickupDistKm)) 2 else 0) or
+            (if (finite(candidate.dropDistKm)) 4 else 0) or
+            (if (address(candidate.pickupAddress)) 8 else 0) or
+            (if (address(candidate.dropAddress)) 16 else 0)
+    }
+
     private val driverPackages = setOf(
         "com.olacabs.oladriver",
         "com.olacabs.driver",

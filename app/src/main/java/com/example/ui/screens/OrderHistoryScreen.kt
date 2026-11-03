@@ -127,7 +127,7 @@ fun OrderHistoryScreen(
     // Hide expired records while asynchronous physical deletion completes.
     val history = remember(historyEntities, yesterdayStart, tomorrowStart) {
         historyEntities.asSequence()
-            .filter { it.status != OrderStatus.PROCESSING.name &&
+            .filter { (it.status != OrderStatus.PROCESSING.name || it.platform == Platform.OLA.name) &&
                 it.detectedAt >= yesterdayStart && it.detectedAt < tomorrowStart }
             .sortedByDescending { it.detectedAt }
             .map { it.toOrderHistoryItem() }.toList()

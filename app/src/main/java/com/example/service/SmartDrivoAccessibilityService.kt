@@ -2774,12 +2774,27 @@ private val processingTimeoutRunnable = Runnable {
         }
 
         // Window topology changes can be the only event for an overlay.
-        // This newly subscribed event is Rapido-only; other engines retain their event set.
+        // Preserve Rapido routing and route verified Ola topology changes as well.
         if (event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             val visible = directRapido || try {
                 windows.any { isRapidoPackage(it.root?.packageName?.toString().orEmpty()) }
             } catch (_: Exception) { false }
             if (visible) dispatchRapidoRead(null, event.eventType, event.eventTime)
+            val olaPackage = com.example.engine.OlaWindowEventRoute.packageFor(
+                event.packageName?.toString(), try {
+                    windows.mapNotNull { it.root?.packageName?.toString() }
+                } catch (_: Exception) { emptyList() })
+            if (olaPackage != null && olaWindowReadQueued.compareAndSet(false, true)) {
+                val eventType = event.eventType
+                serviceScope.launch(Dispatchers.IO) {
+                    try {
+                        olaDiag(OlaDiagnosticStore.Stage.WINDOW_EVENT_READ)
+                        processAccessibilityEvent(olaPackage, null, eventType)
+                    } finally {
+                        olaWindowReadQueued.set(false)
+                    }
+                }
+            }
             return
         }
 
@@ -5862,6 +5877,8 @@ private val processingTimeoutRunnable = Runnable {
     private val olaVisibleOffer = com.example.engine.OlaVisibleOffer()
     private var olaLastEvaluated: RideCandidate? = null
     private var olaLastRecordId: String? = null
+    private val olaWindowReadQueued = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val olaHistoryInserts = com.example.engine.OlaHistoryInsertGate()
     private val olaSessionLock = Any()
     private val olaSessions = com.example.engine.OlaSessionOwner()
 
@@ -5934,6 +5951,7 @@ private val processingTimeoutRunnable = Runnable {
             val candidate = parsedCandidate
 
             olaDiag(OlaDiagnosticStore.Stage.OFFER_PARSED_FARE, candidate.fare?.toInt())
+            olaDiag(OlaDiagnosticStore.Stage.OFFER_FIELD_FLAGS, OlaOfferSafety.fieldFlags(candidate))
             // OLA_HISTORY_VALIDATION_V1: a generic Ola screen is not a ride offer.
             // Never record fake zero-fare / unrelated account details as History.
             if (!OlaOfferSafety.hasUsableOffer(
@@ -6380,10 +6398,17 @@ private val processingTimeoutRunnable = Runnable {
                                 olaDiag(OlaDiagnosticStore.Stage.CLICK_ATTEMPT, 1)
                                 setOlaState(OlaState.OLA_CLICK_ATTEMPTED)
                                 olaVisibleOffer.markAttempted(candidate)
-                                clickableTarget.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                                olaDiag(OlaDiagnosticStore.Stage.SELECTED_TARGET_WINDOW, clickableTarget.windowId)
+                                olaDiag(OlaDiagnosticStore.Stage.ACTION_CALL_STARTED)
+                                val callStart = android.os.SystemClock.uptimeMillis()
+                                val acknowledged = clickableTarget.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                                olaDiag(OlaDiagnosticStore.Stage.ACTION_CALL_RETURNED_MS,
+                                    (android.os.SystemClock.uptimeMillis() - callStart).coerceAtMost(100000).toInt())
+                                acknowledged
                             }
                         }
                     } catch (_: Exception) {
+                        olaDiag(OlaDiagnosticStore.Stage.ACTION_CALL_EXCEPTION)
                         false
                     }
 
@@ -6403,8 +6428,12 @@ private val processingTimeoutRunnable = Runnable {
                 }
 
                 olaDiag(OlaDiagnosticStore.Stage.VERIFICATION_TIMEOUT)
-                ended("OLA_SINGLE_ACTION_UNCONFIRMED",
-                    "One Accept action sent; booking not confirmed. Check Ola manually")
+                if (com.example.engine.OlaActionOutcome.status(actionResult, false) == OrderStatus.FAILED) {
+                    onOrderActionCompletedFast(recordId, candidate, OrderStatus.FAILED,
+                        "OLA_ACTION_REQUEST_REJECTED", "Accept action request failed; booking not confirmed",
+                        false, clickAttempts)
+                } else ended("OLA_SINGLE_ACTION_UNCONFIRMED",
+                    "One Accept action acknowledged; booking not confirmed. Check Ola manually")
                 return
 
             }
@@ -6582,6 +6611,7 @@ private val processingTimeoutRunnable = Runnable {
         candidate: RideCandidate,
         session: com.example.engine.OlaSessionOwner.Session
     ): Boolean {
+        olaDiag(OlaDiagnosticStore.Stage.VERIFY_STARTED)
         val end =
             System.currentTimeMillis() + maxWaitMs
 
@@ -6592,21 +6622,34 @@ private val processingTimeoutRunnable = Runnable {
 
             val root =
                 findBestLiveOlaRoot()
-                    ?: continue
+            if (root == null) {
+                olaDiag(OlaDiagnosticStore.Stage.VERIFY_NO_ROOT)
+                continue
+            }
+            olaDiag(OlaDiagnosticStore.Stage.VERIFY_WINDOW, root.windowId)
 
             val text =
                 OlaAdapter.collectAllNodeTexts(root)
                     .joinToString(" ")
                     .lowercase(Locale.ROOT)
 
-            if (!olaSessions.isCurrent(session) || !olaMonitoringEnabled()) return false
+            if (!olaSessions.isCurrent(session) || !olaMonitoringEnabled()) {
+                olaDiag(OlaDiagnosticStore.Stage.VERIFY_CANCELLED)
+                return false
+            }
             val confirmed = isOlaAcceptedStateV5(text)
             val ready = findExactReadyOlaAcceptV5(root) != null
             olaDiag(OlaDiagnosticStore.Stage.POST_CLICK_STATE,
                 (if (confirmed) 1 else 0) or (if (ready) 2 else 0))
-            if (confirmed && !ready) return true
+            if (confirmed && !ready) {
+                olaDiag(OlaDiagnosticStore.Stage.VERIFY_FINISHED, 1)
+                return true
+            }
             val live = OlaAdapter.extractCandidate(root, candidate.vehicleType)
-            if (OlaOfferSafety.isDifferentOffer(candidate, live)) return false
+            if (OlaOfferSafety.isDifferentOffer(candidate, live)) {
+                olaDiag(OlaDiagnosticStore.Stage.VERIFY_REPLACED)
+                return false
+            }
 
             if (
                 text.contains("accepted by another") ||
@@ -6615,10 +6658,12 @@ private val processingTimeoutRunnable = Runnable {
                 text.contains("you missed") ||
                 text.contains("order missed")
             ) {
+                olaDiag(OlaDiagnosticStore.Stage.VERIFY_ENDED)
                 return false
             }
         }
 
+        olaDiag(OlaDiagnosticStore.Stage.VERIFY_FINISHED, 0)
         return false
     }
 
@@ -10973,6 +11018,10 @@ private val processingTimeoutRunnable = Runnable {
                 }
         activeOrderRecordIds[candidate.platform] = tempId
 
+        val olaInsert = if (candidate.platform == Platform.OLA) {
+            olaHistoryInserts.begin(tempId) ?: return tempId
+        } else null
+
         // SHORT_POPUP_V7: new valid order supersedes old banner.
         // No database or network work on the click-critical path.
         if (prefs.appSettings.value.showOrderReasonPopups) {
@@ -10980,6 +11029,7 @@ private val processingTimeoutRunnable = Runnable {
         }
 
         serviceScope.launch(Dispatchers.IO) {
+            var inserted = false
             try {
                 val entity = rideHistoryRepository.onOrderDetected(
                     candidate = candidate,
@@ -10998,9 +11048,14 @@ private val processingTimeoutRunnable = Runnable {
                         entity.id
                 }
 
+                inserted = true
+                if (olaInsert != null) olaDiag(OlaDiagnosticStore.Stage.HISTORY_INSERTED)
                 prefs.notifyOrderHistoryChanged()
             } catch (e: Exception) {
                 Log.e(TAG, "Error in onOrderDetectedFast", e)
+                if (olaInsert != null) olaDiag(OlaDiagnosticStore.Stage.HISTORY_INSERT_FAILED)
+            } finally {
+                if (olaInsert != null) olaHistoryInserts.complete(tempId, olaInsert, inserted)
             }
         }
         return tempId
@@ -11025,6 +11080,10 @@ private val processingTimeoutRunnable = Runnable {
         if (candidate.platform == Platform.RAPIDO) rapidoMiss("DECISION_${status.name}")
         serviceScope.launch(Dispatchers.IO) {
             try {
+                if (candidate.platform == Platform.OLA && !olaHistoryInserts.await(recordId)) {
+                    olaDiag(OlaDiagnosticStore.Stage.HISTORY_INSERT_FAILED)
+                    return@launch
+                }
                 // onOrderDetectedFast inserts PROCESSING asynchronously.
                 // A very fast decision can arrive before that insert finishes.
                 // Retry briefly so the same real ride cannot remain stuck at PROCESSING.
@@ -11126,6 +11185,10 @@ private val processingTimeoutRunnable = Runnable {
         )
         serviceScope.launch(Dispatchers.IO) {
             try {
+                if (candidate.platform == Platform.OLA && !olaHistoryInserts.await(recordId)) {
+                    olaDiag(OlaDiagnosticStore.Stage.HISTORY_INSERT_FAILED)
+                    return@launch
+                }
                 var updated =
                     rideHistoryRepository.onOrderActionCompleted(
                         id = recordId,

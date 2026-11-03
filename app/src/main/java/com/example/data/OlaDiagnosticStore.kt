@@ -23,7 +23,11 @@ object OlaDiagnosticStore {
         ACCEPT_CONFIRMED, ORDER_ENDED, WATCH_TIMEOUT, WATCH_ERROR,
         TARGET_FLAGS, TARGET_WINDOW, ROOT_WINDOW, TARGET_LEFT, TARGET_TOP,
         TARGET_WIDTH, TARGET_HEIGHT, PARENT_FLAGS, POST_CLICK_STATE,
-        ACTION_ALREADY_ATTEMPTED, VERIFICATION_TIMEOUT, OVERLAY_COUNT
+        ACTION_ALREADY_ATTEMPTED, VERIFICATION_TIMEOUT, OVERLAY_COUNT,
+        HISTORY_INSERTED, HISTORY_INSERT_FAILED, OFFER_FIELD_FLAGS,
+        ACTION_CALL_STARTED, ACTION_CALL_RETURNED_MS, ACTION_CALL_EXCEPTION,
+        SELECTED_TARGET_WINDOW, VERIFY_STARTED, VERIFY_NO_ROOT, VERIFY_CANCELLED,
+        VERIFY_REPLACED, VERIFY_ENDED, VERIFY_WINDOW, VERIFY_FINISHED, WINDOW_EVENT_READ
     }
 
     private const val PREF = "smartdrivo_ola_diagnostics_v1"
@@ -73,6 +77,7 @@ object OlaDiagnosticStore {
             appendLine("Values: ROOT_SELECTED=window score; OFFER_PARSED_FARE=rupees; COUNTDOWN_WAIT=seconds; CLICK_ATTEMPT=attempt number.")
             appendLine("TARGET_FLAGS bits: visible=1 enabled=2 clickable=4 click-action=8 driver-package=16 same-window=32.")
             appendLine("PARENT_FLAGS: clickable=1 enabled=2. POST_CLICK_STATE: confirmed-text=1 ready-control=2. Window IDs are ephemeral; OVERLAY_COUNT counts accessibility overlays only.")
+            appendLine("OFFER_FIELD_FLAGS: positive-fare=1 finite-pickup=2 finite-trip=4 usable-pickup-text=8 usable-drop-text=16. ACTION_CALL_RETURNED_MS is request duration, not booking latency. HISTORY_DETECTED means queued; HISTORY_INSERTED means Room returned.")
             appendLine("Missing events can mean no Ola accessibility events were delivered.")
             appendLine("Events: " + items.size + " of max " + MAX_EVENTS)
             appendLine("---")
