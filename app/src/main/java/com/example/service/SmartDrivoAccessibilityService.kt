@@ -2423,6 +2423,13 @@ private val processingTimeoutRunnable = Runnable {
         if (prefs.adminPickupBlockSettings.value.enabled) {
             val veto = adminPickupBlockDecision(filterRoot, filteredCandidate)
             if (veto !is com.example.engine.AdminPickupBlockPolicy.Decision.Allow) {
+                // Never create a blank/provisional priority History card.
+                if (filteredCandidate.fare?.let { it > 0f } != true ||
+                    filteredCandidate.pickupDistKm == null ||
+                    filteredCandidate.dropDistKm?.let { it > 0f } != true ||
+                    filteredCandidate.dropAddress.isNullOrBlank() ||
+                    filteredCandidate.dropAddress == "Address unavailable") return true
+                if (rapidoIgnoredVisibleOfferGuard.isDuplicateIgnored(filteredCandidate)) return true
                 val vetoId = onOrderDetectedFast(filteredCandidate)
                 handleAdminPickupBlock(filterRoot, filteredCandidate, vetoId)
                 return true
@@ -2508,6 +2515,13 @@ private val processingTimeoutRunnable = Runnable {
         if (prefs.adminPickupBlockSettings.value.enabled) {
             val veto = adminPickupBlockDecision(filterRoot, filteredCandidate)
             if (veto !is com.example.engine.AdminPickupBlockPolicy.Decision.Allow) {
+                // Never create a blank/provisional priority History card.
+                if (filteredCandidate.fare?.let { it > 0f } != true ||
+                    filteredCandidate.pickupDistKm == null ||
+                    filteredCandidate.dropDistKm?.let { it > 0f } != true ||
+                    filteredCandidate.dropAddress.isNullOrBlank() ||
+                    filteredCandidate.dropAddress == "Address unavailable") return true
+                if (rapidoIgnoredVisibleOfferGuard.isDuplicateIgnored(filteredCandidate)) return true
                 val vetoId = onOrderDetectedFast(filteredCandidate)
                 handleAdminPickupBlock(filterRoot, filteredCandidate, vetoId)
                 return true
