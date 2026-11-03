@@ -6133,8 +6133,24 @@ private val processingTimeoutRunnable = Runnable {
         val directResult =
             evaluateDirectRideFilters(candidate)
 
+        if (prefs.olaAdminFilterSettings.value.enabled) {
+            if (!com.example.auth.PickupGuardOwnerAccess.authorized(prefs.userProfile.value) ||
+                com.example.engine.OlaAdminFilterEngine.evaluate(
+                    candidate, prefs.olaAdminFilterSettings.value
+                ) !is com.example.engine.OlaAdminFilterEngine.Result.Match) {
+                historyRecordId?.let { onOrderDecisionFast(it, candidate,
+                    OrderStatus.IGNORED, "OLA_ADMIN_FILTER_CHANGED",
+                    "Owner Ola filter no longer matches") }
+                setOlaState(OlaState.IDLE)
+                return
+            }
+        }
+
         if (directResult.status == OrderStatus.REJECTED) {
-            rejectOlaOffer(root, candidate)
+            if (prefs.olaAdminFilterSettings.value.enabled) {
+                historyRecordId?.let { onOrderDecisionFast(it, candidate,
+                    OrderStatus.IGNORED, "OLA_ADMIN_SHARED_FILTER_IGNORED", directResult.reason) }
+            } else rejectOlaOffer(root, candidate)
             setOlaState(OlaState.IDLE)
             return
         }
@@ -6174,6 +6190,8 @@ private val processingTimeoutRunnable = Runnable {
         session: com.example.engine.OlaSessionOwner.Session
     ) {
         val recordId = session.recordId
+        val sessionUid = prefs.userProfile.value.uid
+        val ownerModeAtStart = prefs.olaAdminFilterSettings.value.enabled
         var replacementRoot: AccessibilityNodeInfo? = null
 
         val deadline =
@@ -6191,6 +6209,8 @@ private val processingTimeoutRunnable = Runnable {
         try {
             while (
                 olaSessions.isCurrent(session) &&
+                prefs.userProfile.value.uid == sessionUid &&
+                (!ownerModeAtStart || prefs.olaAdminFilterSettings.value.enabled) &&
                 olaMonitoringEnabled() &&
                 System.currentTimeMillis() < deadline
             ) {
@@ -6238,7 +6258,16 @@ private val processingTimeoutRunnable = Runnable {
 
                 if (negativeReason != null) {
 
-                    ended("OLA_ORDER_ENDED", negativeReason)
+                    // Only explicit Ola 'missed/expired' UI with NO click can
+                    // populate the verified Missed tab in owner-testing History.
+                    val explicitMiss = negativeReason == "Order missed" ||
+                        negativeReason == "Order expired" ||
+                        negativeReason == "Accepted by another driver"
+                    if (ownerModeAtStart && clickAttempts == 0 && explicitMiss &&
+                        olaSessions.isCurrent(session)) {
+                        onOrderDecisionFast(recordId, candidate, OrderStatus.MISSED,
+                            "OLA_CONFIRMED_MISSED_UI", negativeReason)
+                    } else ended("OLA_ORDER_ENDED", negativeReason)
                     synchronized(olaSessionLock) { olaVisibleOffer.disappeared() }
                     return
                 }
@@ -6375,11 +6404,18 @@ private val processingTimeoutRunnable = Runnable {
     }
 
     private fun olaFinalFiltersMatch(candidate: RideCandidate, root: AccessibilityNodeInfo): Boolean {
+        val olaTest = prefs.olaAdminFilterSettings.value
+        if (olaTest.enabled) {
+            if (!com.example.auth.PickupGuardOwnerAccess.authorized(prefs.userProfile.value)) return false
+            if (com.example.engine.OlaAdminFilterEngine.evaluate(candidate, olaTest)
+                !is com.example.engine.OlaAdminFilterEngine.Result.Match) return false
+        }
         if (evaluateDirectRideFilters(candidate).status != OrderStatus.ACCEPTED) return false
         val goTo = prefs.loadGoToAreas()
         val noGo = prefs.loadNoGoAreas()
-        val pickup = extractPickupLocationText(candidate, root)
-        if (checkPickupAreaRules(pickup, goTo, noGo) is DecisionResult.Reject) return false
+        val pickup = if (olaTest.enabled) "" else extractPickupLocationText(candidate, root)
+        if (!olaTest.enabled &&
+            checkPickupAreaRules(pickup, goTo, noGo) is DecisionResult.Reject) return false
         return AreaRulesEngine.evaluateRide(candidate = candidate, settings = prefs.loadSettings(),
             goToAreas = goTo, noGoAreas = noGo, areas = goTo + noGo,
             pickupLocationTextOverride = pickup) is DecisionResult.Accept
@@ -6406,7 +6442,9 @@ private val processingTimeoutRunnable = Runnable {
     private fun olaMonitoringEnabled(): Boolean =
         preferencesManager.isAutoAcceptEnabled && !bankingModeSuspended && apkIntegrityAllowed &&
             prefs.loadSettings().olaEnabled &&
-            (prefs.userProfile.value.isPlanValid || prefs.userProfile.value.isAdmin)
+            (prefs.userProfile.value.isPlanValid || prefs.userProfile.value.isAdmin) &&
+            (!prefs.olaAdminFilterSettings.value.enabled ||
+                com.example.auth.PickupGuardOwnerAccess.authorized(prefs.userProfile.value))
 
 
 
