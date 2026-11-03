@@ -1,5 +1,6 @@
 package com.example.engine
 
+import kotlinx.coroutines.*
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.concurrent.*
@@ -42,5 +43,27 @@ class RapidoEventRecoveryTest {
             assertTrue(ready.await(5, TimeUnit.SECONDS)); start.countDown()
             assertEquals(1, readers.count { it.get(5, TimeUnit.SECONDS) != null })
         } finally { start.countDown(); pool.shutdownNow() }
+    }
+    @Test fun newEventWakesRecoveryImmediatelyWithoutWaitingForTimer() = runBlocking {
+        val gate = RapidoEventRecovery()
+        val ticket = gate.signal(100L)!!
+        val waiting = async(start = CoroutineStart.UNDISPATCHED) { gate.waitForNext(ticket, 800L) }
+        assertFalse(waiting.isCompleted)
+        assertNull(gate.signal(200L))
+        assertTrue(withTimeout(1000L) { waiting.await() })
+        assertEquals(200L, gate.eventTime(ticket))
+        assertTrue(gate.current(ticket))
+        assertNull(gate.nextDelay(ticket, true, false))
+    }
+    @Test fun coalescedTimestampAndCancellationStayOwnedByTheirTicket() = runBlocking {
+        val gate = RapidoEventRecovery()
+        val old = gate.signal(100L)!!
+        val waiting = async(start = CoroutineStart.UNDISPATCHED) { gate.waitForNext(old, 800L) }
+        gate.cancel()
+        val fresh = gate.signal(300L)!!
+        assertTrue(withTimeout(1000L) { waiting.await() })
+        gate.finish(old)
+        assertTrue(gate.current(fresh))
+        assertEquals(300L, gate.eventTime(fresh))
     }
 }

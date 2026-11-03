@@ -2710,7 +2710,7 @@ private val processingTimeoutRunnable = Runnable {
     private fun dispatchRapidoRead(source: AccessibilityNodeInfo?, type: Int, eventTime: Long) {
         rapidoMiss("EVENT")
         synchronized(rapidoProcessingLock) {
-            val ticket = rapidoRecovery.signal()
+            val ticket = rapidoRecovery.signal(eventTime)
             if (ticket == null) { rapidoMiss("COALESCED"); return }
             isRapidoEventProcessing = true
             serviceScope.launch(Dispatchers.IO) {
@@ -2721,7 +2721,8 @@ private val processingTimeoutRunnable = Runnable {
                         rapidoNeedsRecovery = false
                         try {
                             processAccessibilityEvent("com.rapido.passenger",
-                                if (first) source else null, type, eventTime, ticket)
+                                if (first) source else null, type,
+                                if (first) eventTime else rapidoRecovery.eventTime(ticket), ticket)
                         } catch (e: Exception) {
                             rapidoNeedsRecovery = true
                             rapidoMiss("READ_EXCEPTION")
@@ -2737,7 +2738,9 @@ private val processingTimeoutRunnable = Runnable {
                             }
                             next
                         } ?: break
-                        if (wait > 0L) delay(wait)
+                        if (wait > 0L && rapidoRecovery.waitForNext(ticket, wait)) {
+                            rapidoMiss("RECOVERY_EVENT_WAKE")
+                        }
                     }
                 } finally {
                     synchronized(rapidoProcessingLock) {
@@ -8614,12 +8617,13 @@ private val processingTimeoutRunnable = Runnable {
                 val selectedPickup = additionalRule?.maxPickupKm ?: settings.plusAmountMaxPickupDistanceKm
                 val selectedDrop = additionalRule?.maxDropKm ?: settings.plusAmountMaxDropDistanceKm
                 val label = if (additionalRule != null) "+Amount Unlimited" else "+ Amount Filter"
-                val plusReason = buildString {
+                val plusReason = { buildString {
                     append("Mode: $label")
                     append("\n+₹${plusAmount?.toInt()} >= +₹${selectedMinimum.toInt()}")
                     append(" | Pickup ${String.format(Locale.ENGLISH, "%.1f", plusPickup)} km <= ${String.format(Locale.ENGLISH, "%.1f", selectedPickup)} km")
                     append(" | Trip ${String.format(Locale.ENGLISH, "%.1f", plusDrop)} km <= ${String.format(Locale.ENGLISH, "%.1f", selectedDrop)} km")
                     append("\nOther regular fare filters bypassed")
+                }
                 }
                 Log.i(TAG, "RAPIDO + AMOUNT MATCHED: $label amount=$plusAmount pickup=$plusPickup drop=$plusDrop")
                 executeRapidoAutoAccept(
@@ -8628,7 +8632,7 @@ private val processingTimeoutRunnable = Runnable {
                     prevalidatedAcceptNode = snapshot.acceptNode,
                     historyRecordId = recordId,
                     verifiedPopupSession = rapidoVerifiedClickGuard.beginNewPopup(),
-                    acceptedHistoryReason = plusReason,
+                    acceptedHistoryReasonProvider = plusReason,
                     eventUptimeMs = eventUptimeMs
                 )
                 return
@@ -8773,7 +8777,7 @@ private val processingTimeoutRunnable = Runnable {
             }
 
             // Execute Rapido auto-accept strictly targeting Accept button
-            val acceptedHistoryReason =
+            val acceptedHistoryReasonProvider = {
                 if (
                     decision is DecisionResult.Accept &&
                     (
@@ -8786,6 +8790,7 @@ private val processingTimeoutRunnable = Runnable {
                     buildAcceptedFilterReason(candidate, settings)
                 }
 
+            }
             val turboDecisionMs =
                 (System.nanoTime() - turboStartNs) /
                     1_000_000.0
@@ -8806,8 +8811,7 @@ private val processingTimeoutRunnable = Runnable {
                     snapshot.acceptNode,
                 historyRecordId = recordId,
                 verifiedPopupSession = rapidoVerifiedClickGuard.beginNewPopup(),
-                acceptedHistoryReason =
-                    acceptedHistoryReason,
+                acceptedHistoryReasonProvider = acceptedHistoryReasonProvider,
                 eventUptimeMs = eventUptimeMs
             )
         } catch (e: Exception) {
@@ -8834,7 +8838,8 @@ private val processingTimeoutRunnable = Runnable {
         historyRecordId: String? = null,
         acceptedHistoryReason: String? = null,
         verifiedPopupSession: Long? = null,
-        eventUptimeMs: Long = 0L
+        eventUptimeMs: Long = 0L,
+        acceptedHistoryReasonProvider: (() -> String?)? = null
     ) {
         if (prefs.pickupGuardSettings.value.enabled) {
             resetProcessing()
@@ -8927,19 +8932,21 @@ private val processingTimeoutRunnable = Runnable {
             return
         }
 
+        val finalWork = com.example.engine.RapidoClickWork(
+            canonical = {
+                AreaRulesEngine.evaluateRide(candidate = candidate,
+                    areas = finalGoToGroups + finalNoGoGroups, settings = finalSettings,
+                    goToAreas = finalGoToGroups, noGoAreas = finalNoGoGroups,
+                    pickupLocationTextOverride = "", isGoToEnabled = finalGoToRequired,
+                    isNoGoEnabled = finalNoGoRequired)
+            },
+            historyReason = { acceptedHistoryReason ?: acceptedHistoryReasonProvider?.invoke() }
+        )
+
         if (finalGoToRequired || finalNoGoRequired) {
             // Uses the existing destination-only matcher. No pickup-street read,
             // extra accessibility traversal, network request or Room query.
-            val requiredDecision = AreaRulesEngine.evaluateRide(
-                candidate = candidate,
-                areas = finalGoToGroups + finalNoGoGroups,
-                settings = finalSettings,
-                goToAreas = finalGoToGroups,
-                noGoAreas = finalNoGoGroups,
-                pickupLocationTextOverride = "",
-                isGoToEnabled = finalGoToRequired,
-                isNoGoEnabled = finalNoGoRequired
-            )
+            val requiredDecision = finalWork.decision
             val mandatoryReason = when {
                 finalGoToRequired && requiredDecision !is DecisionResult.Accept ->
                     when (requiredDecision) {
@@ -8973,16 +8980,7 @@ private val processingTimeoutRunnable = Runnable {
         // candidate data, never an additional Accessibility tree or address.
         // Fastest already passed the pickup-only gate above using this settings snapshot.
         if (candidate.platform == Platform.RAPIDO && !finalSettings.isFastestModeEnabled) {
-            val canonicalMatch = AreaRulesEngine.evaluateRide(
-                candidate = candidate,
-                areas = finalGoToGroups + finalNoGoGroups,
-                settings = finalSettings,
-                goToAreas = finalGoToGroups,
-                noGoAreas = finalNoGoGroups,
-                pickupLocationTextOverride = "",
-                isGoToEnabled = finalGoToRequired,
-                isNoGoEnabled = finalNoGoRequired
-            ) is DecisionResult.Accept
+            val canonicalMatch = finalWork.decision is DecisionResult.Accept
 
             val fixAreaMatch = !finalSettings.isFastestModeEnabled &&
                 com.example.engine.FixAreaRuleEngine.evaluate(
@@ -9244,9 +9242,21 @@ private val processingTimeoutRunnable = Runnable {
         rapidoMiss("ACCEPT_DISPATCH")
         val rapidoClickStartedNs = System.nanoTime()
         var clicked = false
+        var firstDispatchAt = 0L
+        var firstKind = 0
+        var firstAck = -1
+        var firstCallNs = 0L
+        fun dispatchAction(node: AccessibilityNodeInfo, kind: Int): Boolean {
+            val first = firstDispatchAt == 0L
+            if (first) { firstDispatchAt = android.os.SystemClock.uptimeMillis(); firstKind = kind }
+            val started = System.nanoTime()
+            val result = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            if (first) { firstAck = if (result) 1 else 0; firstCallNs = System.nanoTime() - started }
+            return result
+        }
         // Primary: performAction(ACTION_CLICK) directly on accept node
         if (acceptNode.isClickable) {
-            clicked = acceptNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            clicked = dispatchAction(acceptNode, 1)
             Log.i(TAG, "👆 [Rapido] Click performed: acceptNode.performAction(ACTION_CLICK) -> Result: $clicked")
         }
 
@@ -9254,7 +9264,7 @@ private val processingTimeoutRunnable = Runnable {
         if (!clicked) {
             val parent = acceptNode.parent
             if (parent != null && parent.isClickable && isStrictButtonContainer(parent)) {
-                clicked = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                clicked = dispatchAction(parent, 2)
                 Log.i(TAG, "👆 [Rapido] Click performed: parent.performAction(ACTION_CLICK) on strict button -> Result: $clicked")
             }
         }
@@ -9267,6 +9277,7 @@ private val processingTimeoutRunnable = Runnable {
                 val cx = bounds.centerX().toFloat()
                 val cy = bounds.centerY().toFloat()
                 Log.i(TAG, "👆 [Rapido] Click performed: Gesture tap strictly at Accept button center ($cx, $cy), screenBounds=$bounds")
+                Log.i("RapidoLatency", "stage=existing_verified_gesture_fallback completion=unknown")
                 simulateTapGesture(cx, cy, isInternalFallback = true, verifiedRapidoFallback = true)
             } else {
                 Log.w(TAG, "❌ [Rapido] Accept button bounds invalid ($bounds) - doing nothing, no random click")
@@ -9314,6 +9325,15 @@ private val processingTimeoutRunnable = Runnable {
 
         // V16: Mark the click attempt on the same History row before the
         // background verification. This is not evidence of acceptance.
+        // Never build presentation strings before the first existing safe dispatch.
+        val resolvedHistoryReason = finalWork.afterDispatch()
+        if (attemptNumber == 1 && firstDispatchAt > 0L && eventUptimeMs > 0L) {
+            Log.i("RapidoLatency", "stage=first_dispatch mode=${if (finalSettings.isFastestModeEnabled) "FASTEST" else "NORMAL"} " +
+                "eventToFirstDispatchMs=${(firstDispatchAt-eventUptimeMs).coerceAtLeast(0L)} " +
+                "kind=$firstKind requestAck=$firstAck firstCallNs=$firstCallNs")
+        }
+
+
         onOrderActionAttemptFast(pinnedRecordId)
 
         // RAPIDO_POST_CLICK_VERIFY_SAFE_V1
@@ -9374,7 +9394,7 @@ private val processingTimeoutRunnable = Runnable {
                         candidate = candidate,
                         status = OrderStatus.ACCEPTED,
                         reasonCode = "FILTERS_MATCHED",
-                        reasonText = acceptedHistoryReason
+                        reasonText = resolvedHistoryReason
                             ?.takeIf { it.isNotBlank() }
                             ?: buildAcceptedFilterReason(candidate),
                         actionSucceeded = true,
@@ -9429,7 +9449,7 @@ private val processingTimeoutRunnable = Runnable {
                         recordId = verificationRecordId,
                         candidate = candidate,
                         attemptNumber = attemptNumber,
-                        acceptedHistoryReason = acceptedHistoryReason
+                        acceptedHistoryReason = resolvedHistoryReason
                     )
                     resetProcessing()
                 }
