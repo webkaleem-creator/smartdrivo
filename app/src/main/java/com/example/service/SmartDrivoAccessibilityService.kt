@@ -574,7 +574,10 @@ private val processingTimeoutRunnable = Runnable {
         handler.removeCallbacks(processingTimeoutRunnable)
 
         isProcessing = false
-        isRapidoEventProcessing = false
+        synchronized(rapidoProcessingLock) {
+            rapidoRecovery.cancel()
+            isRapidoEventProcessing = false
+        }
         activeRapidoPopupOrderId = null
         rapidoIgnoredVisibleOfferGuard.clear()
         activeOrderRecordIds.clear()
@@ -2676,18 +2679,91 @@ private val processingTimeoutRunnable = Runnable {
         OlaDiagnosticStore.record(applicationContext, stage, number)
     }
 
+    private val rapidoRecovery = com.example.engine.RapidoEventRecovery()
+    private var rapidoNeedsRecovery = false
+    private val rapidoDiagnosticAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private fun rapidoMiss(reason: String, flags: Int = 0) {
+        val now = android.os.SystemClock.uptimeMillis()
+        val old = rapidoDiagnosticAt[reason]
+        if (old == null || now - old >= 750L) {
+            rapidoDiagnosticAt[reason] = now
+            Log.i("RapidoMiss", "reason=$reason flags=$flags")
+        }
+    }
+
+    private fun dispatchRapidoRead(source: AccessibilityNodeInfo?, type: Int, eventTime: Long) {
+        rapidoMiss("EVENT")
+        synchronized(rapidoProcessingLock) {
+            val ticket = rapidoRecovery.signal()
+            if (ticket == null) { rapidoMiss("COALESCED"); return }
+            isRapidoEventProcessing = true
+            serviceScope.launch(Dispatchers.IO) {
+                var first = true
+                try {
+                    while (rapidoRecovery.current(ticket) && preferencesManager.isAutoAcceptEnabled) {
+                        rapidoPartialPopupSeen = false
+                        rapidoNeedsRecovery = false
+                        try {
+                            processAccessibilityEvent("com.rapido.passenger",
+                                if (first) source else null, type, eventTime, ticket)
+                        } catch (e: Exception) {
+                            rapidoNeedsRecovery = true
+                            rapidoMiss("READ_EXCEPTION")
+                        }
+                        first = false
+                        val wait = synchronized(rapidoProcessingLock) {
+                            val next = rapidoRecovery.nextDelay(ticket,
+                                preferencesManager.isAutoAcceptEnabled,
+                                rapidoNeedsRecovery || rapidoPartialPopupSeen)
+                            if (next == null && !rapidoRecovery.current(ticket)) {
+                                isRapidoEventProcessing = false
+                                if (rapidoNeedsRecovery || rapidoPartialPopupSeen) rapidoMiss("RECOVERY_EXHAUSTED")
+                            }
+                            next
+                        } ?: break
+                        if (wait > 0L) delay(wait)
+                    }
+                } finally {
+                    synchronized(rapidoProcessingLock) {
+                        if (rapidoRecovery.current(ticket)) {
+                            rapidoRecovery.finish(ticket)
+                            isRapidoEventProcessing = false
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null || bankingModeSuspended) return
+        if (event == null) return
+        val directRapido = isRapidoPackage(event.packageName?.toString().orEmpty())
+        if (bankingModeSuspended) {
+            if (directRapido) rapidoMiss("BANKING_SUSPENDED")
+            return
+        }
 
         // APK_SIGNATURE_TAMPER_LOCK_V1
         // Single volatile Boolean read only. No hashing, PackageManager lookup,
         // Firebase call, or other security work happens on a live order event.
         if (!apkIntegrityAllowed) {
+            if (directRapido) rapidoMiss("INTEGRITY_BLOCKED")
             return
         }
 
         // MASTER OFF: do not read ride-app accessibility events.
         if (!preferencesManager.isAutoAcceptEnabled) {
+            if (directRapido) rapidoMiss("MASTER_OFF")
+            return
+        }
+
+        // Window topology changes can be the only event for an overlay.
+        // This newly subscribed event is Rapido-only; other engines retain their event set.
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            val visible = directRapido || try {
+                windows.any { isRapidoPackage(it.root?.packageName?.toString().orEmpty()) }
+            } catch (_: Exception) { false }
+            if (visible) dispatchRapidoRead(null, event.eventType, event.eventTime)
             return
         }
 
@@ -2706,119 +2782,8 @@ private val processingTimeoutRunnable = Runnable {
 
         if (directRapidoEvent) {
 
-            // V15_AUTO_PRIORITY_UNIFIED_NORMAL_PIPELINE
-            // All Rapido offers, including the Auto Priority badge, now take
-            // the ONE existing popup-validation and standard filter path.
-            // No Auto Priority-specific scan or early-click is run here.
-            // A missing/incomplete card is left untouched (fail closed).
-            val now = System.currentTimeMillis()
-
-            if (
-                event.eventType ==
-                    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
-                now - lastRapidoEventDispatchAt < 1L
-            ) {
-                return
-            }
-
-            lastRapidoEventDispatchAt = now
-
-            val directSource =
-                try {
-                    event.source
-                } catch (_: Exception) {
-                    null
-                }
-
-            // AccessibilityEvent objects can be recycled after this callback.
-            // Capture event timing and type before launching the worker.
-            val rapidoEventType = event.eventType
-            val rapidoEventUptimeMs = event.eventTime
-
-            val shouldLaunch =
-                synchronized(rapidoProcessingLock) {
-
-                    if (isRapidoEventProcessing) {
-                        // RAPIDO_PENDING_RESCAN_V1
-                        // Never queue hundreds of events.
-                        // Remember only that one fresh rescan is needed.
-                        rapidoPendingRescan = true
-                        false
-                    } else {
-                        isRapidoEventProcessing = true
-                        rapidoPendingRescan = false
-                        true
-                    }
-                }
-
-            if (shouldLaunch) {
-
-                serviceScope.launch(Dispatchers.IO) {
-
-                    var firstPass = true
-                    var keepRunning = true
-                    var fastRetryCount = 0
-
-                    while (keepRunning) {
-                        // Set before the scan; only real partial-offer evidence
-                        // inside this pass may request a bounded recheck.
-                        rapidoPartialPopupSeen = false
-
-                        try {
-                            processAccessibilityEvent(
-                                eventPkg = eventPkg,
-                                eventSource =
-                                    if (firstPass) directSource else null,
-                                eventType =
-                                    if (firstPass) {
-                                        rapidoEventType
-                                    } else {
-                                        AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
-                                    },
-                                eventUptimeMs =
-                                    if (firstPass) rapidoEventUptimeMs else 0L
-                            )
-                        } catch (e: Exception) {
-                            Log.e(
-                                TAG,
-                                "Rapido pending worker error: ${e.message}",
-                                e
-                            )
-                        }
-
-                        firstPass = false
-                        var delayForPartialMs = 0L
-                        keepRunning =
-                            synchronized(rapidoProcessingLock) {
-                                when {
-                                    rapidoPendingRescan -> {
-                                        rapidoPendingRescan = false
-                                        true
-                                    }
-                                    RapidoEarlyReadGate.mayRetry(
-                                        rapidoPartialPopupSeen,
-                                        fastRetryCount,
-                                        preferencesManager.isAutoAcceptEnabled
-                                    ) -> {
-                                        fastRetryCount++
-                                        delayForPartialMs =
-                                            RapidoEarlyReadGate.retryDelayMs(fastRetryCount)
-                                        true
-                                    }
-                                    else -> {
-                                        isRapidoEventProcessing = false
-                                        false
-                                    }
-                                }
-                            }
-                        if (keepRunning && delayForPartialMs > 0L) {
-                            // Another event can still set rapidoPendingRescan;
-                            // do not use timer callbacks or queue infinite scans.
-                            delay(delayForPartialMs)
-                        }
-                    }
-                }
-            }
+            dispatchRapidoRead(try { event.source } catch (_: Exception) { null },
+                event.eventType, event.eventTime)
 
             return
         }
@@ -2844,10 +2809,11 @@ private val processingTimeoutRunnable = Runnable {
                 false
             }
 
-        val isRapido = eventPkg == "com.rapido.passenger" ||
-                isRapidoPackage(eventPkg) ||
-                activeRootPkg == "com.rapido.passenger" ||
-                isRapidoPackage(activeRootPkg)
+        val hasRapidoWindow = try {
+            windows.any { isRapidoPackage(it.root?.packageName?.toString().orEmpty()) }
+        } catch (_: Exception) { false }
+        val isRapido = !isOlaPackage(eventPkg) && !isUberPackage(eventPkg) &&
+            (isRapidoPackage(eventPkg) || isRapidoPackage(activeRootPkg) || hasRapidoWindow)
         val isUber = isUberPackage(eventPkg) || isUberPackage(activeRootPkg) || hasUberAccessibilityWindow
         // OLA_REFERENCE_WINDOW_SCAN_V1
         // Ola can expose the incoming order in another accessibility
@@ -2897,35 +2863,15 @@ private val processingTimeoutRunnable = Runnable {
             !isDirectUberEvent &&
             !isDirectOlaEvent &&
             !hasUberAccessibilityWindow &&
-            !hasOlaAccessibilityWindow
+            !hasOlaAccessibilityWindow && !hasRapidoWindow
         ) {
             return
         }
 
         if (isRapido) {
-            val now = System.currentTimeMillis()
-
-            // TYPE_WINDOW_CONTENT_CHANGED is extremely noisy in the Rapido UI.
-            // 80ms still keeps detection responsive while cutting duplicate parser work heavily.
-            if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
-                now - lastRapidoEventDispatchAt < 10L
-            ) {
-                return
-            }
-
-            // Never run multiple full Rapido node-tree parsers at the same time.
-            if (isRapidoEventProcessing) {
-                return
-            }
-
-            lastRapidoEventDispatchAt = now
-
-            Log.d("SmartDrivo", "Rapido event received: ${event.eventType}")
-            Log.i(
-                TAG,
-                "ðŸ“¥ [Rapido] eventPkg='$eventPkg', activePkg='$activeRootPkg', " +
-                    "type=${event.eventType}, AutoAcceptEnabled=${preferencesManager.isAutoAcceptEnabled}"
-            )
+            dispatchRapidoRead(try { event.source } catch (_: Exception) { null },
+                event.eventType, event.eventTime)
+            return
         } else {
             if (!preferencesManager.isAutoAcceptEnabled) return
             if (isClickInProgress) return
@@ -2944,19 +2890,8 @@ private val processingTimeoutRunnable = Runnable {
 
         val eventSource = try { event.source } catch (_: Exception) { null }
 
-        if (isRapido) {
-            isRapidoEventProcessing = true
-            serviceScope.launch(Dispatchers.IO) {
-                try {
-                    processAccessibilityEvent(targetPkg, eventSource, event.eventType)
-                } finally {
-                    isRapidoEventProcessing = false
-                }
-            }
-        } else {
-            serviceScope.launch(Dispatchers.IO) {
-                processAccessibilityEvent(targetPkg, eventSource, event.eventType)
-            }
+        serviceScope.launch(Dispatchers.IO) {
+            processAccessibilityEvent(targetPkg, eventSource, event.eventType)
         }
     }
 
@@ -3017,7 +2952,8 @@ private val processingTimeoutRunnable = Runnable {
         eventPkg: String,
         eventSource: AccessibilityNodeInfo?,
         eventType: Int = 0,
-        eventUptimeMs: Long = 0L
+        eventUptimeMs: Long = 0L,
+        readerTicket: com.example.engine.RapidoEventRecovery.Ticket? = null
     ) {
         // MASTER OFF: cancel queued ride processing.
         if (!preferencesManager.isAutoAcceptEnabled) {
@@ -3227,6 +3163,7 @@ private val processingTimeoutRunnable = Runnable {
                 isRapidoPackage(eventPkg)
 
         if (isRapidoPkg) {
+            rapidoNeedsRecovery = true
             val rapidoReadStartedNs = System.nanoTime()
             var partialRapidoOfferSeenInPass = false
             Log.d("SmartDrivo", "Rapido event received: $eventType")
@@ -3280,6 +3217,8 @@ private val processingTimeoutRunnable = Runnable {
                     )
 
                     logRapidoReadLatency("source", rapidoReadStartedNs, eventUptimeMs)
+                    if (readerTicket != null && !rapidoRecovery.current(readerTicket)) return
+                    rapidoNeedsRecovery = false
                     handleRapidoOrder(
                         directRapidoSource,
                         sourceValidation,
@@ -3335,6 +3274,8 @@ private val processingTimeoutRunnable = Runnable {
                     )
 
                     logRapidoReadLatency("root", rapidoReadStartedNs, eventUptimeMs)
+                    if (readerTicket != null && !rapidoRecovery.current(readerTicket)) return
+                    rapidoNeedsRecovery = false
                     handleRapidoOrder(
                         directRapidoRoot,
                         directValidation,
@@ -3400,6 +3341,11 @@ private val processingTimeoutRunnable = Runnable {
                 val validation =
                     previousValidation
                         ?: RapidoAdapter.validateRapidoOrderPopup(root)
+                rapidoMiss("VALIDATION", (if (validation.isValid) 16 else 0) or
+                    (if ((validation.orderData?.totalFare ?: 0f) > 0f) 1 else 0) or
+                    (if (com.example.engine.RapidoDistanceValidity.isValidPickup(validation.orderData?.pickupKm)) 2 else 0) or
+                    (if ((validation.orderData?.dropKm ?: 0f) > 0f) 4 else 0) or
+                    (if (validation.acceptButton != null) 8 else 0))
                 if (isRapidoIncompleteValidation(validation)) {
                     partialRapidoOfferSeenInPass = true
                 }
@@ -3426,6 +3372,8 @@ private val processingTimeoutRunnable = Runnable {
                 )
 
                 logRapidoReadLatency("window", rapidoReadStartedNs, eventUptimeMs)
+                if (readerTicket != null && !rapidoRecovery.current(readerTicket)) return
+                    rapidoNeedsRecovery = false
                 handleRapidoOrder(
                     validatedRoot,
                     validatedPopup,
@@ -3434,6 +3382,7 @@ private val processingTimeoutRunnable = Runnable {
                 return
             }
 
+            rapidoMiss(if (candidateRoots.isEmpty()) "NO_ROOT" else "NO_COMPLETE_POPUP")
             if (partialRapidoOfferSeenInPass) {
                 // The valid offer may be mid-render. Request at most two
                 // short scans; never click or log incomplete data.
@@ -8179,7 +8128,7 @@ private val processingTimeoutRunnable = Runnable {
             captureRapidoFastSnapshot(
                 root = root,
                 validation = validation
-            ) ?: return
+            ) ?: run { rapidoMiss("SNAPSHOT_INVALID"); rapidoNeedsRecovery = true; return }
 
         val candidate =
             snapshot.candidate
@@ -8199,6 +8148,8 @@ private val processingTimeoutRunnable = Runnable {
                 TAG,
                 "Rapido popup incomplete - waiting for Trip km before History insert"
             )
+            rapidoNeedsRecovery = true
+            rapidoMiss("TRIP_INCOMPLETE")
             return
         }
         // Ignore repeated accessibility events only for the CURRENT visible Rapido popup.
@@ -8210,20 +8161,26 @@ private val processingTimeoutRunnable = Runnable {
             resetProcessing()
             return
         }
+        rapidoMiss("VALID_OFFER")
         val bookingId = candidate.bookingId
         val orderId = snapshot.orderId
 
-        // Only affects unmatched offers kept visible when Auto Reject is OFF.
-        // Do not compare mutable pickup distance or reinsert into History.
-        if ((prefs.pickupGuardSettings.value.enabled ||
+        // An ignored popup may become eligible as pickup/settings change. Reevaluate
+        // through every existing filter, reusing its history row rather than clicking here.
+        val duplicateIgnored = (prefs.pickupGuardSettings.value.enabled ||
             !prefs.appSettings.value.isAutoRejectBadFaresEnabled) &&
             rapidoIgnoredVisibleOfferGuard.isDuplicateIgnored(candidate)
-        ) {
-            Log.d(TAG, "RAPIDO IGNORED DEDUP: still-visible unmatched offer; no new History row")
+        val recheckIgnored = duplicateIgnored && !prefs.pickupGuardSettings.value.enabled &&
+            rapidoIgnoredVisibleOfferGuard.needsFilterRecheck(candidate, rapidoFilterContext())
+        val reusedIgnoredRecord = if (recheckIgnored) activeOrderRecordIds[Platform.RAPIDO] else null
+        if (duplicateIgnored && (!recheckIgnored || reusedIgnoredRecord == null)) {
+            rapidoMiss("IGNORED_VISIBLE_DUPLICATE")
             return
         }
+        if (recheckIgnored) rapidoMiss("IGNORED_FILTER_RECHECK")
 
-        if (activeRapidoPopupOrderId == orderId) {
+        if (!recheckIgnored && activeRapidoPopupOrderId == orderId) {
+            rapidoMiss("CURRENT_OFFER_DUPLICATE")
             Log.i(
                 TAG,
                 "Duplicate event for current Rapido popup skipped " +
@@ -8244,6 +8201,8 @@ private val processingTimeoutRunnable = Runnable {
                 TAG,
                 "Rapido event deferred while previous order is finalizing"
             )
+            rapidoNeedsRecovery = true
+            rapidoMiss("PROCESSING_DEFERRED")
             return
         }
 
@@ -8258,9 +8217,10 @@ private val processingTimeoutRunnable = Runnable {
 
         activeRapidoPopupOrderId = orderId
 
-        val recordId = onOrderDetectedFast(candidate)
+        val recordId = reusedIgnoredRecord ?: onOrderDetectedFast(candidate)
         Log.i(TAG, "⚡ Rapido order detected & inserted to Room [PROCESSING]: Fare=₹${candidate.fare}, pickup=${candidate.pickupAddress}")
 
+        rapidoMiss("HISTORY_QUEUED")
         if (handleOwnerPickupGuard(root, candidate, recordId)) return
 
         // Auto-Accept and Auto-Reject are independent.
@@ -8736,6 +8696,7 @@ private val processingTimeoutRunnable = Runnable {
             resetProcessing()
             return
         }
+        rapidoIgnoredVisibleOfferGuard.clear()
         // HISTORY_PINNED_RECORD_V2
         // Keep every retry/final status attached to the same real ride.
         val pinnedRecordId =
@@ -9136,6 +9097,7 @@ private val processingTimeoutRunnable = Runnable {
 
         // Verified popup and per-order guard already authorized this click.
         // Do not start a global 3-second lock for Rapido retries.
+        rapidoMiss("ACCEPT_DISPATCH")
         val rapidoClickStartedNs = System.nanoTime()
         var clicked = false
         // Primary: performAction(ACTION_CLICK) directly on accept node
@@ -10060,6 +10022,9 @@ private val processingTimeoutRunnable = Runnable {
      *   Rapido skip/reject control.
      * - No blind coordinate taps.
      */
+    private fun rapidoFilterContext(): Any = listOf(prefs.appSettings.value,
+        prefs.goToAreas.value, prefs.noGoAreas.value, prefs.fixAreaSettings.value)
+
     private fun handleRapidoFilterFailure(
         root: AccessibilityNodeInfo,
         candidate: RideCandidate,
@@ -10098,7 +10063,7 @@ private val processingTimeoutRunnable = Runnable {
         // Auto Reject OFF: Rapido keeps this same offer on screen.
         // Remember it so later Accessibility updates cannot log it again.
         if (candidate.platform == Platform.RAPIDO) {
-            rapidoIgnoredVisibleOfferGuard.rememberIgnored(candidate)
+            rapidoIgnoredVisibleOfferGuard.rememberIgnored(candidate, rapidoFilterContext())
         }
 
         onOrderDecisionFast(
@@ -10958,6 +10923,7 @@ private val processingTimeoutRunnable = Runnable {
         // This method only finalizes an existing detected row.
         // Always allow the final status to be written.
 
+        if (candidate.platform == Platform.RAPIDO) rapidoMiss("DECISION_${status.name}")
         serviceScope.launch(Dispatchers.IO) {
             try {
                 // onOrderDetectedFast inserts PROCESSING asynchronously.

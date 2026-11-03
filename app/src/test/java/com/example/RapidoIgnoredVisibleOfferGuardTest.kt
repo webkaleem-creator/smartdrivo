@@ -76,4 +76,19 @@ class RapidoIgnoredVisibleOfferGuardTest {
         guard.rememberIgnored(offer(drop = 3.0f))
         assertFalse(guard.isDuplicateIgnored(offer(drop = 4.5f)))
     }
+    @Test fun autoRejectOffPickupOrSavedFilterChangeRequestsReevaluationWithoutNewIdentity() {
+        val guard = RapidoIgnoredVisibleOfferGuard()
+        val original = offer(fare = 45f, pickup = 1.1f, drop = 2.2f)
+        val settings = com.example.model.AppSettings(isAutoRejectBadFaresEnabled = false,
+            isFastestModeEnabled = true, maxPickupDistanceKm = 1f)
+        guard.rememberIgnored(original, settings)
+        assertFalse(guard.needsFilterRecheck(original, settings))
+        val matching = original.copy(pickupDistKm = 0.9f)
+        assertTrue(guard.isDuplicateIgnored(matching))
+        assertTrue(guard.needsFilterRecheck(matching, settings))
+        assertTrue(com.example.engine.AreaRulesEngine.evaluateRide(matching, settings = settings)
+            is com.example.engine.DecisionResult.Accept)
+        guard.rememberIgnored(original, settings)
+        assertTrue(guard.needsFilterRecheck(original, settings.copy(maxPickupDistanceKm = 2f)))
+    }
 }

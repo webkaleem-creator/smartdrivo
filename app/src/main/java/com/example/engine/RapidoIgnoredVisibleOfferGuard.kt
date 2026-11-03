@@ -15,6 +15,11 @@ import kotlin.math.abs
  */
 class RapidoIgnoredVisibleOfferGuard {
     private var lastIgnored: RideCandidate? = null
+    private var filterContext: Any? = null
+    @Synchronized fun needsFilterRecheck(candidate: RideCandidate, context: Any): Boolean {
+        val previous = lastIgnored ?: return false
+        return context != filterContext || previous.pickupDistKm != candidate.pickupDistKm
+    }
     private var firstIgnoredAtMs: Long = 0L
 
     @Synchronized
@@ -28,9 +33,10 @@ class RapidoIgnoredVisibleOfferGuard {
     }
 
     @Synchronized
-    fun rememberIgnored(candidate: RideCandidate) {
+    fun rememberIgnored(candidate: RideCandidate, context: Any? = null) {
         if (candidate.platform == Platform.RAPIDO) {
             lastIgnored = candidate
+            filterContext = context
             firstIgnoredAtMs = System.currentTimeMillis()
         }
     }
@@ -38,6 +44,7 @@ class RapidoIgnoredVisibleOfferGuard {
     @Synchronized
     fun clear() {
         lastIgnored = null
+        filterContext = null
         firstIgnoredAtMs = 0L
     }
 
