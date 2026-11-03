@@ -229,7 +229,7 @@ fun OlaAdminFilterScreen(
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     Text("Protected by existing rules", color = Color(0xFF087A73), fontWeight = FontWeight.Bold)
                     Text(
-                        "Ola's separate limits work alongside existing No-Go, Go-To, Bundle, +Amount and other shared checks. Rapido, Uber and Pickup Guard settings stay independent.",
+                        "Ola's Fare/Distance/Both replaces Home numeric filters only for Ola when ON. No-Go, Go-To and Bundle safety remain active. Rapido, Uber and Pickup Guard settings stay independent.",
                         color = olaInk, fontSize = 12.sp
                     )
                     Text("Check Ola orders in the main History → Ola filter.",

@@ -5,7 +5,7 @@ import com.example.model.OlaAdminFilterSettings
 import com.example.model.Platform
 import com.example.model.RideCandidate
 
-/** Additional Ola-owner AND gate: never bypass shared No-Go or other rules. */
+/** Permanent Ola numeric limits; shared safety applies in OlaAdminAcceptancePolicy. */
 object OlaAdminFilterEngine {
     sealed class Result {
         data object Match : Result()
@@ -15,7 +15,7 @@ object OlaAdminFilterEngine {
     fun evaluate(candidate: RideCandidate, settings: OlaAdminFilterSettings): Result {
         if (candidate.platform != Platform.OLA) return Result.Ignore("Not an Ola offer")
         if (!settings.enabled || !settings.valid())
-            return Result.Ignore("Owner Ola testing disabled or settings invalid")
+            return Result.Ignore("Ola Global Filter disabled or settings invalid")
 
         val fare = candidate.fare
         val pickup = candidate.pickupDistKm

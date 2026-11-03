@@ -1280,6 +1280,22 @@ private val processingTimeoutRunnable = Runnable {
         return null
     }
 
+    /** Ola owner decision must be identical at detection, watcher and final click. */
+    private fun evaluateOlaOwnerDecision(candidate: RideCandidate): DecisionResult {
+        if (!com.example.auth.PickupGuardOwnerAccess.authorized(prefs.userProfile.value)) {
+            return DecisionResult.Ignore("Ola Global Filter: admin authorization expired")
+        }
+        val shared = prefs.loadSettings()
+        return com.example.engine.OlaAdminAcceptancePolicy.evaluate(
+            candidate = candidate,
+            ola = prefs.olaAdminFilterSettings.value,
+            shared = shared,
+            goToAreas = prefs.loadGoToAreas(),
+            noGoAreas = prefs.loadNoGoAreas(),
+            noGoEnabled = shared.isNoGoEnabled || prefs.isNoGoEnabled
+        )
+    }
+
     private fun evaluateDirectRideFilters(candidate: RideCandidate): DirectFilterResult {
         // V12_FASTEST_DIRECT_FALLBACK: only pickup decides a Rapido Fastest
         // filter. Full strict popup validation and click safety remain elsewhere.
@@ -5951,18 +5967,28 @@ private val processingTimeoutRunnable = Runnable {
             if (handleOwnerPickupGuard(root, candidate, recordId)) return
 
             if (olaOwnerTesting) {
-                val ownerFilter = com.example.engine.OlaAdminFilterEngine.evaluate(
-                    candidate, prefs.olaAdminFilterSettings.value)
-                if (ownerFilter is com.example.engine.OlaAdminFilterEngine.Result.Ignore) {
-                    onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED,
-                        "OLA_ADMIN_FILTER_IGNORED", ownerFilter.reason)
-                    setOlaState(OlaState.IDLE)
-                    return
+                // Ola numeric filter takes precedence; No-Go/Go-To/Bundle still gate.
+                when (val ownerResult = evaluateOlaOwnerDecision(candidate)) {
+                    is DecisionResult.Accept -> Log.i(TAG, "OLA_ADMIN_MATCH: ${ownerResult.reason}")
+                    is DecisionResult.Ignore, is DecisionResult.Reject -> {
+                        val reason = when (ownerResult) {
+                            is DecisionResult.Ignore -> ownerResult.reason
+                            is DecisionResult.Reject -> ownerResult.reason
+                            else -> ""
+                        }
+                        val code = if (reason.startsWith("Ola Global Filter:"))
+                            "OLA_ADMIN_FILTER_IGNORED" else "OLA_ADMIN_SHARED_SAFETY_IGNORED"
+                        onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED, code, reason)
+                        setOlaState(OlaState.IDLE)
+                        return
+                    }
                 }
             }
 
             // Direct SharedPreferences Filter Evaluation before evaluating ANY ride
-            val directResult = evaluateDirectRideFilters(candidate)
+            val directResult = if (olaOwnerTesting)
+                DirectFilterResult(OrderStatus.ACCEPTED, "Ola Global Filter matched")
+            else evaluateDirectRideFilters(candidate)
             when (directResult.status) {
                 OrderStatus.REJECTED -> {
                     if (olaOwnerTesting) {
@@ -6018,23 +6044,28 @@ private val processingTimeoutRunnable = Runnable {
                 return
             }
 
-            val directSettings = readDirectSettingsFresh()
-            val effectiveSettings = settings.copy(
-                minFare = directSettings.minFare,
-                maxFare = directSettings.maxFare,
-                maxPickupDistanceKm = directSettings.maxPickupKm,
-                maxDropDistanceKm = directSettings.maxDropKm,
-                maxDropKm = directSettings.maxDropKm
-            )
-
-            val decision = AreaRulesEngine.evaluateRide(
-                candidate = candidate,
-                areas = goToAreas + noGoAreas,
-                settings = effectiveSettings,
-                goToAreas = goToAreas,
-                noGoAreas = noGoAreas,
-                pickupLocationTextOverride = pickupText
-            )
+            // Owner Ola policy already checked numeric and shared safety.
+            // Do not reapply Home numerics in this second decision stage.
+            val decision = if (olaOwnerTesting) {
+                DecisionResult.Accept("Ola Global Filter and shared safety matched")
+            } else {
+                val directSettings = readDirectSettingsFresh()
+                val effectiveSettings = settings.copy(
+                    minFare = directSettings.minFare,
+                    maxFare = directSettings.maxFare,
+                    maxPickupDistanceKm = directSettings.maxPickupKm,
+                    maxDropDistanceKm = directSettings.maxDropKm,
+                    maxDropKm = directSettings.maxDropKm
+                )
+                AreaRulesEngine.evaluateRide(
+                    candidate = candidate,
+                    areas = goToAreas + noGoAreas,
+                    settings = effectiveSettings,
+                    goToAreas = goToAreas,
+                    noGoAreas = noGoAreas,
+                    pickupLocationTextOverride = pickupText
+                )
+            }
 
             if (decision is DecisionResult.Reject) {
                 if (olaOwnerTesting) {
@@ -6130,21 +6161,14 @@ private val processingTimeoutRunnable = Runnable {
             return
         }
 
-        val directResult =
-            evaluateDirectRideFilters(candidate)
-
-        if (prefs.olaAdminFilterSettings.value.enabled) {
-            if (!com.example.auth.PickupGuardOwnerAccess.authorized(prefs.userProfile.value) ||
-                com.example.engine.OlaAdminFilterEngine.evaluate(
-                    candidate, prefs.olaAdminFilterSettings.value
-                ) !is com.example.engine.OlaAdminFilterEngine.Result.Match) {
-                historyRecordId?.let { onOrderDecisionFast(it, candidate,
-                    OrderStatus.IGNORED, "OLA_ADMIN_FILTER_CHANGED",
-                    "Owner Ola filter no longer matches") }
-                setOlaState(OlaState.IDLE)
-                return
+        val ownerMode = prefs.olaAdminFilterSettings.value.enabled
+        val directResult = if (ownerMode) {
+            when (val decision = evaluateOlaOwnerDecision(candidate)) {
+                is DecisionResult.Accept -> DirectFilterResult(OrderStatus.ACCEPTED, decision.reason)
+                is DecisionResult.Ignore -> DirectFilterResult(OrderStatus.IGNORED, decision.reason)
+                is DecisionResult.Reject -> DirectFilterResult(OrderStatus.IGNORED, decision.reason)
             }
-        }
+        } else evaluateDirectRideFilters(candidate)
 
         if (directResult.status == OrderStatus.REJECTED) {
             if (prefs.olaAdminFilterSettings.value.enabled) {
@@ -6157,7 +6181,10 @@ private val processingTimeoutRunnable = Runnable {
 
         if (directResult.status == OrderStatus.IGNORED) {
             historyRecordId?.let {
-                onOrderDecisionFast(it, candidate, OrderStatus.IGNORED, "CRITERIA_NOT_MET", directResult.reason)
+                val code = if (!ownerMode) "CRITERIA_NOT_MET"
+                    else if (directResult.reason.startsWith("Ola Global Filter:"))
+                        "OLA_ADMIN_FILTER_IGNORED" else "OLA_ADMIN_SHARED_SAFETY_IGNORED"
+                onOrderDecisionFast(it, candidate, OrderStatus.IGNORED, code, directResult.reason)
             }
             setOlaState(OlaState.IDLE)
             return
@@ -6404,18 +6431,15 @@ private val processingTimeoutRunnable = Runnable {
     }
 
     private fun olaFinalFiltersMatch(candidate: RideCandidate, root: AccessibilityNodeInfo): Boolean {
-        val olaTest = prefs.olaAdminFilterSettings.value
-        if (olaTest.enabled) {
-            if (!com.example.auth.PickupGuardOwnerAccess.authorized(prefs.userProfile.value)) return false
-            if (com.example.engine.OlaAdminFilterEngine.evaluate(candidate, olaTest)
-                !is com.example.engine.OlaAdminFilterEngine.Result.Match) return false
+        if (prefs.olaAdminFilterSettings.value.enabled) {
+            // Re-read Ola settings, owner claim and shared safety on the fresh offer.
+            return evaluateOlaOwnerDecision(candidate) is DecisionResult.Accept
         }
         if (evaluateDirectRideFilters(candidate).status != OrderStatus.ACCEPTED) return false
         val goTo = prefs.loadGoToAreas()
         val noGo = prefs.loadNoGoAreas()
-        val pickup = if (olaTest.enabled) "" else extractPickupLocationText(candidate, root)
-        if (!olaTest.enabled &&
-            checkPickupAreaRules(pickup, goTo, noGo) is DecisionResult.Reject) return false
+        val pickup = extractPickupLocationText(candidate, root)
+        if (checkPickupAreaRules(pickup, goTo, noGo) is DecisionResult.Reject) return false
         return AreaRulesEngine.evaluateRide(candidate = candidate, settings = prefs.loadSettings(),
             goToAreas = goTo, noGoAreas = noGo, areas = goTo + noGo,
             pickupLocationTextOverride = pickup) is DecisionResult.Accept
