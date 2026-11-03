@@ -87,7 +87,8 @@ class PreferencesManager(private val context: Context) {
         val raw = prefs.getString(prefix + "words", "").orEmpty()
         val parsed = AdminPickupBlockPolicy.parse(raw)
         return AdminPickupBlockSettings(
-            enabled = prefs.getBoolean(prefix + "enabled", false) && parsed.isNotEmpty(),
+            enabled = _userProfile.value.isAdmin &&
+                prefs.getBoolean(prefix + "enabled", false) && parsed.isNotEmpty(),
             blockedWords = parsed
         )
     }
