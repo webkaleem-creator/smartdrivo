@@ -103,6 +103,8 @@ fun MoreScreen(
     onNavigateToReadOnlyProfile: () -> Unit = {},
     onNavigateToAdminPanel: () -> Unit = {},
     onNavigateToPickupGuard: () -> Unit = {},
+    onNavigateToOlaAdminFilter: () -> Unit = {},
+    onNavigateToOlaAdminHistory: () -> Unit = {},
     onLogout: () -> Unit,
     onBack: () -> Unit = {}
 ) {
@@ -633,6 +635,18 @@ fun MoreScreen(
                                 title = "Pickup Guard",
                                 subtitle = "Owner-only manual choice & No-Go protection",
                                 onClick = onNavigateToPickupGuard
+                            )
+                            MoreCardRow(
+                                icon = Icons.Default.AdminPanelSettings,
+                                title = "Ola Global Filter",
+                                subtitle = "Owner-only Ola testing & independent filter limits",
+                                onClick = onNavigateToOlaAdminFilter
+                            )
+                            MoreCardRow(
+                                icon = Icons.Default.AdminPanelSettings,
+                                title = "Ola Testing History",
+                                subtitle = "Owner-only real Ola order outcomes",
+                                onClick = onNavigateToOlaAdminHistory
                             )
                         }
                     }

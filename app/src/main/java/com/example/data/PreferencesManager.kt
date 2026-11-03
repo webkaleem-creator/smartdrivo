@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.example.model.AppSettings
 import com.example.model.PickupGuardSettings
+import com.example.model.OlaAdminFilterSettings
 import com.example.model.AppThemeMode
 import com.example.model.AreaGroup
 import com.example.model.AreaType
@@ -66,6 +67,48 @@ class PreferencesManager(private val context: Context) {
             .putFloat("owner_guard_max_v1_$uid", value.maxPickupKm)
             .commit()
         if (saved) _pickupGuardSettings.value = value
+        return saved
+    }
+
+    // Owner-only Ola testing configuration: separate from shared Rapido/Uber filters.
+    // OFF by default and scoped to Firebase UID; never fall back to a different user.
+    private val _olaAdminFilterSettings = MutableStateFlow(readOlaAdminFilterSettings())
+    val olaAdminFilterSettings: StateFlow<OlaAdminFilterSettings> =
+        _olaAdminFilterSettings.asStateFlow()
+
+    private fun readOlaAdminFilterSettings(): OlaAdminFilterSettings {
+        val uid = _userProfile.value.uid.takeIf { it.isNotBlank() }
+            ?: return OlaAdminFilterSettings()
+        val prefix = "owner_ola_global_v1_${uid}_"
+        val defaults = OlaAdminFilterSettings()
+        val mode = runCatching {
+            FilterMode.valueOf(prefs.getString(prefix + "mode", defaults.filterMode.name).orEmpty())
+        }.getOrDefault(defaults.filterMode)
+        return OlaAdminFilterSettings(
+            enabled = prefs.getBoolean(prefix + "enabled", false),
+            filterMode = mode,
+            minFare = getSafeFloat(prefix + "min", defaults.minFare),
+            maxFare = getSafeFloat(prefix + "max", defaults.maxFare),
+            maxPickupKm = getSafeFloat(prefix + "pickup", defaults.maxPickupKm),
+            maxTripKm = getSafeFloat(prefix + "trip", defaults.maxTripKm)
+        ).let { if (it.valid()) it else defaults }
+    }
+
+    fun saveOlaAdminFilterSettings(settings: OlaAdminFilterSettings): Boolean {
+        val profile = _userProfile.value
+        if (profile.uid.isBlank() ||
+            !com.example.auth.PickupGuardOwnerAccess.authorized(profile) ||
+            !settings.valid()) return false
+        val prefix = "owner_ola_global_v1_${profile.uid}_"
+        val saved = prefs.edit()
+            .putBoolean(prefix + "enabled", settings.enabled)
+            .putString(prefix + "mode", settings.filterMode.name)
+            .putFloat(prefix + "min", settings.minFare)
+            .putFloat(prefix + "max", settings.maxFare)
+            .putFloat(prefix + "pickup", settings.maxPickupKm)
+            .putFloat(prefix + "trip", settings.maxTripKm)
+            .commit()
+        if (saved) _olaAdminFilterSettings.value = settings
         return saved
     }
 
@@ -858,6 +901,7 @@ class PreferencesManager(private val context: Context) {
         }
         _userProfile.value = profile
         _pickupGuardSettings.value = readPickupGuardSettings()
+        _olaAdminFilterSettings.value = readOlaAdminFilterSettings()
         updateUserInList(profile)
     }
 
