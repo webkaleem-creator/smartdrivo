@@ -91,6 +91,8 @@ object PickupOnlyLabel {
         if (Regex("""\b\d+(?:[.,]\d+)?\s*(?:km|m|min|mins|minute|minutes)\b""", RegexOption.IGNORE_CASE).containsMatchIn(clean)) return false
         if (clean.matches(Regex("""[\d.,+\s-]+"""))) return false
         val lower = AdminPickupBlockPolicy.normalize(clean)
+        if (isLabel(clean) || lower.startsWith("drop:") ||
+            lower.startsWith("destination:")) return false
         if (lower in setOf("pickup", "pick up", "drop", "drop location", "destination",
                 "accept", "decline", "address unavailable")) return false
         // Mixed pickup/drop text must never be mistaken for a pickup-only field.
