@@ -32,6 +32,9 @@ interface RideHistoryDao {
     @Query("SELECT * FROM ride_history WHERE bookingId = :bookingId AND bookingId != '' LIMIT 1")
     suspend fun getByBookingId(bookingId: String): RideHistoryEntity?
 
+    @Query("SELECT * FROM ride_history WHERE platform = :platform AND bookingId = :bookingId AND bookingId != '' ORDER BY detectedAt DESC LIMIT 1")
+    suspend fun getByPlatformBookingId(platform: String, bookingId: String): RideHistoryEntity?
+
     @Query("SELECT * FROM ride_history WHERE platform = :platform AND status = 'PROCESSING' ORDER BY detectedAt DESC LIMIT 1")
     suspend fun getActiveProcessingRide(platform: String): RideHistoryEntity?
 

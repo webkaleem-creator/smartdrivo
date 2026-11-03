@@ -33,13 +33,24 @@ class RideHistoryRepository(
     val acceptedCount: Flow<Int> = dao.getAcceptedCount()
 
     private val mutex = Mutex()
+    // Recent provisional IDs must resolve to the exact row returned by deduplication.
+    // Bounded in-memory compatibility only; existing rows and schema are unchanged.
+    private val detectionAliases = object : LinkedHashMap<String, String>(128, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > 1024
+    }
 
     // V16: onOrderDetectedFast returns a provisional ride_<fingerprint>_<time>
     // before Room's async insert/dedupe completes. When dedupe returns an
     // older primary key, resolve the same ride by its fingerprint + timestamp.
     // Never match another offer with the same fingerprint outside 3 seconds.
     private suspend fun resolveActionRecord(id: String): RideHistoryEntity? {
-        val direct = dao.getById(id) ?: dao.getByBookingId(id) ?: dao.getByFingerprint(id)
+        dao.getById(id)?.let { return it }
+        val exactAlias = synchronized(detectionAliases) { detectionAliases[id] }
+        if (exactAlias != null) return dao.getById(exactAlias)
+        val bookingKey = Regex("^booking_(RAPIDO|UBER|OLA)_(.+)$").matchEntire(id)
+        if (bookingKey != null) return dao.getByPlatformBookingId(
+            bookingKey.groupValues[1], bookingKey.groupValues[2])
+        val direct = dao.getByBookingId(id) ?: dao.getByFingerprint(id)
         if (direct != null) return direct
         val match = Regex("^ride_(.+)_([0-9]{13})$").matchEntire(id) ?: return null
         val timestamp = match.groupValues[2].toLongOrNull() ?: return null
@@ -81,6 +92,13 @@ class RideHistoryRepository(
             val now = System.currentTimeMillis()
             val detectedTime = if (candidate.detectionTimeMs > 0L) candidate.detectionTimeMs else now
             val fingerprint = generateFingerprint(candidate)
+            fun reused(row: RideHistoryEntity): RideHistoryEntity {
+                val provisional = olaRecordId ?: detectionRecordId(candidate)
+                if (provisional != row.id) synchronized(detectionAliases) {
+                    detectionAliases[provisional] = row.id
+                }
+                return row
+            }
 
             // A supplied Ola session key is authoritative for its entire lifetime.
             // Detection retries must never recreate/reset that row after a dedupe window.
@@ -91,7 +109,7 @@ class RideHistoryRepository(
             // Check duplicate by bookingId (if available)
             val byBookingId = if (olaRecordId != null) dao.getById(olaRecordId)
             else if (!candidate.bookingId.isNullOrBlank()) {
-                dao.getByBookingId(candidate.bookingId)
+                dao.getByPlatformBookingId(candidate.platform.name, candidate.bookingId)
             } else null
 
             // Check duplicate by fingerprint
@@ -178,6 +196,12 @@ class RideHistoryRepository(
                         existing.bookingId ==
                             candidate.bookingId
 
+                // A genuine booking remains the same record beyond render/dedupe windows.
+                // Never replace its terminal status with a fresh PROCESSING entity.
+                if (sameBookingId && !isRecent) {
+                    return@withContext reused(existing)
+                }
+
                 // Merge repeated accessibility events only while
                 // the original real ride is still PROCESSING.
                 if (
@@ -209,7 +233,7 @@ class RideHistoryRepository(
                             "(duplicates: ${merged.duplicateEventsIgnored})"
                     )
 
-                    return@withContext merged
+                    return@withContext reused(merged)
                 }
 
                 // HISTORY_DEDUP_PHASE2A_V1
@@ -247,19 +271,12 @@ class RideHistoryRepository(
                     )
                     dao.update(enriched)
                     Log.i("RideHistoryRepo", "Deduped finalized ride: ${enriched.id}")
-                    return@withContext enriched
+                    return@withContext reused(enriched)
                 }
             }
 
             // Create new record
-            val recordId = olaRecordId ?:
-                if (!candidate.bookingId.isNullOrBlank()) {
-                    candidate.bookingId
-                } else {
-                    // Fingerprint handles duplicate accessibility events.
-                    // detectedTime makes a later identical real offer unique.
-                    "ride_${fingerprint}_${detectedTime}"
-                }
+            val recordId = olaRecordId ?: detectionRecordId(candidate)
 
             val (dateStr, timeStr) = formatDateTime(detectedTime)
             val insertLatency = now - detectedTime
@@ -465,20 +482,9 @@ class RideHistoryRepository(
         dao.getAllHistoryList()
     }
 
-    fun generateFingerprint(candidate: RideCandidate): String {
-        if (!candidate.bookingId.isNullOrBlank()) {
-            return "${candidate.platform}_${candidate.bookingId}"
-        }
-        val fareInt = (candidate.fare ?: 0f).toInt()
-        val pickup10 = ((candidate.pickupDistKm ?: 0f) * 10).toInt()
-        val drop10 = ((candidate.dropDistKm ?: 0f) * 10).toInt()
-        val pickupClean = (candidate.pickupAddress ?: "").take(12).replace(Regex("[^A-Za-z0-9]"), "")
-        // A 12-character drop prefix collides for many Charminar offers.
-        val fullDrop = candidate.dropAddress.orEmpty().trim().lowercase(Locale.ROOT)
-        val dropClean = fullDrop.replace(Regex("[^a-z0-9]"), "").take(48)
-        val dropSignature = fullDrop.hashCode().toUInt().toString(16)
-        return "${candidate.platform}_${fareInt}_${pickup10}_${drop10}_${pickupClean}_${dropClean}_${dropSignature}"
-    }
+    /** Shared by the async caller and Room: no database work or mutable active-ID lookup. */
+    fun detectionRecordId(candidate: RideCandidate): String = HistoryRecordIdentity.id(candidate)
+    fun generateFingerprint(candidate: RideCandidate): String = HistoryRecordIdentity.fingerprint(candidate)
 
     private fun formatDateTime(timestamp: Long): Pair<String, String> {
         val date = Date(if (timestamp > 0L) timestamp else System.currentTimeMillis())

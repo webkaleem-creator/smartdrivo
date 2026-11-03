@@ -5878,7 +5878,7 @@ private val processingTimeoutRunnable = Runnable {
     private var olaLastEvaluated: RideCandidate? = null
     private var olaLastRecordId: String? = null
     private val olaWindowReadQueued = java.util.concurrent.atomic.AtomicBoolean(false)
-    private val olaHistoryInserts = com.example.engine.OlaHistoryInsertGate()
+    private val historyInserts = com.example.engine.HistoryInsertGate()
     private val olaSessionLock = Any()
     private val olaSessions = com.example.engine.OlaSessionOwner()
 
@@ -10999,28 +10999,12 @@ private val processingTimeoutRunnable = Runnable {
             return candidate.bookingId?.ifBlank { null } ?: "PAUSED"
         }
 
-        val tempId = olaRecordId ?:
-            candidate.bookingId
-                ?.ifBlank { null }
-                ?: run {
-                    val fingerprint =
-                        rideHistoryRepository
-                            .generateFingerprint(candidate)
-
-                    val detectedTime =
-                        if (candidate.detectionTimeMs > 0L) {
-                            candidate.detectionTimeMs
-                        } else {
-                            candidate.timestamp
-                        }
-
-                    "ride_${fingerprint}_${detectedTime}"
-                }
+        val tempId = olaRecordId ?: com.example.data.db.HistoryRecordIdentity.id(candidate)
+        val queuedAt = android.os.SystemClock.elapsedRealtime()
         activeOrderRecordIds[candidate.platform] = tempId
 
-        val olaInsert = if (candidate.platform == Platform.OLA) {
-            olaHistoryInserts.begin(tempId) ?: return tempId
-        } else null
+        val insert = historyInserts.begin(tempId) ?: return tempId
+        val isOla = candidate.platform == Platform.OLA
 
         // SHORT_POPUP_V7: new valid order supersedes old banner.
         // No database or network work on the click-critical path.
@@ -11049,13 +11033,15 @@ private val processingTimeoutRunnable = Runnable {
                 }
 
                 inserted = true
-                if (olaInsert != null) olaDiag(OlaDiagnosticStore.Stage.HISTORY_INSERTED)
+                if (isOla) olaDiag(OlaDiagnosticStore.Stage.HISTORY_INSERTED)
                 prefs.notifyOrderHistoryChanged()
             } catch (e: Exception) {
                 Log.e(TAG, "Error in onOrderDetectedFast", e)
-                if (olaInsert != null) olaDiag(OlaDiagnosticStore.Stage.HISTORY_INSERT_FAILED)
+                if (isOla) olaDiag(OlaDiagnosticStore.Stage.HISTORY_INSERT_FAILED)
             } finally {
-                if (olaInsert != null) olaHistoryInserts.complete(tempId, olaInsert, inserted)
+                historyInserts.complete(tempId, insert, inserted)
+                Log.i("HistoryLatency", "stage=insert platform=${candidate.platform.name} " +
+                    "success=$inserted elapsedMs=${android.os.SystemClock.elapsedRealtime() - queuedAt}")
             }
         }
         return tempId
@@ -11080,8 +11066,9 @@ private val processingTimeoutRunnable = Runnable {
         if (candidate.platform == Platform.RAPIDO) rapidoMiss("DECISION_${status.name}")
         serviceScope.launch(Dispatchers.IO) {
             try {
-                if (candidate.platform == Platform.OLA && !olaHistoryInserts.await(recordId)) {
-                    olaDiag(OlaDiagnosticStore.Stage.HISTORY_INSERT_FAILED)
+                if (!historyInserts.await(recordId)) {
+                    if (candidate.platform == Platform.OLA) olaDiag(OlaDiagnosticStore.Stage.HISTORY_INSERT_FAILED)
+                    else Log.e("HistoryLatency", "stage=insert_failed platform=${candidate.platform.name}")
                     return@launch
                 }
                 // onOrderDetectedFast inserts PROCESSING asynchronously.
@@ -11143,6 +11130,7 @@ private val processingTimeoutRunnable = Runnable {
         }
         serviceScope.launch(Dispatchers.IO) {
             try {
+                if (!historyInserts.await(recordId)) return@launch
                 rideHistoryRepository.onOrderActionAttempt(recordId)
             } catch (e: Exception) {
                 Log.e(TAG, "Error in onOrderActionAttemptFast", e)
@@ -11185,8 +11173,9 @@ private val processingTimeoutRunnable = Runnable {
         )
         serviceScope.launch(Dispatchers.IO) {
             try {
-                if (candidate.platform == Platform.OLA && !olaHistoryInserts.await(recordId)) {
-                    olaDiag(OlaDiagnosticStore.Stage.HISTORY_INSERT_FAILED)
+                if (!historyInserts.await(recordId)) {
+                    if (candidate.platform == Platform.OLA) olaDiag(OlaDiagnosticStore.Stage.HISTORY_INSERT_FAILED)
+                    else Log.e("HistoryLatency", "stage=insert_failed platform=${candidate.platform.name}")
                     return@launch
                 }
                 var updated =

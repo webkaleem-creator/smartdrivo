@@ -121,14 +121,16 @@ fun OrderHistoryScreen(
             historyClock = System.currentTimeMillis()
         }
     }
-    val yesterdayStart = OrderHistoryRetention.startOfYesterdayMillis(historyClock)
-    val todayStart = OrderHistoryRetention.startOfTodayMillis(historyClock)
-    val tomorrowStart = OrderHistoryRetention.startOfTomorrowMillis(historyClock)
+    // New Room data must advance the date window immediately at midnight;
+    // retain the periodic tick for an idle screen with no database emissions.
+    val renderClock = remember(historyClock, historyEntities) { System.currentTimeMillis() }
+    val yesterdayStart = OrderHistoryRetention.startOfYesterdayMillis(renderClock)
+    val todayStart = OrderHistoryRetention.startOfTodayMillis(renderClock)
+    val tomorrowStart = OrderHistoryRetention.startOfTomorrowMillis(renderClock)
     // Hide expired records while asynchronous physical deletion completes.
     val history = remember(historyEntities, yesterdayStart, tomorrowStart) {
         historyEntities.asSequence()
-            .filter { (it.status != OrderStatus.PROCESSING.name || it.platform == Platform.OLA.name) &&
-                it.detectedAt >= yesterdayStart && it.detectedAt < tomorrowStart }
+            .filter { it.detectedAt >= yesterdayStart && it.detectedAt < tomorrowStart }
             .sortedByDescending { it.detectedAt }
             .map { it.toOrderHistoryItem() }.toList()
     }
@@ -243,6 +245,16 @@ fun OrderHistoryScreen(
     }
     // AUTO-SCROLL TO NEWEST ORDER
     val newestVisibleOrderId = filteredList.firstOrNull()?.id
+
+    // Frame callback is a device-side measurement point, not proof of pixels displayed.
+    LaunchedEffect(newestVisibleOrderId, filteredList.firstOrNull()?.status) {
+        filteredList.firstOrNull()?.let { item ->
+            androidx.compose.runtime.withFrameNanos { }
+            val age = System.currentTimeMillis() - item.timestamp
+            if (age in 0L..30_000L) android.util.Log.i("HistoryLatency",
+                "stage=frame platform=${item.platform.name} status=${item.status.name} detectionAgeMs=$age")
+        }
+    }
 
     LaunchedEffect(newestVisibleOrderId) {
         if (newestVisibleOrderId != null && filteredList.isNotEmpty()) {

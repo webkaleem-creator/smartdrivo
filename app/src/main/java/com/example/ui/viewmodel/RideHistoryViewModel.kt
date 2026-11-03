@@ -9,6 +9,7 @@ import com.example.data.db.RideHistoryRepository
 import com.example.data.db.entity.RideHistoryEntity
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -63,7 +64,18 @@ class RideHistoryViewModel(
             }
         }
     }
+    private var lastHistoryMetric: Pair<String, String>? = null
 val history: StateFlow<List<RideHistoryEntity>> = repository.allHistory
+        .onEach { rows ->
+            rows.firstOrNull()?.let { row ->
+                val key = row.id to row.status
+                val age = System.currentTimeMillis() - row.detectedAt
+                if (key != lastHistoryMetric && age in 0L..30_000L) {
+                    android.util.Log.i("HistoryLatency", "stage=flow platform=${row.platform} status=${row.status} detectionAgeMs=$age")
+                }
+                lastHistoryMetric = key
+            }
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
