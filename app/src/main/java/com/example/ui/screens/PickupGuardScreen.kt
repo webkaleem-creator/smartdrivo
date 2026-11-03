@@ -13,6 +13,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -23,9 +24,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.auth.PickupGuardOwnerAccess
 import com.example.data.PreferencesManager
 
@@ -75,7 +79,27 @@ fun PickupGuardScreen(prefs: PreferencesManager, onBack: () -> Unit) {
                                 message = "Enter a valid maximum"
                                 Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                             }
-                        })
+                        },
+                            // Owner-only premium switch: teal active / slate inactive,
+                            // with a clear in-thumb state symbol for accessibility.
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = Color(0xFF087F79),
+                                checkedThumbColor = Color.White,
+                                checkedBorderColor = Color(0xFF06A99F),
+                                uncheckedTrackColor = Color(0xFF475569),
+                                uncheckedThumbColor = Color.White,
+                                uncheckedBorderColor = Color(0xFF64748B)
+                            ),
+                            thumbContent = {
+                                Text(
+                                    text = if (current.enabled) "✓" else "−",
+                                    color = if (current.enabled) Color(0xFF087F79)
+                                        else Color(0xFF475569),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        )
                     }
                     OutlinedTextField(
                         value = input,
