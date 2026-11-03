@@ -1057,6 +1057,11 @@ private val processingTimeoutRunnable = Runnable {
         if (!guard.enabled) return false
 
         fun finish(reasonCode: String, reason: String) {
+            // An unchanged, still-visible Rapido card must never create
+            // another History row on the next accessibility event.
+            if (candidate.platform == Platform.RAPIDO) {
+                rapidoIgnoredVisibleOfferGuard.rememberIgnored(candidate)
+            }
             onOrderDecisionFast(
                 recordId, candidate, OrderStatus.IGNORED, reasonCode, reason
             )
@@ -1115,21 +1120,36 @@ private val processingTimeoutRunnable = Runnable {
                     Platform.OLA -> OlaAdapter.extractCandidate(
                         root, prefs.userProfile.value.vehicleType
                     )
-                    Platform.RAPIDO, Platform.UBER -> OrderDataExtractor.extractCandidate(
+                    Platform.RAPIDO -> {
+                        // Never compare the Turbo Snapshot against the generic
+                        // OrderDataExtractor: fare/tip/address readings can differ.
+                        // Revalidate with the same Rapido popup parser as detection.
+                        val freshPopup = RapidoAdapter.validateRapidoOrderPopup(root)
+                        if (freshPopup.isValid) {
+                            captureRapidoFastSnapshot(root, freshPopup)?.candidate
+                        } else null
+                    }
+                    Platform.UBER -> OrderDataExtractor.extractCandidate(
                         root, candidate.platform, prefs.userProfile.value.vehicleType
                     )
                 }
-                val sameVisibleOffer =
-                    live.fare == candidate.fare &&
-                    live.pickupDistKm == candidate.pickupDistKm &&
-                    live.dropDistKm == candidate.dropDistKm &&
-                    live.dropAddress?.trim() == candidate.dropAddress?.trim() &&
-                    (candidate.bookingId.isNullOrBlank() ||
-                        live.bookingId == candidate.bookingId)
-                val liveDecision = com.example.engine.PickupGuardEngine.evaluate(
-                    live, guard, prefs.noGoAreas.value,
-                    settings.isNoGoEnabled || prefs.isNoGoEnabled
-                )
+                val sameVisibleOffer = live != null && when (candidate.platform) {
+                    Platform.RAPIDO ->
+                        com.example.engine.PickupGuardRapidoOfferIdentity.sameVisibleOffer(candidate, live)
+                    else ->
+                        live.fare == candidate.fare &&
+                        live.pickupDistKm == candidate.pickupDistKm &&
+                        live.dropDistKm == candidate.dropDistKm &&
+                        live.dropAddress?.trim() == candidate.dropAddress?.trim() &&
+                        (candidate.bookingId.isNullOrBlank() ||
+                            live.bookingId == candidate.bookingId)
+                }
+                val liveDecision = live?.let {
+                    com.example.engine.PickupGuardEngine.evaluate(
+                        it, guard, prefs.noGoAreas.value,
+                        settings.isNoGoEnabled || prefs.isNoGoEnabled
+                    )
+                }
                 if (!sameVisibleOffer ||
                     liveDecision !is com.example.engine.PickupGuardEngine.Result.AutoReject) {
                     finish("PICKUP_GUARD_OFFER_CHANGED",
@@ -1139,9 +1159,13 @@ private val processingTimeoutRunnable = Runnable {
 
                 // No gesture fallback, guessed position or clickable-ancestor substitution.
                 // Uber requires an explicit visible Reject/Decline/Skip label.
-                // Guard cannot use the legacy Rapido geometric fallback or
-                // Ola's non-clickable text-match ancestor. Explicit controls only.
-                val rejectNode = findPickupGuardNamedReject(root)
+                // Reuse Rapido's existing Auto-Reject Skip/X finder. Its
+                // bounded same-row control check supports an icon-only minus.
+                // Ola/Uber remain strict explicit-label-only.
+                val rejectNode = when (candidate.platform) {
+                    Platform.RAPIDO -> findStrictRapidoRejectNode(root)
+                    Platform.OLA, Platform.UBER -> findPickupGuardNamedReject(root)
+                }
                 val bounds = Rect()
                 rejectNode?.getBoundsInScreen(bounds)
                 val nodePkg = rejectNode?.packageName?.toString().orEmpty()
@@ -1168,6 +1192,12 @@ private val processingTimeoutRunnable = Runnable {
                 }
                 val clicked = rejectNode!!.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 // Android ACTION_CLICK_OK does not prove rejection reached the platform.
+                if (clicked && candidate.platform == Platform.RAPIDO) {
+                    rapidoIgnoredVisibleOfferGuard.rememberIgnored(candidate)
+                    observePickupGuardRapidoReject(recordId, candidate, decision.reason)
+                    resetProcessing()
+                    return true
+                }
                 finish(if (clicked) "PICKUP_GUARD_REJECT_SENT" else "PICKUP_GUARD_REJECT_FAILED",
                     "${decision.reason} | " +
                     if (clicked) "Reject action sent; final result unverified"
@@ -1175,6 +1205,54 @@ private val processingTimeoutRunnable = Runnable {
             }
         }
         return true
+    }
+
+    // UI evidence, not performAction() alone, determines the Rejected History state.
+    // This never clicks twice, never moves to another offer and never re-evaluates
+    // acceptance. It runs only after a verified Rapido Skip/X action was sent.
+    private fun observePickupGuardRapidoReject(
+        recordId: String,
+        candidate: RideCandidate,
+        reason: String
+    ) {
+        fun check(attempt: Int) {
+            var matchingOfferStillVisible = false
+            var rapidoHomeVisible = false
+            try {
+                val roots = mutableListOf<AccessibilityNodeInfo>()
+                rootInActiveWindow?.let { roots.add(it) }
+                windows.take(12).forEach { window ->
+                    window.root?.let { roots.add(it) }
+                }
+                for (rapidoRoot in roots) {
+                    if (!isRapidoPackage(rapidoRoot.packageName?.toString().orEmpty())) continue
+                    val validated = RapidoAdapter.validateRapidoOrderPopup(rapidoRoot)
+                    if (validated.isValid) {
+                        val observed = captureRapidoFastSnapshot(rapidoRoot, validated)?.candidate
+                        if (observed != null &&
+                            com.example.engine.PickupGuardRapidoOfferIdentity.sameVisibleOffer(candidate, observed)
+                        ) matchingOfferStillVisible = true
+                    } else if (RapidoAdapter.isRapidoHomeScreen(rapidoRoot)) {
+                        rapidoHomeVisible = true
+                    }
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "PICKUP_GUARD_REJECT_VERIFY: visibility scan unavailable")
+            }
+
+            if (!matchingOfferStillVisible && rapidoHomeVisible) {
+                onOrderDecisionFast(recordId, candidate, OrderStatus.REJECTED,
+                    "PICKUP_GUARD_REJECT_UI_DISMISSED",
+                    "$reason | Rapido Skip action sent; home screen observed")
+            } else if (attempt < 9) {
+                handler.postDelayed({ check(attempt + 1) }, 200L)
+            } else {
+                onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED,
+                    "PICKUP_GUARD_REJECT_UNCONFIRMED",
+                    "$reason | Skip action sent, but dismissal not verified")
+            }
+        }
+        handler.postDelayed({ check(0) }, 200L)
     }
 
     private fun findPickupGuardNamedReject(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
@@ -8134,7 +8212,8 @@ private val processingTimeoutRunnable = Runnable {
 
         // Only affects unmatched offers kept visible when Auto Reject is OFF.
         // Do not compare mutable pickup distance or reinsert into History.
-        if (!prefs.appSettings.value.isAutoRejectBadFaresEnabled &&
+        if ((prefs.pickupGuardSettings.value.enabled ||
+            !prefs.appSettings.value.isAutoRejectBadFaresEnabled) &&
             rapidoIgnoredVisibleOfferGuard.isDuplicateIgnored(candidate)
         ) {
             Log.d(TAG, "RAPIDO IGNORED DEDUP: still-visible unmatched offer; no new History row")
