@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -95,6 +96,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.FirebaseRepository
 import com.example.data.PreferencesManager
+import com.example.model.AdminPanelInsights
 import com.example.model.PaymentStatus
 import com.example.model.PaymentSubmission
 import com.example.model.MembershipDisplay
@@ -134,10 +136,13 @@ fun AdminPanelScreen(
         }
     }
 
-    // KPI Counters
-    val totalUsersCount = allUsers.size
-    val activeUsersCount = allUsers.count { it.isActive }
-    val inactiveUsersCount = allUsers.count { !it.isActive }
+    // Treat account enablement and membership validity as separate metrics.
+    // Never display all enabled accounts as paid subscribers.
+    val dashboardNow = System.currentTimeMillis()
+    val insights = remember(allUsers, dashboardNow) {
+        AdminPanelInsights.calculate(allUsers, dashboardNow)
+    }
+    val totalUsersCount = insights.totalUsers
     val pendingApprovalsCount by remember(submissions) {
         derivedStateOf { submissions.count { it.status == PaymentStatus.PENDING } }
     }
@@ -150,7 +155,7 @@ fun AdminPanelScreen(
 
     // State for user management
     var userSearchQuery by remember { mutableStateOf("") }
-    var userStatusFilter by remember { mutableStateOf("ALL") } // ALL, ACTIVE, INACTIVE
+    var userStatusFilter by remember { mutableStateOf("ALL") } // ALL, VALID, EXPIRED, AWAITING, DISABLED
     var userForPlanEdit by remember { mutableStateOf<UserProfile?>(null) }
 
     // State for payment management
@@ -188,11 +193,11 @@ fun AdminPanelScreen(
                             Text(
                                 text = "Admin Control Panel",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
+                                fontSize = 18.sp
                             )
                             Text(
                                 text = "SmartDrivo Partner & Payment Management",
-                                fontSize = 9.sp,
+                                fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -218,17 +223,19 @@ fun AdminPanelScreen(
         ) {
             // Top Metrics KPI Header
             AdminKpiHeader(
-                totalUsers = totalUsersCount,
-                activeUsers = activeUsersCount,
-                inactiveUsers = inactiveUsersCount,
+                summary = insights,
                 pendingApprovals = pendingApprovalsCount,
-                onFilterActiveClick = {
+                onShowAll = {
                     selectedTab = 0
-                    userStatusFilter = "ACTIVE"
+                    userStatusFilter = "ALL"
                 },
-                onFilterInactiveClick = {
+                onShowValid = {
                     selectedTab = 0
-                    userStatusFilter = "INACTIVE"
+                    userStatusFilter = "VALID"
+                },
+                onShowExpired = {
+                    selectedTab = 0
+                    userStatusFilter = "EXPIRED"
                 },
                 onPendingApprovalsClick = {
                     selectedTab = 1
@@ -321,6 +328,7 @@ fun AdminPanelScreen(
                         onSearchChange = { userSearchQuery = it },
                         statusFilter = userStatusFilter,
                         onStatusFilterChange = { userStatusFilter = it },
+                        now = dashboardNow,
                         onToggleActive = { _ -> },
                         onOpenPlanEdit = { user ->
                             userForPlanEdit = user
@@ -580,67 +588,64 @@ private fun PlanChoiceButton(label: String, days: Int, planId: String, onSelect:
 }
 
 /**
- * Top KPI Summary Banner with Total, Active, Inactive, and Pending counts
+ * Read-only membership-aware dashboard. Account state is shown separately
+ * because isActive does not imply an unexpired, approved subscription.
  */
 @Composable
 private fun AdminKpiHeader(
-    totalUsers: Int,
-    activeUsers: Int,
-    inactiveUsers: Int,
+    summary: AdminPanelInsights.Totals,
     pendingApprovals: Int,
-    onFilterActiveClick: () -> Unit,
-    onFilterInactiveClick: () -> Unit,
+    onShowAll: () -> Unit,
+    onShowValid: () -> Unit,
+    onShowExpired: () -> Unit,
     onPendingApprovalsClick: () -> Unit
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.fillMaxWidth()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                brush = Brush.linearGradient(
+                    listOf(Color(0xFF102A43), Color(0xFF17616C), Color(0xFF175C49))
+                )
+            )
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Total Drivers Card
-                KpiCard(
-                    title = "TOTAL",
-                    count = "$totalUsers",
-                    sub = "Drivers",
-                    badgeColor = Color(0xFF64748B),
-                    modifier = Modifier.weight(1f),
-                    onClick = {}
-                )
-
-                // Active Drivers Card
-                KpiCard(
-                    title = "ACTIVE",
-                    count = "$activeUsers",
-                    sub = "Subscribed",
-                    badgeColor = AccentGreen,
-                    modifier = Modifier.weight(1f),
-                    onClick = onFilterActiveClick
-                )
-
-                // Inactive Drivers Card
-                KpiCard(
-                    title = "INACTIVE",
-                    count = "$inactiveUsers",
-                    sub = "Expired/Free",
-                    badgeColor = AccentRed,
-                    modifier = Modifier.weight(1f),
-                    onClick = onFilterInactiveClick
-                )
-
-                // Pending Approvals Card
-                KpiCard(
-                    title = "PENDING",
-                    count = "$pendingApprovals",
-                    sub = "Payments",
-                    badgeColor = AccentYellow,
-                    modifier = Modifier.weight(1f),
-                    onClick = onPendingApprovalsClick
-                )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Text("ADMIN OVERVIEW", fontWeight = FontWeight.Bold,
+                    color = Color(0xFFD3FFF4), fontSize = 11.sp)
+                Text("Driver & membership dashboard",
+                    color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
+            Icon(Icons.Default.Security, contentDescription = "Admin only",
+                tint = Color(0xFFAAFFCC), modifier = Modifier.size(24.dp))
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            KpiCard("DRIVERS", "${summary.totalUsers}", "Registered",
+                Color(0xFF64748B), Modifier.weight(1f), onShowAll)
+            KpiCard("VALID", "${summary.validPlans}", "Valid plans",
+                AccentGreen, Modifier.weight(1f), onShowValid)
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            KpiCard("EXPIRED", "${summary.expiredPlans}", "Expired plans",
+                AccentRed, Modifier.weight(1f), onShowExpired)
+            KpiCard("PENDING", "$pendingApprovals", "Payments",
+                AccentYellow, Modifier.weight(1f), onPendingApprovalsClick)
+        }
+        Text(
+            text = "Accounts enabled: ${summary.enabledAccounts}  •  Disabled: ${summary.disabledAccounts}  •  Admins: ${summary.admins}",
+            color = Color(0xFFD9FFF1), fontSize = 10.sp
+        )
+        if (summary.awaitingApproval > 0) {
+            Text(
+                text = "${summary.awaitingApproval} membership(s) awaiting approval",
+                color = Color(0xFFFFE7B1), fontSize = 10.sp
+            )
         }
     }
 }
@@ -666,13 +671,13 @@ private fun KpiCard(
         ) {
             Text(
                 text = title,
-                fontSize = 7.5.sp,
+                fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 color = badgeColor
             )
             Text(
                 text = count,
-                fontSize = 15.sp,
+                fontSize = 23.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -697,43 +702,46 @@ private fun UserManagementSection(
     onSearchChange: (String) -> Unit,
     statusFilter: String,
     onStatusFilterChange: (String) -> Unit,
+    now: Long,
     onToggleActive: (UserProfile) -> Unit,
     onOpenPlanEdit: (UserProfile) -> Unit
 ) {
     val context = LocalContext.current
 
-    // Filter users based on search query and status
-    val filteredUsers = remember(allUsers, searchQuery, statusFilter) {
-        allUsers.filter { user ->
-            val matchesSearch = searchQuery.isBlank() ||
-                    user.phone.contains(searchQuery, ignoreCase = true) ||
-                    user.email.contains(searchQuery, ignoreCase = true) ||
-                    user.name.contains(searchQuery, ignoreCase = true) ||
-                    user.city.contains(searchQuery, ignoreCase = true) ||
-                    user.state.contains(searchQuery, ignoreCase = true)
-
-            val matchesStatus = when (statusFilter) {
-                "ACTIVE" -> user.isActive
-                "INACTIVE" -> !user.isActive
-                else -> true
-            }
-
-            matchesSearch && matchesStatus
+    // Search/plan filters and sorting are read-only; never modify user records.
+    var sortOrder by remember { mutableStateOf(AdminPanelInsights.SortOrder.NEWEST) }
+    val filteredUsers = remember(allUsers, searchQuery, statusFilter, sortOrder, now) {
+        val selected = when (statusFilter) {
+            "VALID" -> AdminPanelInsights.UserFilter.VALID_PLAN
+            "EXPIRED" -> AdminPanelInsights.UserFilter.EXPIRED_PLAN
+            "AWAITING" -> AdminPanelInsights.UserFilter.AWAITING
+            "DISABLED" -> AdminPanelInsights.UserFilter.DISABLED
+            else -> AdminPanelInsights.UserFilter.ALL
         }
+        val matches = allUsers.filter { user ->
+            val queryMatches = searchQuery.isBlank() ||
+                user.phone.contains(searchQuery, ignoreCase = true) ||
+                user.email.contains(searchQuery, ignoreCase = true) ||
+                user.name.contains(searchQuery, ignoreCase = true) ||
+                user.city.contains(searchQuery, ignoreCase = true) ||
+                user.state.contains(searchQuery, ignoreCase = true)
+            queryMatches && AdminPanelInsights.matches(user, selected, now)
+        }
+        AdminPanelInsights.sorted(matches, sortOrder, now)
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // Search bar for phone & email
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchChange,
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Search drivers by phone (+91...) or email...", fontSize = 10.sp) },
+            placeholder = { Text("Search name, phone, email or location", fontSize = 12.sp) },
             leadingIcon = {
                 Icon(Icons.Default.Search, contentDescription = "Search", tint = AccentGreen, modifier = Modifier.size(18.dp))
             },
@@ -752,42 +760,50 @@ private fun UserManagementSection(
             )
         )
 
-        // Filter chips: All, Active, Inactive
-        Row(
+        // Scrollable membership filters keep account and subscription separate.
+        LazyRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            FilterChip(
-                selected = statusFilter == "ALL",
-                onClick = { onStatusFilterChange("ALL") },
-                label = { Text("All (${allUsers.size})", fontSize = 9.sp) },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer
+            val choices = listOf(
+                Triple("ALL", "All", allUsers.size),
+                Triple("VALID", "Valid plans", allUsers.count {
+                    AdminPanelInsights.matches(it, AdminPanelInsights.UserFilter.VALID_PLAN, now)
+                }),
+                Triple("EXPIRED", "Expired", allUsers.count {
+                    AdminPanelInsights.matches(it, AdminPanelInsights.UserFilter.EXPIRED_PLAN, now)
+                }),
+                Triple("AWAITING", "Awaiting", allUsers.count {
+                    AdminPanelInsights.matches(it, AdminPanelInsights.UserFilter.AWAITING, now)
+                }),
+                Triple("DISABLED", "Account off", allUsers.count { !it.isActive })
+            )
+            items(choices) { (key, label, count) ->
+                FilterChip(
+                    selected = statusFilter == key,
+                    onClick = { onStatusFilterChange(key) },
+                    label = { Text("$label ($count)", fontSize = 11.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer
+                    )
                 )
-            )
-            FilterChip(
-                selected = statusFilter == "ACTIVE",
-                onClick = { onStatusFilterChange("ACTIVE") },
-                label = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(6.dp).background(AccentGreen, CircleShape))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Active (${allUsers.count { it.isActive }})", fontSize = 9.sp)
-                    }
-                }
-            )
-            FilterChip(
-                selected = statusFilter == "INACTIVE",
-                onClick = { onStatusFilterChange("INACTIVE") },
-                label = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(6.dp).background(AccentRed, CircleShape))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Inactive (${allUsers.count { !it.isActive }})", fontSize = 9.sp)
-                    }
-                }
-            )
+            }
+        }
+        Row(modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Sort:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            listOf(
+                AdminPanelInsights.SortOrder.NEWEST to "Newest",
+                AdminPanelInsights.SortOrder.EXPIRING_SOON to "Expiring",
+                AdminPanelInsights.SortOrder.NAME to "Name"
+            ).forEach { (option, title) ->
+                FilterChip(
+                    selected = sortOrder == option,
+                    onClick = { sortOrder = option },
+                    label = { Text(title, fontSize = 10.sp) }
+                )
+            }
         }
 
         // Driver list count summary
@@ -1472,7 +1488,7 @@ private fun PaymentCardWithUtrValidation(
             // Submission date & timestamp
             Text(
                 text = "Submitted: ${SimpleDateFormat("dd/MM/yyyy hh:mm a", Locale.getDefault()).format(Date(submission.submittedAt))}",
-                fontSize = 8.sp,
+                fontSize = 10.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
