@@ -67,4 +67,19 @@ class OlaHistoryOwnershipTest {
         assertEquals(0, row.timesClicked)
         assertEquals(0L, row.actionCompletedAt)
     }
+    @Test fun oldOlaSessionDetectionCannotOverwriteItsTerminalHistory() = runBlocking {
+        val candidate = offer().copy(detectionTimeMs = System.currentTimeMillis() - 20_000L)
+        for (status in listOf(OrderStatus.ACCEPTED, OrderStatus.UNCONFIRMED, OrderStatus.IGNORED)) {
+            val key = "ola_offer_old_${status.name}"
+            history.onOrderDetected(candidate, olaRecordId = key)
+            if (status == OrderStatus.IGNORED) {
+                history.onOrderDecision(key, status, "TEST", "Ignored")
+            } else {
+                history.onOrderActionCompleted(key, status, "TEST", "Final", status == OrderStatus.ACCEPTED)
+            }
+            val before = history.getById(key)!!
+            repeat(20) { history.onOrderDetected(candidate.copy(fare = 999f), olaRecordId = key) }
+            assertEquals(before, history.getById(key))
+        }
+    }
 }

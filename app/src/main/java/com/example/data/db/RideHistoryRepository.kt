@@ -82,6 +82,12 @@ class RideHistoryRepository(
             val detectedTime = if (candidate.detectionTimeMs > 0L) candidate.detectionTimeMs else now
             val fingerprint = generateFingerprint(candidate)
 
+            // A supplied Ola session key is authoritative for its entire lifetime.
+            // Detection retries must never recreate/reset that row after a dedupe window.
+            if (olaRecordId != null) {
+                dao.getById(olaRecordId)?.let { return@withContext it }
+            }
+
             // Check duplicate by bookingId (if available)
             val byBookingId = if (olaRecordId != null) dao.getById(olaRecordId)
             else if (!candidate.bookingId.isNullOrBlank()) {
