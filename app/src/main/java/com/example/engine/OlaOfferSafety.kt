@@ -8,6 +8,49 @@ import kotlin.math.abs
  * Fail closed on ambiguous offers: a UI click is never proof of acceptance.
  */
 object OlaOfferSafety {
+    // Require an explicit label and an identifier containing a digit. Never parse prose.
+    fun bookingId(text: String): String? = Regex(
+        """\b(?:CRN|booking\s*(?:id|number|no\.?)|order\s*(?:id|number|no\.?))\s*[:#-]?\s*([A-Z0-9-]{3,32})\b""",
+        RegexOption.IGNORE_CASE
+    ).findAll(text).map { it.groupValues[1] }
+        .firstOrNull { id -> id.any { it.isDigit() } }
+
+    fun routesToOla(eventPackage: String, rootPackages: List<String>): Boolean =
+        isDriverPackage(eventPackage) || rootPackages.any { isDriverPackage(it) }
+
+    fun internalId(): String = "ola_offer_" + java.util.UUID.randomUUID().toString()
+
+    /** Missing or changed decision inputs fail closed, even for the same booking. */
+    fun sameOffer(old: com.example.model.RideCandidate, live: com.example.model.RideCandidate): Boolean {
+        val genuineId = old.bookingId?.takeUnless { it.startsWith("ola_offer_") }
+        if (genuineId != null && genuineId != live.bookingId) return false
+        fun address(value: String?) = value.orEmpty().trim().lowercase(Locale.ROOT)
+        return old.fare != null && old.fare == live.fare &&
+            old.pickupDistKm == live.pickupDistKm && old.dropDistKm == live.dropDistKm &&
+            address(old.pickupAddress) == address(live.pickupAddress) &&
+            address(old.dropAddress) == address(live.dropAddress) && old.vehicleType == live.vehicleType
+    }
+
+    /** Replacement requires positive identity evidence, never missing render fields. */
+    fun isDifferentOffer(old: com.example.model.RideCandidate, live: com.example.model.RideCandidate): Boolean {
+        fun id(v: String?) = v?.takeUnless { it.startsWith("ola_offer_") || it.isBlank() }
+        val a = id(old.bookingId); val b = id(live.bookingId)
+        if (a != null && b != null) return a != b
+        fun address(v: String?): String? = normalize(v).takeUnless {
+            it.isBlank() || it == "address unavailable" || it.endsWith(" location")
+        }
+        val oldPickup = address(old.pickupAddress); val newPickup = address(live.pickupAddress)
+        val oldDrop = address(old.dropAddress); val newDrop = address(live.dropAddress)
+        return oldPickup != null && newPickup != null && oldDrop != null && newDrop != null &&
+            oldPickup != newPickup && oldDrop != newDrop
+    }
+
+    fun isSafeDirectTarget(label: String?, description: String?, visible: Boolean,
+        enabled: Boolean, clickable: Boolean, clickAction: Boolean,
+        driverPackage: Boolean, sameWindow: Boolean, validBounds: Boolean): Boolean =
+        visible && enabled && clickable && clickAction && driverPackage && sameWindow && validBounds &&
+            (isReadyLabel(label) || isReadyLabel(description))
+
     private val driverPackages = setOf(
         "com.olacabs.oladriver",
         "com.olacabs.driver",

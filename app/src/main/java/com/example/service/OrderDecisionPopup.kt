@@ -213,7 +213,7 @@ object OrderDecisionPopup {
                 platform = platform,
                 fare = fare,
                 reason = if (status == OrderStatus.UNCONFIRMED)
-                    "Rapido confirmation not found. Check trip screen."
+                    "${platform.replaceFirstChar { it.uppercase() }} confirmation not found. Check ${platform} trip screen."
                 else reason,
                 pickupKm = pickupKm,
                 tripKm = tripKm,
@@ -313,7 +313,7 @@ object OrderDecisionPopup {
 
         val reasonTitle = compactReason(status, reason)
         val friendlyReason = if (status == OrderStatus.UNCONFIRMED) {
-            "Checking Rapido trip screen is recommended"
+            "Checking ${platform.replaceFirstChar { it.uppercase() }} trip screen is recommended"
         } else reasonTitle
         root.addView(TextView(context).apply {
             text = friendlyReason

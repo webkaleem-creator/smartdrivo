@@ -6,6 +6,7 @@ import com.example.engine.FixAreaSettings
 import android.content.Context
 import android.content.SharedPreferences
 import com.example.model.AppSettings
+import com.example.model.PickupGuardSettings
 import com.example.model.AppThemeMode
 import com.example.model.AreaGroup
 import com.example.model.AreaType
@@ -42,6 +43,31 @@ class PreferencesManager(private val context: Context) {
     // Reactive StateFlows for UI
     private val _userProfile = MutableStateFlow(loadUserProfile())
     val userProfile: StateFlow<UserProfile> = _userProfile.asStateFlow()
+
+    // Per-user storage; OFF by default. Active only with a short-lived server owner claim.
+    private val _pickupGuardSettings = MutableStateFlow(readPickupGuardSettings())
+    val pickupGuardSettings: StateFlow<PickupGuardSettings> = _pickupGuardSettings.asStateFlow()
+
+    private fun readPickupGuardSettings(): PickupGuardSettings {
+        val uid = _userProfile.value.uid.takeIf { it.isNotBlank() } ?: return PickupGuardSettings()
+        val maximum = prefs.getFloat("owner_guard_max_v1_$uid", 0.6f)
+        return PickupGuardSettings(
+            enabled = prefs.getBoolean("owner_guard_enabled_v1_$uid", false),
+            maxPickupKm = if (maximum.isFinite() && maximum > 0f && maximum <= 30f) maximum else 0.6f
+        )
+    }
+
+    fun savePickupGuardSettings(value: PickupGuardSettings): Boolean {
+        val uid = _userProfile.value.uid
+        if (uid.isBlank() || !com.example.auth.PickupGuardOwnerAccess.authorized(_userProfile.value)) return false
+        if (!value.maxPickupKm.isFinite() || value.maxPickupKm <= 0f || value.maxPickupKm > 30f) return false
+        val saved = prefs.edit()
+            .putBoolean("owner_guard_enabled_v1_$uid", value.enabled)
+            .putFloat("owner_guard_max_v1_$uid", value.maxPickupKm)
+            .commit()
+        if (saved) _pickupGuardSettings.value = value
+        return saved
+    }
 
     private val _appSettings = MutableStateFlow(loadAppSettingsRaw())
     val appSettings: StateFlow<AppSettings> = _appSettings.asStateFlow()
@@ -831,6 +857,7 @@ class PreferencesManager(private val context: Context) {
             apply()
         }
         _userProfile.value = profile
+        _pickupGuardSettings.value = readPickupGuardSettings()
         updateUserInList(profile)
     }
 

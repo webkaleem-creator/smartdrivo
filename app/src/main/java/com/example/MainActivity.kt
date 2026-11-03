@@ -72,6 +72,7 @@ import com.example.ui.screens.CommunityScreen
 import com.example.ui.screens.FinishSetupScreen
 import com.example.ui.screens.GuestScreen
 import com.example.ui.screens.HomeScreen
+import com.example.ui.screens.PickupGuardScreen
 import com.example.ui.screens.MoreScreen
 import com.example.ui.screens.OrderHistoryScreen
 import com.example.ui.screens.PaymentFailedScreen
@@ -121,6 +122,7 @@ object Routes {
     const val PROFILE_DETAILS = "profile_details"
     const val COMMUNITY = "community"
     const val ADMIN_PANEL = "admin_panel"
+    const val PICKUP_GUARD = "owner_pickup_guard"
     const val FINISH_SETUP = "finish_setup"
     const val SECURITY_LOCK = "security_lock"
     const val UPDATE_REQUIRED = "update_required"
@@ -277,6 +279,22 @@ fun SmartDrivoApp(
     val isUserAdmin = userProfile.isAdmin
     val firebaseUser = PhoneAuthManager.getAuthInstance()?.currentUser
     val isLoggedIn = loginFlag && firebaseUser != null && firebaseUser.uid == userProfile.uid
+
+    // Foreground renewal of server owner claim. Expired or failed verification
+    // means no automatic Pickup Guard action; never fall back to normal auto-accept.
+    LaunchedEffect(isLoggedIn, userProfile.uid, userProfile.isAdmin,
+        userProfile.isActive, userProfile.isBlocked, userProfile.isDeviceBlacklisted) {
+        if (!isLoggedIn || !userProfile.isAdmin || !userProfile.isActive ||
+            userProfile.isBlocked || userProfile.isDeviceBlacklisted) {
+            com.example.auth.PickupGuardOwnerAccess.clear()
+        } else {
+            while (true) {
+                com.example.auth.PickupGuardOwnerAccess.refresh(userProfile) { }
+                kotlinx.coroutines.delay(5L * 60L * 1000L)
+            }
+        }
+    }
+
     val isProfileComplete = userProfile.phone.isNotBlank() && userProfile.city.isNotBlank() && userProfile.state.isNotBlank()
 
     // OFFLINE_GRACE_LOCK_V1
@@ -1433,9 +1451,11 @@ fun SmartDrivoApp(
                 onNavigateToCommunity = { navController.navigate(Routes.COMMUNITY) },
                 onNavigateToReadOnlyProfile = { navController.navigate(Routes.PROFILE_DETAILS) },
                 onNavigateToAdminPanel = { navController.navigate(Routes.ADMIN_PANEL) },
+                onNavigateToPickupGuard = { navController.navigate(Routes.PICKUP_GUARD) },
                 onLogout = {
                     repository.stopOwnMembershipSync()
                     PhoneAuthManager.signOut()
+                    com.example.auth.PickupGuardOwnerAccess.clear()
                     prefs.clearLoginSessionState()
                     prefs.isLoggedIn = false
                     prefs.setAutoAcceptActive(false)
@@ -1461,6 +1481,14 @@ fun SmartDrivoApp(
                 prefs = prefs,
                 onBack = { navController.popBackStack() }
             )
+        }
+
+        composable(Routes.PICKUP_GUARD) {
+            if (!com.example.auth.PickupGuardOwnerAccess.authorized(userProfile)) {
+                androidx.compose.runtime.LaunchedEffect(Unit) { navController.popBackStack() }
+            } else {
+                PickupGuardScreen(prefs = prefs, onBack = { navController.popBackStack() })
+            }
         }
 
         // 18. Admin Panel Screen

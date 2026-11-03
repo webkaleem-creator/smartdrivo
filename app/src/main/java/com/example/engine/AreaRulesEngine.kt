@@ -51,6 +51,23 @@ object AreaRulesEngine {
 
         return expression.containsMatchIn(destination)
     }
+    /** Shared saved No-Go destination keyword lookup; pickup address never used. */
+    fun firstNoGoDestinationMatch(
+        dropAddress: String?, dropArea: String?, noGoAreas: List<AreaGroup>
+    ): String? {
+        val destination = "${dropAddress.orEmpty()} ${dropArea.orEmpty()}".trim().lowercase()
+        for (group in noGoAreas) {
+            if (!group.isEnabled) continue
+            for (raw in group.keywords) {
+                val keyword = raw.trim()
+                if (keyword.isBlank() || keyword.equals(group.name, ignoreCase = true)) continue
+                if (destinationKeywordMatches(keyword.lowercase(), destination))
+                    return "No-Go Area: destination matches '$keyword' in '${group.name}'"
+            }
+        }
+        return null
+    }
+
     fun evaluateRide(
         candidate: RideCandidate,
         areas: List<AreaGroup> = emptyList(),
