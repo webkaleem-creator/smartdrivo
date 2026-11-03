@@ -5857,6 +5857,15 @@ private val processingTimeoutRunnable = Runnable {
     private fun handleOlaOrderLocked(root: AccessibilityNodeInfo?, pkgName: String = "ola.cabs") {
         if (root == null) return
 
+        // Enabled Ola owner test must never fall back to normal auto-actions
+        // when the short-lived Firebase owner claim is no longer valid.
+        val olaOwnerTesting = prefs.olaAdminFilterSettings.value.enabled
+        if (olaOwnerTesting &&
+            !com.example.auth.PickupGuardOwnerAccess.authorized(prefs.userProfile.value)) {
+            Log.i(TAG, "OLA_ADMIN_AUTH_EXPIRED: no action")
+            return
+        }
+
         if (!preferencesManager.isAutoAcceptEnabled) {
             // Master OFF: no Ola processing or history.
             setOlaState(OlaState.IDLE)
@@ -5941,13 +5950,30 @@ private val processingTimeoutRunnable = Runnable {
 
             if (handleOwnerPickupGuard(root, candidate, recordId)) return
 
+            if (olaOwnerTesting) {
+                val ownerFilter = com.example.engine.OlaAdminFilterEngine.evaluate(
+                    candidate, prefs.olaAdminFilterSettings.value)
+                if (ownerFilter is com.example.engine.OlaAdminFilterEngine.Result.Ignore) {
+                    onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED,
+                        "OLA_ADMIN_FILTER_IGNORED", ownerFilter.reason)
+                    setOlaState(OlaState.IDLE)
+                    return
+                }
+            }
+
             // Direct SharedPreferences Filter Evaluation before evaluating ANY ride
             val directResult = evaluateDirectRideFilters(candidate)
             when (directResult.status) {
                 OrderStatus.REJECTED -> {
-                    Log.i(TAG, "Ola ride rejected by direct filter: ${directResult.reason}")
-                    onOrderDecisionFast(recordId, candidate, OrderStatus.REJECTED, "REJECT_CRITERIA_MET", directResult.reason)
-                    rejectOlaOffer(root, candidate)
+                    if (olaOwnerTesting) {
+                        onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED,
+                            "OLA_ADMIN_SHARED_FILTER_IGNORED", directResult.reason)
+                    } else {
+                        Log.i(TAG, "Ola ride rejected by direct filter: ${directResult.reason}")
+                        onOrderDecisionFast(recordId, candidate, OrderStatus.REJECTED,
+                            "REJECT_CRITERIA_MET", directResult.reason)
+                        rejectOlaOffer(root, candidate)
+                    }
                     setOlaState(OlaState.IDLE)
                     return
                 }
@@ -5976,12 +6002,14 @@ private val processingTimeoutRunnable = Runnable {
                 return
             }
 
-            // Check pickup location text against Go-To and No-Go area lists
-            val pickupText = extractPickupLocationText(candidate, root)
+            // Admin mode avoids pickup-address scans. Existing destination
+            // Go-To and No-Go rules are still applied by shared filters.
+            val pickupText = if (olaOwnerTesting) "" else extractPickupLocationText(candidate, root)
             val goToAreas = prefs.loadGoToAreas()
             val noGoAreas = prefs.loadNoGoAreas()
 
-            val pickupAreaDecision = checkPickupAreaRules(pickupText, goToAreas, noGoAreas)
+            val pickupAreaDecision = if (olaOwnerTesting) null
+                else checkPickupAreaRules(pickupText, goToAreas, noGoAreas)
             if (pickupAreaDecision is DecisionResult.Reject) {
                 Log.i(TAG, "Ola ride rejected by pickup area rule: ${pickupAreaDecision.reason}")
                 onOrderDecisionFast(recordId, candidate, OrderStatus.REJECTED, "OLA_PICKUP_AREA_RULE", pickupAreaDecision.reason)
@@ -6009,6 +6037,13 @@ private val processingTimeoutRunnable = Runnable {
             )
 
             if (decision is DecisionResult.Reject) {
+                if (olaOwnerTesting) {
+                    // Admin mode uses Ignore/no-click for all filter misses.
+                    onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED,
+                        "OLA_ADMIN_AREA_FILTER_IGNORED", decision.reason)
+                    setOlaState(OlaState.IDLE)
+                    return
+                }
                 val isNoGo = decision.reason.contains("No-Go", ignoreCase = true)
                 if (isNoGo) {
                     Log.i(TAG, "Ola ride rejected by filter: ${decision.reason}")
@@ -6351,6 +6386,8 @@ private val processingTimeoutRunnable = Runnable {
     }
 
     private fun rejectOlaOffer(root: AccessibilityNodeInfo, candidate: RideCandidate) {
+        // Owner testing: never Reject/X a failed Ola filter.
+        if (prefs.olaAdminFilterSettings.value.enabled) return
         if (!olaActionsAllowed() || !isOlaPackage(root.packageName?.toString().orEmpty())) return
         if (!OlaOfferSafety.sameOffer(candidate, OlaAdapter.extractCandidate(root, candidate.vehicleType))) return
         val node = OlaAdapter.findRejectNode(root) ?: return
