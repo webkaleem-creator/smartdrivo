@@ -890,10 +890,15 @@ private fun DriverUserCard(
     onCopyPhone: () -> Unit,
     onCopyEmail: () -> Unit
 ) {
-    val isExpired = user.planExpireMillis < System.currentTimeMillis() && !user.isAdmin
-    val daysRemaining = remember(user.planExpireMillis) {
-        val diff = user.planExpireMillis - System.currentTimeMillis()
-        if (diff > 0) (diff / 86400000L).toInt() else 0
+    val membership = MembershipDisplay.of(user)
+    val isExpired = membership.status == "Expired"
+    // A driver can have an enabled account and an expired membership.
+    val accountColor = if (user.isActive) AccentGreen else AccentRed
+    val planColor = when {
+        user.isAdmin -> Color(0xFF2563EB)
+        membership.active -> AccentGreen
+        isExpired -> AccentRed
+        else -> AccentYellow
     }
 
     Card(
@@ -902,7 +907,7 @@ private fun DriverUserCard(
         shape = RoundedCornerShape(12.dp),
         border = BorderStroke(
             1.dp,
-            if (user.isActive) AccentGreen.copy(alpha = 0.5f) else AccentRed.copy(alpha = 0.3f)
+            if (isExpired) AccentRed.copy(alpha = 0.45f) else accountColor.copy(alpha = 0.4f)
         )
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -943,7 +948,7 @@ private fun DriverUserCard(
                             Text(
                                 text = user.name.ifEmpty { "Driver Partner" },
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 11.5.sp,
+                                fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -978,10 +983,10 @@ private fun DriverUserCard(
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = if (user.isActive) "● ACTIVE" else "● INACTIVE",
-                        fontSize = 8.sp,
+                        text = if (user.isActive) "● ACCOUNT ON" else "● ACCOUNT OFF",
+                        fontSize = 8.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (user.isActive) AccentGreen else AccentRed
+                        color = accountColor
                     )
                 }
             }
@@ -1040,8 +1045,7 @@ private fun DriverUserCard(
 
                 // Plan info pill
                 Column(horizontalAlignment = Alignment.End) {
-                    val display = MembershipDisplay.of(user)
-                    val planDisplayName = display.plan +
+                    val planDisplayName = membership.plan +
                         (if (!user.isAdmin && user.planPrice > 0) " (₹" + user.planPrice + ")" else "")
                     Text(
                         text = planDisplayName,
@@ -1050,12 +1054,20 @@ private fun DriverUserCard(
                         color = AccentGreen
                     )
                     Text(
-                        text = if (user.isAdmin) "No expiration (Admin)"
-                            else if (display.status == "Expired") "Plan Expired"
-                            else if (display.active) display.days
-                            else display.status,
-                        fontSize = 8.sp,
-                        color = if (isExpired && !user.isAdmin) AccentRed else MaterialTheme.colorScheme.onSurfaceVariant
+                        text = if (user.isAdmin) "ADMIN ACCESS"
+                            else when (membership.status) {
+                                "Active" -> "PLAN VALID"
+                                "Expired" -> "PLAN EXPIRED"
+                                else -> "PLAN INACTIVE"
+                            },
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = planColor
+                    )
+                    Text(
+                        text = if (user.isAdmin) "Unlimited" else membership.days,
+                        fontSize = 9.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -1078,7 +1090,7 @@ private fun DriverUserCard(
                 ) {
                     Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(12.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Extend Plan", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text("Manage / Extend Plan", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
