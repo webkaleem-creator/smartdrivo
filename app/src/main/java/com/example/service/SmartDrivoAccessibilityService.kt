@@ -1170,7 +1170,10 @@ private val processingTimeoutRunnable = Runnable {
                 rejectNode?.getBoundsInScreen(bounds)
                 val nodePkg = rejectNode?.packageName?.toString().orEmpty()
                 val nodeOwned = when (candidate.platform) {
-                    Platform.RAPIDO -> isRapidoPackage(nodePkg)
+                    // Existing Rapido Auto-Reject permits a blank child package
+                    // only inside a previously verified Rapido root. Keep the
+                    // same safe behavior for the icon-only Skip/X node.
+                    Platform.RAPIDO -> nodePkg.isBlank() || isRapidoPackage(nodePkg)
                     Platform.OLA -> isOlaPackage(nodePkg)
                     Platform.UBER -> isUberPackage(nodePkg)
                 }
