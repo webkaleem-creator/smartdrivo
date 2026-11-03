@@ -70,7 +70,9 @@ object PickupOnlyLabel {
     fun fromField(text: String?, resourceId: String?): String? {
         val raw = text?.trim().orEmpty()
         if (!plausible(raw)) return null
-        val id = resourceId?.substringAfterLast('/')?.lowercase(Locale.ROOT).orEmpty()
+        val id = resourceId?.substringAfterLast('/')
+            ?.replace(Regex("([a-z])([A-Z])"), "$1_$2")
+            ?.replace('-', '_')?.lowercase(Locale.ROOT).orEmpty()
         if (id.isNotBlank() && pickupId.containsMatchIn(id) &&
             addressId.containsMatchIn(id) && !distanceId.containsMatchIn(id)
         ) return raw
