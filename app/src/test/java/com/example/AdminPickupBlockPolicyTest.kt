@@ -66,6 +66,10 @@ class AdminPickupBlockPolicyTest {
         assertEquals("Hitech City",
             PickupOnlyLabel.fromField("Hitech City", "com.rapido.captain:id/pickup_address"))
         assertNull(PickupOnlyLabel.fromField("Charminar", "com.rapido.captain:id/drop_address"))
+        assertEquals("Tank Bund",
+            PickupOnlyLabel.fromField("Tank Bund", "com.rapido.captain:id/tvPickupAddress"))
+        assertNull(PickupOnlyLabel.fromField("1.5 km",
+            "com.rapido.captain:id/pickupKmDistance"))
         assertNull(PickupOnlyLabel.fromField("Pickup: 1.2 km", null))
         assertNull(PickupOnlyLabel.fromField("Drop: Tank Bund", null))
     }
