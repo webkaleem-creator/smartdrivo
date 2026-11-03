@@ -1051,6 +1051,127 @@ private val processingTimeoutRunnable = Runnable {
      */
     // OWNER_PICKUP_GUARD_V1: dedicated priority path, isolated from all saved acceptance modes.
     // Each platform enters here only after its existing genuine-offer gate.
+
+    /**
+     * Priority #5. Owner-only pickup address veto.
+     * OFF has zero additional parser traversals. ON reads ONLY explicit pickup
+     * fields. Missing pickup fails closed; no destination-based fallback.
+     *
+     * This veto overrides numeric/fastest modes intentionally: an enabled
+     * explicit owner block must never be bypassed by the click path.
+     */
+    private fun adminPickupBlockDecision(
+        root: AccessibilityNodeInfo,
+        candidate: RideCandidate
+    ): com.example.engine.AdminPickupBlockPolicy.Decision? {
+        val block = prefs.adminPickupBlockSettings.value
+        if (!block.enabled) return null
+        val owner = prefs.userProfile.value
+        if (!owner.isAdmin || !com.example.auth.PickupGuardOwnerAccess.authorized(owner)) {
+            return com.example.engine.AdminPickupBlockPolicy.Decision.Unreadable
+        }
+        val pkg = root.packageName?.toString().orEmpty()
+        val correctPlatform = when (candidate.platform) {
+            Platform.RAPIDO -> isRapidoPackage(pkg)
+            Platform.OLA -> isOlaPackage(pkg)
+            Platform.UBER -> isUberPackage(pkg)
+        }
+        if (!correctPlatform) return com.example.engine.AdminPickupBlockPolicy.Decision.Unreadable
+        val pickup = com.example.engine.AdminPickupAddressReader.read(root, candidate.platform)
+        return com.example.engine.AdminPickupBlockPolicy.evaluate(block, pickup)
+    }
+
+    private fun adminPickupBlockSameOffer(
+        root: AccessibilityNodeInfo, candidate: RideCandidate
+    ): Boolean = try {
+        val latest = when (candidate.platform) {
+            Platform.RAPIDO -> {
+                val popup = RapidoAdapter.validateRapidoOrderPopup(root)
+                if (popup.isValid) captureRapidoFastSnapshot(root, popup)?.candidate else null
+            }
+            Platform.OLA -> OlaAdapter.extractCandidate(root, candidate.vehicleType)
+            Platform.UBER -> OrderDataExtractor.extractCandidate(
+                root, candidate.platform, candidate.vehicleType
+            )
+        }
+        latest != null &&
+            latest.fare == candidate.fare &&
+            latest.pickupDistKm == candidate.pickupDistKm &&
+            latest.dropDistKm == candidate.dropDistKm &&
+            latest.dropAddress?.trim() == candidate.dropAddress?.trim()
+    } catch (_: Exception) { false }
+
+    /**
+     * Returns true when owner block has consumed the offer. A verified X/Skip
+     * may be actioned once; ACTION_CLICK success is NOT proof of server rejection.
+     */
+    private fun handleAdminPickupBlock(
+        root: AccessibilityNodeInfo,
+        candidate: RideCandidate,
+        recordId: String
+    ): Boolean {
+        val decision = adminPickupBlockDecision(root, candidate) ?: return false
+        if (decision is com.example.engine.AdminPickupBlockPolicy.Decision.Allow) return false
+
+        val blocked = decision is com.example.engine.AdminPickupBlockPolicy.Decision.Blocked
+        val word = (decision as? com.example.engine.AdminPickupBlockPolicy.Decision.Blocked)?.word
+        val reason = if (blocked)
+            "Pickup Shield: blocked pickup word '${word}'"
+        else "Pickup Shield: pickup unavailable or owner access expired; no auto-accept"
+
+        // Re-verify the SAME live offer before any reject action. Never tap
+        // coordinates, guess an X, or use destination text to authorize Reject.
+        var sent = false
+        if (blocked && preferencesManager.isAutoAcceptEnabled &&
+            !bankingModeSuspended &&
+            com.example.auth.PickupGuardOwnerAccess.authorized(prefs.userProfile.value) &&
+            prefs.adminPickupBlockSettings.value.enabled &&
+            adminPickupBlockSameOffer(root, candidate)
+        ) {
+            val node = when (candidate.platform) {
+                Platform.RAPIDO -> findStrictRapidoRejectNode(root)
+                Platform.OLA, Platform.UBER -> findPickupGuardNamedReject(root)
+            }
+            val bounds = Rect()
+            node?.getBoundsInScreen(bounds)
+            val nodePkg = node?.packageName?.toString().orEmpty()
+            val pkgCorrect = when (candidate.platform) {
+                Platform.RAPIDO -> nodePkg.isBlank() || isRapidoPackage(nodePkg)
+                Platform.OLA -> isOlaPackage(nodePkg)
+                Platform.UBER -> isUberPackage(nodePkg)
+            }
+            if (node != null && pkgCorrect &&
+                node.isVisibleToUser && node.isEnabled && node.isClickable &&
+                node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK } &&
+                bounds.width() > 0 && bounds.height() > 0
+            ) {
+                sent = runCatching {
+                    node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                }.getOrDefault(false)
+            }
+        }
+
+        // Avoid resurrecting an unchanged visible blocked order on next event.
+        if (candidate.platform == Platform.RAPIDO) {
+            rapidoIgnoredVisibleOfferGuard.rememberIgnored(candidate)
+        } else if (candidate.platform == Platform.OLA) {
+            olaVisibleOffer.markAttempted(candidate)
+        }
+
+        val resultStatus = if (sent) OrderStatus.REJECTED else OrderStatus.IGNORED
+        val reasonCode = when {
+            !blocked -> "ADMIN_PICKUP_UNREADABLE"
+            sent -> "ADMIN_PICKUP_REJECT_SENT"
+            else -> "ADMIN_PICKUP_BLOCKED_NO_CLICK"
+        }
+        onOrderDecisionFast(recordId, candidate, resultStatus, reasonCode,
+            reason + if (sent) " | Safe Reject requested; server result unverified"
+                     else " | No verified Reject action; left for manual handling")
+        if (candidate.platform == Platform.OLA) setOlaState(OlaState.IDLE)
+        else resetProcessing()
+        return true
+    }
+
     private fun handleOwnerPickupGuard(
         root: AccessibilityNodeInfo,
         candidate: RideCandidate,
