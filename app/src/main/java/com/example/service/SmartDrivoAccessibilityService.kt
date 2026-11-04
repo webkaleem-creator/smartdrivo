@@ -465,7 +465,9 @@ private val processingTimeoutRunnable = Runnable {
             "com.rapido.passenger",
             "com.rapido.rider",
             "com.ubercab",
-            "com.ubercab.driver"
+            "com.ubercab.driver",
+            // Only used by the owner preview reader; auto-click remains disabled.
+            "com.olacabs.oladriver"
         )
 
         var isServiceRunning = false
@@ -2725,10 +2727,49 @@ private val processingTimeoutRunnable = Runnable {
         }
     }
 
+    // Ola read-only diagnostics are isolated from Rapido/Uber processing and
+    // have no Accept/Reject gesture or history side effects.
+    private var lastOlaReadOnlyCaptureUptime = 0L
+
+    private fun captureOlaReadOnlyPreview(event: AccessibilityEvent) {
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            event.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) return
+        if (!::prefs.isInitialized) return
+        val owner = prefs.userProfile.value
+        if (!com.example.ola.OlaReadOnlyCapturePolicy.allowed(
+                event.packageName?.toString(),
+                owner.isAdmin,
+                prefs.isLoggedIn,
+                owner.isActive,
+                owner.isBlocked || owner.isDeviceBlacklisted,
+                bankingModeSuspended
+            )) return
+
+        // Hard bounded, max ~2 reads/s, independent of master Auto Accept.
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastOlaReadOnlyCaptureUptime < 500L) return
+        lastOlaReadOnlyCaptureUptime = now
+        try {
+            val foreground = rootInActiveWindow
+            val root = if (foreground?.packageName?.toString() ==
+                com.example.ola.OlaReadOnlyCapturePolicy.OLA_DRIVER_PACKAGE
+            ) foreground else event.source
+            val fields = com.example.ola.OlaAccessibilityReadOnlyCollector.collect(root)
+            com.example.ola.OlaReadOnlyPreviewStore.record(
+                fields, System.currentTimeMillis()
+            )
+        } catch (_: Exception) {
+            // Window changed mid-read: no click, no record, no retry loop.
+        }
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
-        // Ola disabled for all users regardless of historical local flags.
-        if (isOlaPackage(event.packageName?.toString().orEmpty())) return
+        // Ola remains fully disabled for actions; owner can only inspect fields.
+        if (isOlaPackage(event.packageName?.toString().orEmpty())) {
+            captureOlaReadOnlyPreview(event)
+            return
+        }
         val directRapido = isRapidoPackage(event.packageName?.toString().orEmpty())
         if (bankingModeSuspended) {
             if (directRapido) rapidoMiss("BANKING_SUSPENDED")

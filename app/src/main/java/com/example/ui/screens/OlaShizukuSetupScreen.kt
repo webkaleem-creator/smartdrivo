@@ -31,6 +31,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.ola.OlaShizukuPolicy
+import com.example.ola.OlaReadOnlyPreviewStore
+import androidx.compose.runtime.collectAsState
+import java.util.Locale
 import kotlinx.coroutines.delay
 import rikka.shizuku.Shizuku
 
@@ -42,6 +45,7 @@ import rikka.shizuku.Shizuku
 @Composable
 fun OlaShizukuSetupScreen(onBack: () -> Unit) {
     val context = LocalContext.current
+    val preview by OlaReadOnlyPreviewStore.state.collectAsState()
     var tick by remember { mutableIntStateOf(0) }
     var message by remember { mutableStateOf("") }
     val binderListener = remember {
@@ -159,6 +163,38 @@ fun OlaShizukuSetupScreen(onBack: () -> Unit) {
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Official Shizuku download & instructions") }
+                }
+            }
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("Ola live offer • READ ONLY",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold)
+                    Text("Only fare, pickup km, trip km and drop address are captured. " +
+                        "Pickup address, rider details and taps are excluded.")
+                    val ageMillis = System.currentTimeMillis() - preview.seenAtMillis
+                    if (preview.seenAtMillis == 0L || ageMillis > 120_000L) {
+                        Text("No recent Ola offer. Keep SmartDrivo Accessibility ON, " +
+                            "open an Ola Driver offer, then return here within 2 minutes.")
+                    } else {
+                        Text(preview.status)
+                        val offer = preview.offer
+                        if (offer != null) {
+                            fun number(value: Double?): String =
+                                value?.let { String.format(Locale.US, "%.1f", it) } ?: "Not read"
+                            Text("Fare: " + (offer.fareRupees?.let {
+                                "₹" + String.format(Locale.US, "%.2f", it)
+                            } ?: "Not read"))
+                            Text("Pickup: " + number(offer.pickupKm) + " km")
+                            Text("Trip: " + number(offer.tripKm) + " km")
+                            Text("Drop address: " + (offer.dropAddress ?: "Not read"))
+                            Text(if (offer.isComplete) "Complete diagnostic snapshot"
+                                 else "Partial: Ola UI IDs require live verification")
+                        }
+                    }
                 }
             }
             Text(
