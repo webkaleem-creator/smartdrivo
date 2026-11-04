@@ -73,6 +73,7 @@ import com.example.ui.screens.FinishSetupScreen
 import com.example.ui.screens.GuestScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.PickupGuardScreen
+import com.example.ui.screens.AdminPickupBlockScreen
 import com.example.ui.screens.OlaAdminFilterScreen
 import com.example.ui.screens.MoreScreen
 import com.example.ui.screens.OrderHistoryScreen
@@ -124,6 +125,7 @@ object Routes {
     const val COMMUNITY = "community"
     const val ADMIN_PANEL = "admin_panel"
     const val PICKUP_GUARD = "owner_pickup_guard"
+    const val ADMIN_PICKUP_BLOCK = "admin_pickup_block"
     const val OLA_ADMIN_FILTER = "owner_ola_global_filter"
     const val FINISH_SETUP = "finish_setup"
     const val SECURITY_LOCK = "security_lock"
@@ -1454,6 +1456,7 @@ fun SmartDrivoApp(
                 onNavigateToReadOnlyProfile = { navController.navigate(Routes.PROFILE_DETAILS) },
                 onNavigateToAdminPanel = { navController.navigate(Routes.ADMIN_PANEL) },
                 onNavigateToPickupGuard = { navController.navigate(Routes.PICKUP_GUARD) },
+                onNavigateToAdminPickupBlock = { navController.navigate(Routes.ADMIN_PICKUP_BLOCK) },
                 onNavigateToOlaAdminFilter = { navController.navigate(Routes.OLA_ADMIN_FILTER) },
                 onLogout = {
                     repository.stopOwnMembershipSync()
@@ -1500,6 +1503,19 @@ fun SmartDrivoApp(
             } else {
                 OlaAdminFilterScreen(prefs = prefs,
                     onBack = { navController.popBackStack() })
+            }
+        }
+
+        // Priority #5: permanent admin-only Pickup Shield (not a global user filter).
+        composable(Routes.ADMIN_PICKUP_BLOCK) {
+            if (!userProfile.isAdmin ||
+                !com.example.auth.PickupGuardOwnerAccess.authorized(userProfile)) {
+                LaunchedEffect(Unit) { navController.popBackStack() }
+            } else {
+                AdminPickupBlockScreen(
+                    prefs = prefs,
+                    onBack = { navController.popBackStack() }
+                )
             }
         }
 

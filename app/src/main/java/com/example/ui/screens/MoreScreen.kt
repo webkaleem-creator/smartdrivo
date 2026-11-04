@@ -103,6 +103,7 @@ fun MoreScreen(
     onNavigateToReadOnlyProfile: () -> Unit = {},
     onNavigateToAdminPanel: () -> Unit = {},
     onNavigateToPickupGuard: () -> Unit = {},
+    onNavigateToAdminPickupBlock: () -> Unit = {},
     onNavigateToOlaAdminFilter: () -> Unit = {},
     onLogout: () -> Unit,
     onBack: () -> Unit = {}
@@ -640,6 +641,12 @@ fun MoreScreen(
                                 title = "Ola Global Filter",
                                 subtitle = "Admin-only permanent Ola filter settings",
                                 onClick = onNavigateToOlaAdminFilter
+                            )
+                            MoreCardRow(
+                                icon = Icons.Default.AdminPanelSettings,
+                                title = "Pickup Shield",
+                                subtitle = "Admin-only pickup location auto-block",
+                                onClick = onNavigateToAdminPickupBlock
                             )
                         }
                     }

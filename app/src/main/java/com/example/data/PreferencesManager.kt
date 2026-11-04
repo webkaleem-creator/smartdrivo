@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.example.model.AppSettings
 import com.example.model.PickupGuardSettings
+import com.example.model.AdminPickupBlockSettings
+import com.example.engine.AdminPickupBlockPolicy
 import com.example.model.OlaAdminFilterSettings
 import com.example.model.AppThemeMode
 import com.example.model.AreaGroup
@@ -67,6 +69,41 @@ class PreferencesManager(private val context: Context) {
             .putFloat("owner_guard_max_v1_$uid", value.maxPickupKm)
             .commit()
         if (saved) _pickupGuardSettings.value = value
+        return saved
+    }
+
+    // Permanent owner-only pickup address veto; stored per Firebase UID,
+    // OFF by default. Only verified owners may change it.
+    private val _adminPickupBlockSettings = MutableStateFlow(readAdminPickupBlockSettings())
+    val adminPickupBlockSettings: StateFlow<AdminPickupBlockSettings> =
+        _adminPickupBlockSettings.asStateFlow()
+
+    private fun pickupBlockPrefix(): String? =
+        _userProfile.value.uid.takeIf { it.isNotBlank() }
+            ?.let { "owner_pickup_block_v1_${it}_" }
+
+    private fun readAdminPickupBlockSettings(): AdminPickupBlockSettings {
+        val prefix = pickupBlockPrefix() ?: return AdminPickupBlockSettings()
+        val raw = prefs.getString(prefix + "words", "").orEmpty()
+        val parsed = AdminPickupBlockPolicy.parse(raw)
+        return AdminPickupBlockSettings(
+            enabled = _userProfile.value.isAdmin &&
+                prefs.getBoolean(prefix + "enabled", false) && parsed.isNotEmpty(),
+            blockedWords = parsed
+        )
+    }
+
+    fun saveAdminPickupBlockSettings(value: AdminPickupBlockSettings): Boolean {
+        val owner = _userProfile.value
+        if (owner.uid.isBlank() || !owner.isAdmin ||
+            !com.example.auth.PickupGuardOwnerAccess.authorized(owner) ||
+            !AdminPickupBlockPolicy.valid(value)) return false
+        val prefix = pickupBlockPrefix() ?: return false
+        val saved = prefs.edit()
+            .putString(prefix + "words", value.blockedWords.joinToString(","))
+            .putBoolean(prefix + "enabled", value.enabled)
+            .commit()
+        if (saved) _adminPickupBlockSettings.value = value
         return saved
     }
 
@@ -536,6 +573,9 @@ class PreferencesManager(private val context: Context) {
         if (key != null && (key.startsWith("setting_") || key == KEY_GOTO_ENABLED || key == KEY_NOGO_ENABLED)) {
             loadAppSettings()
         }
+        if (key != null && key.startsWith("owner_pickup_block_v1_")) {
+            _adminPickupBlockSettings.value = readAdminPickupBlockSettings()
+        }
     }
 
     init {
@@ -902,6 +942,7 @@ class PreferencesManager(private val context: Context) {
         _userProfile.value = profile
         _pickupGuardSettings.value = readPickupGuardSettings()
         _olaAdminFilterSettings.value = readOlaAdminFilterSettings()
+        _adminPickupBlockSettings.value = readAdminPickupBlockSettings()
         updateUserInList(profile)
     }
 
