@@ -67,6 +67,10 @@ class RideHistoryViewModel(
     private var lastHistoryMetric: Pair<String, String>? = null
 val history: StateFlow<List<RideHistoryEntity>> = repository.allHistory
         .onEach { rows ->
+            rows.take(256).forEach { row ->
+                if (System.currentTimeMillis() - row.detectedAt in 0L..30_000L)
+                    com.example.data.HistoryLatencyTrace.mark(row.id, row.platform, "flow_${row.status}")
+            }
             rows.firstOrNull()?.let { row ->
                 val key = row.id to row.status
                 val age = System.currentTimeMillis() - row.detectedAt

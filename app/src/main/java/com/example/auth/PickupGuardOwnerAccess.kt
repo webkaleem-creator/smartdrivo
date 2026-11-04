@@ -9,17 +9,14 @@ import com.google.firebase.auth.FirebaseAuth
  * No valid claim, no current auth session or expired verification => fail closed.
  */
 object PickupGuardOwnerAccess {
-    @Volatile private var verifiedUid: String? = null
-    @Volatile private var verifiedAtMs = 0L
-    private const val VALID_MS = 10 * 60 * 1000L
+    private val lease = OwnerClaimLease()
 
     fun authorized(profile: UserProfile): Boolean {
         val current = FirebaseAuth.getInstance().currentUser?.uid
         val now = System.currentTimeMillis()
         return profile.isAdmin && profile.isActive && !profile.isBlocked &&
             !profile.isDeviceBlacklisted && profile.uid.isNotBlank() &&
-            profile.uid == current && profile.uid == verifiedUid &&
-            verifiedAtMs > 0L && now >= verifiedAtMs && now - verifiedAtMs < VALID_MS
+            profile.uid == current && lease.valid(current, now)
     }
 
     fun refresh(profile: UserProfile, onResult: (Boolean) -> Unit) {
@@ -30,24 +27,19 @@ object PickupGuardOwnerAccess {
             onResult(false)
             return
         }
+        val request = lease.begin(profile.uid, System.currentTimeMillis())
+        if (request == null) { onResult(authorized(profile)); return }
         user.getIdToken(true)
             .addOnSuccessListener { token ->
-                val verified = token.claims["pickupGuardOwner"] == true &&
-                    FirebaseAuth.getInstance().currentUser?.uid == profile.uid
-                if (verified) {
-                    verifiedUid = profile.uid
-                    verifiedAtMs = System.currentTimeMillis()
-                } else clear()
-                onResult(verified && authorized(profile))
+                lease.complete(request, token.claims["pickupGuardOwner"] == true,
+                    FirebaseAuth.getInstance().currentUser?.uid, System.currentTimeMillis())
+                onResult(authorized(profile))
             }
             .addOnFailureListener {
-                clear()
+                lease.complete(request, false, FirebaseAuth.getInstance().currentUser?.uid, System.currentTimeMillis())
                 onResult(false)
             }
     }
 
-    fun clear() {
-        verifiedUid = null
-        verifiedAtMs = 0L
-    }
+    fun clear() { lease.clear() }
 }

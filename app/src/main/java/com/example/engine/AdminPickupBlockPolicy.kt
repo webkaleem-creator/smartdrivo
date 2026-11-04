@@ -13,6 +13,7 @@ object AdminPickupBlockPolicy {
     sealed class Decision {
         object Allow : Decision()
         object Unreadable : Decision()
+        object OwnerUnavailable : Decision()
         data class Blocked(val word: String) : Decision()
     }
 
@@ -73,7 +74,7 @@ object PickupOnlyLabel {
         rootWindow: Int, nodeWindow: Int, visible: Boolean): Boolean {
         if (!visible || rootWindow != nodeWindow || rootPackage != nodePackage) return false
         return when (platform) {
-            Platform.RAPIDO -> rootPackage.startsWith("com.rapido.")
+            Platform.RAPIDO -> rootPackage in RapidoAdapter.RAPIDO_PACKAGES
             Platform.OLA -> OlaOfferSafety.isDriverPackage(rootPackage)
             Platform.UBER -> rootPackage == "com.ubercab" || rootPackage.startsWith("com.ubercab.") ||
                 rootPackage == "com.uber.driver" || rootPackage.startsWith("com.uber.driver.")
@@ -104,7 +105,7 @@ object PickupOnlyLabel {
         val clean = value.trim()
         if (clean.length < 3 || clean.length > 240) return false
         if (clean.contains('₹')) return false
-        if (Regex("""\b\d+(?:[.,]\d+)?\s*(?:km|m|min|mins|minute|minutes)\b""", RegexOption.IGNORE_CASE).containsMatchIn(clean)) return false
+        if (Regex("""\d+(?:[.,]\d+)?\s*(?:km|m|min|mins|minute|minutes)""", RegexOption.IGNORE_CASE).matches(clean)) return false
         if (clean.matches(Regex("""[\d.,+\s-]+"""))) return false
         val lower = AdminPickupBlockPolicy.normalize(clean)
         if (isLabel(clean) || lower.startsWith("drop:") ||

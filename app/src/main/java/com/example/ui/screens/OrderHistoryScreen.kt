@@ -250,6 +250,7 @@ fun OrderHistoryScreen(
     LaunchedEffect(newestVisibleOrderId, filteredList.firstOrNull()?.status) {
         filteredList.firstOrNull()?.let { item ->
             androidx.compose.runtime.withFrameNanos { }
+            com.example.data.HistoryLatencyTrace.mark(item.id, item.platform.name, "frame_${item.status.name}")
             val age = System.currentTimeMillis() - item.timestamp
             if (age in 0L..30_000L) android.util.Log.i("HistoryLatency",
                 "stage=frame platform=${item.platform.name} status=${item.status.name} detectionAgeMs=$age")

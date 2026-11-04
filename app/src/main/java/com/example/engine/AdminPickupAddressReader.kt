@@ -4,56 +4,41 @@ import android.view.accessibility.AccessibilityNodeInfo
 import com.example.model.Platform
 import java.util.ArrayDeque
 
-/**
- * Runs ONLY while the owner pickup veto is enabled.
- * No broad text scanning to infer pickup from drop; only explicit fields/labels.
- * A missing or ambiguous pickup is unreadable (fail closed, never auto-accept).
- */
+/** Enabled Shield only. Explicit fields or a unique value in a trusted labelled pickup section. */
 object AdminPickupAddressReader {
-    fun read(root: AccessibilityNodeInfo, platform: Platform): String? {
+    fun read(root: AccessibilityNodeInfo, platform: Platform, diagnostics: ((String) -> Unit)? = null): String? {
         val rootPackage = root.packageName?.toString().orEmpty()
         val rootWindow = root.windowId
         fun trusted(node: AccessibilityNodeInfo) = PickupOnlyLabel.trustedNode(
             rootPackage, node.packageName?.toString().orEmpty(), platform,
             rootWindow, node.windowId, node.isVisibleToUser)
-        if (!trusted(root)) return null
-        val pending: ArrayDeque<AccessibilityNodeInfo> = ArrayDeque()
-        pending.add(root)
-        var visited = 0
-        while (pending.isNotEmpty() && visited++ < 350) {
-            val node = pending.removeFirst()
-            if (!trusted(node)) continue
-
-            val text = node.text?.toString()?.trim()
-            val desc = node.contentDescription?.toString()?.trim()
+        if (!trusted(root)) { diagnostics?.invoke("stage=pickup_structure reason=ROOT_UNTRUSTED"); return null }
+        val pending = ArrayDeque<Triple<AccessibilityNodeInfo, Int, Int?>>()
+        pending.add(Triple(root, 0, null))
+        val fields = mutableListOf<PickupShieldEvidence.Field>()
+        var key = 0
+        while (pending.isNotEmpty() && fields.size < 350) {
+            val (node, ownKey, parentKey) = pending.removeFirst()
+            val safe = trusted(node)
             val id = node.viewIdResourceName
+            val text = if (safe) node.text?.toString()?.trim() else null
+            val desc = if (safe) node.contentDescription?.toString()?.trim() else null
+            fields += PickupShieldEvidence.Field(ownKey, parentKey, text, desc, id, safe)
+            if (!safe) continue
             PickupOnlyLabel.fromField(text, id)?.let { return it }
             PickupOnlyLabel.fromField(desc, id)?.let { return it }
-
-            // If an exact pickup label is followed by an address field inside
-            // its own parent, inspect only that sibling, never the drop block.
-            if (PickupOnlyLabel.isLabel(text) || PickupOnlyLabel.isLabel(desc)) {
-                val parent = node.parent
-                if (parent != null) {
-                    val siblingCount = parent.childCount.coerceAtMost(12)
-                    for (i in 0 until siblingCount) {
-                        val sibling = parent.getChild(i) ?: continue
-                        if (sibling == node || !trusted(sibling)) continue
-                        val t = sibling.text?.toString()?.trim()
-                        val candidate = t?.takeIf(PickupOnlyLabel::plausible)
-                        if (candidate != null && !PickupOnlyLabel.isLabel(candidate)) {
-                            // Only a sibling with pickup-related view ID is trustworthy.
-                            val siblingId = sibling.viewIdResourceName.orEmpty()
-                            if (PickupOnlyLabel.fromField(candidate, siblingId) != null) return candidate
-                        }
-                    }
-                }
-            }
             for (i in 0 until node.childCount.coerceAtMost(45)) {
-                node.getChild(i)?.let(pending::addLast)
+                node.getChild(i)?.let { pending.add(Triple(it, ++key, ownKey)) }
             }
         }
-        return null
+        val value = PickupShieldEvidence.labelledPickup(fields)
+        if (value == null) {
+            val ids = fields.mapNotNull { it.resourceId?.substringAfterLast('/') }
+                .filter { it.matches(Regex("[A-Za-z_]{1,64}")) }.distinct().take(8)
+            diagnostics?.invoke("stage=pickup_structure reason=NO_TRUSTED_PICKUP nodes=${fields.size} " +
+                "labels=${fields.count { PickupOnlyLabel.isLabel(it.text) || PickupOnlyLabel.isLabel(it.description) }} " +
+                "untrusted=${fields.count { !it.trusted }} ids=${ids.joinToString(",")}")
+        }
+        return value
     }
-
 }

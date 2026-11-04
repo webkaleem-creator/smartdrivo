@@ -812,13 +812,9 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
 
         // Booking ID extraction from text entries
         var bookingId: String? = null
-        val bookingRegex = Regex("(?:CRN|ID|#|Booking\\s*ID)[:\\s-]*([A-Za-z0-9-]+)", RegexOption.IGNORE_CASE)
         for (entry in scopedEntries) {
-            val match = bookingRegex.find(entry.text)
-            if (match != null) {
-                bookingId = match.groupValues[1].trim()
-                break
-            }
+            RapidoVisibleOffer.bookingId(entry.text)?.let { bookingId = it }
+            if (bookingId != null) break
         }
 
         val rawPickup = pickupFromId ?: data.pickupAddress

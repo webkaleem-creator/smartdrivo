@@ -90,15 +90,21 @@ class RideHistoryRepository(
         candidate: RideCandidate,
         initialReasonCode: String = "DETECTING",
         initialReasonText: String = "Evaluating ride filters...",
-        olaRecordId: String? = null
+        olaRecordId: String? = null,
+        rapidoRecordId: String? = null
     ): RideHistoryEntity = withContext(ioDispatcher) {
+        val sessionRecordId = olaRecordId ?: rapidoRecordId
+        val traceId = sessionRecordId ?: detectionRecordId(candidate)
+        com.example.data.HistoryLatencyTrace.mark(traceId, candidate.platform.name, "room_enter")
         mutex.withLock {
             require(olaRecordId == null || (candidate.platform == Platform.OLA && olaRecordId.startsWith("ola_offer_")))
+            require(rapidoRecordId == null || (olaRecordId == null && candidate.platform == Platform.RAPIDO && rapidoRecordId.startsWith("rapido_offer_")))
+            com.example.data.HistoryLatencyTrace.mark(traceId, candidate.platform.name, "room_lock")
             val now = System.currentTimeMillis()
             val detectedTime = if (candidate.detectionTimeMs > 0L) candidate.detectionTimeMs else now
             val fingerprint = generateFingerprint(candidate)
             fun reused(row: RideHistoryEntity): RideHistoryEntity {
-                val provisional = olaRecordId ?: detectionRecordId(candidate)
+                val provisional = sessionRecordId ?: detectionRecordId(candidate)
                 if (provisional != row.id) synchronized(detectionAliases) {
                     detectionAliases[provisional] = row.id
                 }
@@ -107,18 +113,20 @@ class RideHistoryRepository(
 
             // A supplied Ola session key is authoritative for its entire lifetime.
             // Detection retries must never recreate/reset that row after a dedupe window.
-            if (olaRecordId != null) {
-                dao.getById(olaRecordId)?.let { return@withContext it }
+            if (sessionRecordId != null) {
+                dao.getById(sessionRecordId)?.let { return@withContext it }
             }
 
             // Check duplicate by bookingId (if available)
-            val byBookingId = if (olaRecordId != null) dao.getById(olaRecordId)
+            val byBookingId = if (rapidoRecordId != null && !candidate.bookingId.isNullOrBlank())
+                dao.getByPlatformBookingId(Platform.RAPIDO.name, candidate.bookingId)
+            else if (sessionRecordId != null) dao.getById(sessionRecordId)
             else if (!candidate.bookingId.isNullOrBlank()) {
                 dao.getByPlatformBookingId(candidate.platform.name, candidate.bookingId)
             } else null
 
             // Check duplicate by fingerprint
-            val byFingerprint = if (olaRecordId == null && byBookingId == null) {
+            val byFingerprint = if (sessionRecordId == null && byBookingId == null) {
                 dao.getByFingerprint(fingerprint)?.takeIf { previous ->
                     val oldDrop = previous.dropAddress.trim().lowercase(Locale.ROOT)
                     val newDrop = candidate.dropAddress?.trim()?.lowercase(Locale.ROOT).orEmpty()
@@ -141,7 +149,7 @@ class RideHistoryRepository(
                 exactDrop != "drop location" &&
                 exactDrop != "detected drop location"
             val nearbyPartialPriority =
-                if (candidate.platform == Platform.RAPIDO && validDrop) {
+                if (sessionRecordId == null && candidate.platform == Platform.RAPIDO && validDrop) {
                     dao.getRecentPlatformHistory(Platform.RAPIDO.name, now - 5_000L)
                         .firstOrNull { previous ->
                             val sameDrop = previous.dropAddress
@@ -166,6 +174,7 @@ class RideHistoryRepository(
             // Never merge Accepted records or distinct booking IDs.
             val nearbyFinalized = if (
                 candidate.platform == Platform.RAPIDO &&
+                sessionRecordId == null &&
                 candidate.bookingId.isNullOrBlank() && validDrop && exactDrop.length >= 12
             ) {
                 dao.getRecentPlatformHistory(Platform.RAPIDO.name, now - 3_000L)
@@ -281,7 +290,7 @@ class RideHistoryRepository(
             }
 
             // Create new record
-            val recordId = olaRecordId ?: detectionRecordId(candidate)
+            val recordId = sessionRecordId ?: detectionRecordId(candidate)
 
             val (dateStr, timeStr) = formatDateTime(detectedTime)
             val insertLatency = now - detectedTime

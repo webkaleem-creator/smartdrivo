@@ -20,7 +20,10 @@ class RapidoIgnoredVisibleOfferGuard {
     @Synchronized fun hasOwnerVeto(): Boolean = ownerVeto
     @Synchronized fun needsFilterRecheck(candidate: RideCandidate, context: Any): Boolean {
         val previous = lastIgnored ?: return false
-        return context != filterContext || previous.pickupDistKm != candidate.pickupDistKm
+        return context != filterContext || previous.pickupDistKm != candidate.pickupDistKm ||
+            previous.fare != candidate.fare || previous.dropDistKm != candidate.dropDistKm ||
+            previous.dropAddress != candidate.dropAddress || previous.tipAmount != candidate.tipAmount ||
+            previous.isBundledOrder != candidate.isBundledOrder
     }
     private var firstIgnoredAtMs: Long = 0L
 
