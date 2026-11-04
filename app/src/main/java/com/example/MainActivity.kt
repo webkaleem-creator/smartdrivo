@@ -1,6 +1,7 @@
 package com.example
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -137,6 +138,21 @@ private data class NavItemData(
 
 class MainActivity : ComponentActivity() {
 
+    private var renewalIntentCounter by mutableStateOf(0)
+
+    private fun consumeRenewalIntent(incoming: Intent?) {
+        if (incoming?.getBooleanExtra(
+                com.example.notifications.MembershipExpiryReminderScheduler.EXTRA_OPEN_RENEWAL,
+                false
+            ) == true
+        ) {
+            incoming.removeExtra(
+                com.example.notifications.MembershipExpiryReminderScheduler.EXTRA_OPEN_RENEWAL
+            )
+            renewalIntentCounter += 1
+        }
+    }
+
 
 
     private lateinit var preferencesManager: PreferencesManager
@@ -144,6 +160,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        consumeRenewalIntent(intent)
         enableEdgeToEdge()
 
 
@@ -186,7 +203,8 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     SmartDrivoApp(
                         prefs = preferencesManager,
-                        repository = firebaseRepository
+                        repository = firebaseRepository,
+                        renewalIntentCounter = renewalIntentCounter
                     )
                 }
             }
@@ -196,6 +214,25 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         checkAndApplyAutoAcceptOnResume()
+        // Permission and membership may have changed in Android Settings.
+        com.example.notifications.MembershipExpiryReminderScheduler.refresh(applicationContext)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        consumeRenewalIntent(intent)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1001) {
+            com.example.notifications.MembershipExpiryReminderScheduler.refresh(applicationContext)
+        }
     }
 
     private fun checkAndApplyAutoAcceptOnResume() {
@@ -226,7 +263,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun SmartDrivoApp(
     prefs: PreferencesManager,
-    repository: FirebaseRepository
+    repository: FirebaseRepository,
+    renewalIntentCounter: Int = 0
 ) {
     val context = LocalContext.current
     val appContext = context.applicationContext
@@ -339,6 +377,23 @@ fun SmartDrivoApp(
             minimumAppVersionCode > 0 &&
             BuildConfig.VERSION_CODE <
                 minimumAppVersionCode
+
+    // Open plan renewal from an expiry reminder only after normal login/security
+    // routing. Consume the request once so Back does not reopen the plan screen.
+    var lastHandledRenewal by remember { mutableStateOf(0) }
+    LaunchedEffect(renewalIntentCounter, currentRoute, isLoggedIn,
+        isForceUpdateRequired, isProfileComplete) {
+        if (renewalIntentCounter > lastHandledRenewal &&
+            currentRoute != null && currentRoute != Routes.SPLASH &&
+            isLoggedIn && !isSecurityBlocked && !isForceUpdateRequired &&
+            (isUserAdmin || isProfileComplete)
+        ) {
+            lastHandledRenewal = renewalIntentCounter
+            if (currentRoute != Routes.PLAN_SELECTION) {
+                navController.navigate(Routes.PLAN_SELECTION) { launchSingleTop = true }
+            }
+        }
+    }
 
     // OFFLINE_GRACE_LOCK_V1
     // Existing signed-in installs receive one migration grace window.

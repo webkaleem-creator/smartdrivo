@@ -61,6 +61,12 @@
                 android:value="Overlay popup showing accepted ride details for drivers" />
         </service>
 
+        <!-- Local subscription-expiry alarms: no network, no Accessibility dependency. -->
+        <receiver
+            android:name=".notifications.MembershipExpiryReminderReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <!-- Boot Receiver for Autostart feature on device boot -->
         <receiver
             android:name=".receiver.BootReceiver"
@@ -68,6 +74,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
     </application>

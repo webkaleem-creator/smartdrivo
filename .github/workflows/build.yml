@@ -1,16 +1,11 @@
 name: Build SmartDrivo APK
 
 on:
-  # Automatically build and test on every developer branch push.
-  # Publishing remains restricted to successful pushes to main.
+  # One automatic CI build per consolidated main push.
+  # Branch testing remains available via workflow_dispatch.
   push:
     branches:
       - main
-      - 'feature/**'
-      - 'fix/**'
-      - 'test/**'
-      - 'perf/**'
-      - smartdrivo-device-lock-free-20261011-112401
   workflow_dispatch:
 
 jobs:
