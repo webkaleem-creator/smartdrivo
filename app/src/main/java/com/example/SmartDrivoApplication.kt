@@ -9,5 +9,7 @@ class SmartDrivoApplication : Application() {
         super.onCreate()
         // Create the notification channel on Application start
         NotificationHelper.createNotificationChannel(this)
+        // Owner-only Pickup Guard bubble; independent of live ride parsing.
+        com.example.service.PickupGuardBubbleRuntime.start(this)
     }
 }
