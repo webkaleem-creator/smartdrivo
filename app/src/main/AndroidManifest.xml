@@ -13,6 +13,9 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" tools:ignore="ProtectedPermissions" />
 
+    <!-- Shizuku manager grants permission explicitly to SmartDrivo when user approves. -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+
     <application
         android:name=".SmartDrivoApplication"
         android:allowBackup="false"
@@ -33,6 +36,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Official Shizuku SDK handshake; no privileged work runs automatically. -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL">
+            <meta-data android:name="moe.shizuku.client.V3_SUPPORT" android:value="true" />
+        </provider>
 
         <!-- SmartDrivo Accessibility Service for auto-accepting / rejecting orders -->
         <service

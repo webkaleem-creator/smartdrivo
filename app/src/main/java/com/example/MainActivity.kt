@@ -74,6 +74,7 @@ import com.example.ui.screens.FinishSetupScreen
 import com.example.ui.screens.GuestScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.PickupGuardScreen
+import com.example.ui.screens.OlaShizukuSetupScreen
 import com.example.ui.screens.MoreScreen
 import com.example.ui.screens.OrderHistoryScreen
 import com.example.ui.screens.PaymentFailedScreen
@@ -124,6 +125,7 @@ object Routes {
     const val COMMUNITY = "community"
     const val ADMIN_PANEL = "admin_panel"
     const val PICKUP_GUARD = "owner_pickup_guard"
+    const val OLA_SHIZUKU_SETUP = "owner_ola_shizuku_setup"
     const val FINISH_SETUP = "finish_setup"
     const val SECURITY_LOCK = "security_lock"
     const val UPDATE_REQUIRED = "update_required"
@@ -1507,6 +1509,7 @@ fun SmartDrivoApp(
                 onNavigateToReadOnlyProfile = { navController.navigate(Routes.PROFILE_DETAILS) },
                 onNavigateToAdminPanel = { navController.navigate(Routes.ADMIN_PANEL) },
                 onNavigateToPickupGuard = { navController.navigate(Routes.PICKUP_GUARD) },
+                onNavigateToOlaShizuku = { navController.navigate(Routes.OLA_SHIZUKU_SETUP) },
                 onLogout = {
                     repository.stopOwnMembershipSync()
                     PhoneAuthManager.signOut()
@@ -1543,6 +1546,15 @@ fun SmartDrivoApp(
                 androidx.compose.runtime.LaunchedEffect(Unit) { navController.popBackStack() }
             } else {
                 PickupGuardScreen(prefs = prefs, onBack = { navController.popBackStack() })
+            }
+        }
+
+        // Ola Shizuku setup is owner/admin preview only. No Ola auto-click is enabled.
+        composable(Routes.OLA_SHIZUKU_SETUP) {
+            if (!isLoggedIn || !isUserAdmin) {
+                LaunchedEffect(Unit) { navController.popBackStack() }
+            } else {
+                OlaShizukuSetupScreen(onBack = { navController.popBackStack() })
             }
         }
 

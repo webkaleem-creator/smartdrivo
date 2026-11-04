@@ -103,6 +103,7 @@ fun MoreScreen(
     onNavigateToReadOnlyProfile: () -> Unit = {},
     onNavigateToAdminPanel: () -> Unit = {},
     onNavigateToPickupGuard: () -> Unit = {},
+    onNavigateToOlaShizuku: () -> Unit = {},
     onLogout: () -> Unit,
     onBack: () -> Unit = {}
 ) {
@@ -635,6 +636,12 @@ fun MoreScreen(
                                 onClick = onNavigateToPickupGuard
                             )
                         }
+                        MoreCardRow(
+                            icon = Icons.Default.AdminPanelSettings,
+                            title = "Ola • Shizuku Setup",
+                            subtitle = "Admin preview • service, permission and Ola readiness",
+                            onClick = onNavigateToOlaShizuku
+                        )
                     }
                 }
             }

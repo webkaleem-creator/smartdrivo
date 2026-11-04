@@ -103,6 +103,10 @@ dependencies {
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
   implementation(libs.androidx.core.ktx)
+  // Used ONLY by the owner-facing Ola readiness/authorization setup screen.
+  // Rapido/Uber engine never calls Shizuku.
+  implementation("dev.rikka.shizuku:api:13.1.5")
+  implementation("dev.rikka.shizuku:provider:13.1.5")
   // implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
