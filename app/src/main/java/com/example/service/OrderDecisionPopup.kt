@@ -73,7 +73,7 @@ object OrderDecisionPopup {
         }
     }
 
-    private const val DISPLAY_MS = 13_000L
+    private const val DISPLAY_MS = 5_000L
     private const val DEDUPE_MS = 5000L
 
     private data class Style(
