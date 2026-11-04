@@ -846,7 +846,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                     fontSize = 16.sp
                                 )
                                 Text(
-                                    text = "Tap to allow SmartDrivo to show popup ride cards over Rapido, Uber, and Ola.",
+                                    text = "Tap to allow SmartDrivo to show popup ride cards over Rapido and Uber.",
                                     color = TextDarkSecondary,
                                     fontSize = 14.sp
                                 )
@@ -2244,7 +2244,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        listOf(Platform.RAPIDO, Platform.UBER, Platform.OLA).forEach { plat ->
+                        listOf(Platform.RAPIDO, Platform.UBER).forEach { plat ->
                             val isSelected = simPlatform == plat
                             Surface(
                                 onClick = { simPlatform = plat },
@@ -2471,7 +2471,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "SmartDrivo requires Accessibility permission to detect incoming ride orders from Rapido, Uber, and Ola, and auto-click the Accept button according to your fare and distance filters.",
+                        text = "SmartDrivo requires Accessibility permission to detect incoming ride orders from Rapido and Uber, and auto-click the Accept button according to your fare and distance filters.",
                         fontSize = 11.sp,
                         color = TextDarkSecondary,
                         lineHeight = 16.sp
@@ -2556,7 +2556,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "SmartDrivo needs 'Display over other apps' permission to show the floating ride details popup and accept overlay on top of Rapido, Uber, and Ola.",
+                        text = "SmartDrivo needs 'Display over other apps' permission to show the floating ride details popup and accept overlay on top of Rapido and Uber.",
                         fontSize = 11.sp,
                         color = TextDarkSecondary,
                         lineHeight = 16.sp

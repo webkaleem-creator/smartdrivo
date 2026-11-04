@@ -1822,9 +1822,6 @@ private fun formatIgnoredFilters(
         )
 
     FastestHistoryReason.clarify(normalizedReason, item.pickupDistKm)?.let { return it }
-    if (item.platform == Platform.OLA) {
-        OlaHistoryReasonSummary.summarize(normalizedReason)?.let { return it }
-    }
     formatGenericFilterFailureV7(
         normalizedReason
     )?.let {

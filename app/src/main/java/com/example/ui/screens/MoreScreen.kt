@@ -103,7 +103,6 @@ fun MoreScreen(
     onNavigateToReadOnlyProfile: () -> Unit = {},
     onNavigateToAdminPanel: () -> Unit = {},
     onNavigateToPickupGuard: () -> Unit = {},
-    onNavigateToOlaAdminFilter: () -> Unit = {},
     onLogout: () -> Unit,
     onBack: () -> Unit = {}
 ) {
@@ -635,12 +634,6 @@ fun MoreScreen(
                                 subtitle = "Owner-only manual choice & No-Go protection",
                                 onClick = onNavigateToPickupGuard
                             )
-                            MoreCardRow(
-                                icon = Icons.Default.AdminPanelSettings,
-                                title = "Ola Global Filter",
-                                subtitle = "Admin-only permanent Ola filter settings",
-                                onClick = onNavigateToOlaAdminFilter
-                            )
                         }
                     }
                 }
@@ -791,7 +784,7 @@ fun MoreScreen(
                         "Bundle Order has its own ON/OFF control. When ON, detected bundle rides continue through your normal Go-To, No-Go, Fare, Distance or Both rules. When OFF, SmartDrivo will never auto-accept the bundle. If Auto Reject is ON it may be skipped; if Auto Reject is OFF it stays for manual action.",
 
                     "6. Supported Platforms" to
-                        "Use the Filters screen to enable or disable Rapido, Uber and Ola individually. SmartDrivo processes only the platforms you have enabled.",
+                        "Use the Filters screen to manage Rapido. Ola processing is disabled in this release.",
 
                     "7. Go-To Areas" to
                         "Create Go-To areas for locations you prefer to travel towards. When Go-To filtering is enabled, SmartDrivo compares the detected ride destination with your saved area rules and conditions.",

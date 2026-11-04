@@ -2,7 +2,6 @@ package com.example
 
 import com.example.engine.AreaRulesEngine
 import com.example.engine.DecisionResult
-import com.example.engine.OlaAdapter
 import com.example.engine.RapidoAdapter
 import com.example.engine.UberAdapter
 import com.example.model.AreaGroup
@@ -55,13 +54,7 @@ class ExampleUnitTest {
     }
 
     @Test
-    fun testOlaAndUberAcceptTextMatching() {
-        assertTrue(OlaAdapter.isAcceptText("Accept"))
-        assertTrue(OlaAdapter.isAcceptText("ACCEPT"))
-        assertTrue(OlaAdapter.isAcceptText("Accept Ride"))
-        assertTrue(OlaAdapter.isAcceptText("Accept Order"))
-        assertTrue(OlaAdapter.isAcceptText("स्वीकार करें"))
-
+    fun testUberAcceptTextMatching() {
         assertTrue(UberAdapter.isAcceptText("Accept"))
         assertTrue(UberAdapter.isAcceptText("ACCEPT"))
         assertTrue(UberAdapter.isAcceptText("Confirm"))

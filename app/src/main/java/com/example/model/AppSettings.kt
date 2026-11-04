@@ -91,7 +91,7 @@ data class AppSettings(
     // Platforms enabled
     val rapidoEnabled: Boolean = true,
     val uberEnabled: Boolean = true,
-    val olaEnabled: Boolean = true,
+    val olaEnabled: Boolean = false, // Legacy field retained for saved data compatibility.
     // Vehicles enabled
     val autoEnabled: Boolean = true,
     val bikeEnabled: Boolean = true,

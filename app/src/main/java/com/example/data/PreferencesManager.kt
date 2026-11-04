@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.example.model.AppSettings
 import com.example.model.PickupGuardSettings
-import com.example.model.OlaAdminFilterSettings
 import com.example.model.AppThemeMode
 import com.example.model.AreaGroup
 import com.example.model.AreaType
@@ -41,6 +40,16 @@ class PreferencesManager(private val context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("smartdrivo_prefs", Context.MODE_PRIVATE)
 
+    // Retire old Ola-only diagnostics and admin-test configuration safely.
+    // Do not clear Rapido filters, account state or historic ride database.
+    init {
+        runCatching { context.deleteSharedPreferences("smartdrivo_ola_diagnostics_v1") }
+        val retiredKeys = prefs.all.keys.filter { it.startsWith("owner_ola_global_v1_") }
+        val editor = prefs.edit()
+        retiredKeys.forEach { editor.remove(it) }
+        editor.putBoolean("setting_ola", false).apply()
+    }
+
     // Reactive StateFlows for UI
     private val _userProfile = MutableStateFlow(loadUserProfile())
     val userProfile: StateFlow<UserProfile> = _userProfile.asStateFlow()
@@ -67,48 +76,6 @@ class PreferencesManager(private val context: Context) {
             .putFloat("owner_guard_max_v1_$uid", value.maxPickupKm)
             .commit()
         if (saved) _pickupGuardSettings.value = value
-        return saved
-    }
-
-    // Owner-only Ola testing configuration: separate from shared Rapido/Uber filters.
-    // OFF by default and scoped to Firebase UID; never fall back to a different user.
-    private val _olaAdminFilterSettings = MutableStateFlow(readOlaAdminFilterSettings())
-    val olaAdminFilterSettings: StateFlow<OlaAdminFilterSettings> =
-        _olaAdminFilterSettings.asStateFlow()
-
-    private fun readOlaAdminFilterSettings(): OlaAdminFilterSettings {
-        val uid = _userProfile.value.uid.takeIf { it.isNotBlank() }
-            ?: return OlaAdminFilterSettings()
-        val prefix = "owner_ola_global_v1_${uid}_"
-        val defaults = OlaAdminFilterSettings()
-        val mode = runCatching {
-            FilterMode.valueOf(prefs.getString(prefix + "mode", defaults.filterMode.name).orEmpty())
-        }.getOrDefault(defaults.filterMode)
-        return OlaAdminFilterSettings(
-            enabled = prefs.getBoolean(prefix + "enabled", false),
-            filterMode = mode,
-            minFare = getSafeFloat(prefix + "min", defaults.minFare),
-            maxFare = getSafeFloat(prefix + "max", defaults.maxFare),
-            maxPickupKm = getSafeFloat(prefix + "pickup", defaults.maxPickupKm),
-            maxTripKm = getSafeFloat(prefix + "trip", defaults.maxTripKm)
-        ).let { if (it.valid()) it else defaults }
-    }
-
-    fun saveOlaAdminFilterSettings(settings: OlaAdminFilterSettings): Boolean {
-        val profile = _userProfile.value
-        if (profile.uid.isBlank() ||
-            !com.example.auth.PickupGuardOwnerAccess.authorized(profile) ||
-            !settings.valid()) return false
-        val prefix = "owner_ola_global_v1_${profile.uid}_"
-        val saved = prefs.edit()
-            .putBoolean(prefix + "enabled", settings.enabled)
-            .putString(prefix + "mode", settings.filterMode.name)
-            .putFloat(prefix + "min", settings.minFare)
-            .putFloat(prefix + "max", settings.maxFare)
-            .putFloat(prefix + "pickup", settings.maxPickupKm)
-            .putFloat(prefix + "trip", settings.maxTripKm)
-            .commit()
-        if (saved) _olaAdminFilterSettings.value = settings
         return saved
     }
 
@@ -901,7 +868,6 @@ class PreferencesManager(private val context: Context) {
         }
         _userProfile.value = profile
         _pickupGuardSettings.value = readPickupGuardSettings()
-        _olaAdminFilterSettings.value = readOlaAdminFilterSettings()
         updateUserInList(profile)
     }
 
@@ -1037,7 +1003,7 @@ class PreferencesManager(private val context: Context) {
 
             putBoolean(KEY_RAPIDO_ENABLED, settings.rapidoEnabled)
             putBoolean(KEY_UBER_ENABLED, settings.uberEnabled)
-            putBoolean(KEY_OLA_ENABLED, settings.olaEnabled)
+            putBoolean(KEY_OLA_ENABLED, false) // Ola disabled for this version.
             putBoolean(KEY_AUTO_TYPE_ENABLED, settings.autoEnabled)
             putBoolean(KEY_BIKE_TYPE_ENABLED, settings.bikeEnabled)
             putBoolean(KEY_CAR_TYPE_ENABLED, settings.carEnabled)
@@ -1060,7 +1026,7 @@ class PreferencesManager(private val context: Context) {
         }
         _isGoToEnabled.value = settings.isGoToEnabled
         _isNoGoEnabled.value = settings.isNoGoEnabled
-        _appSettings.value = settings.copy(isPrimaryFilterEnabled = true)
+        _appSettings.value = settings.copy(isPrimaryFilterEnabled = true, olaEnabled = false)
     }
 
     private fun getSafeFloat(key: String, defaultValue: Float): Float {
@@ -1237,7 +1203,7 @@ class PreferencesManager(private val context: Context) {
 
             rapidoEnabled = prefs.getBoolean(KEY_RAPIDO_ENABLED, true),
             uberEnabled = prefs.getBoolean(KEY_UBER_ENABLED, true),
-            olaEnabled = prefs.getBoolean(KEY_OLA_ENABLED, true),
+            olaEnabled = false, // Ignore old saved Ola=true.
             autoEnabled = prefs.getBoolean(KEY_AUTO_TYPE_ENABLED, true),
             bikeEnabled = prefs.getBoolean(KEY_BIKE_TYPE_ENABLED, true),
             carEnabled = prefs.getBoolean(KEY_CAR_TYPE_ENABLED, true),

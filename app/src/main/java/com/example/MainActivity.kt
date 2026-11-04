@@ -73,7 +73,6 @@ import com.example.ui.screens.FinishSetupScreen
 import com.example.ui.screens.GuestScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.PickupGuardScreen
-import com.example.ui.screens.OlaAdminFilterScreen
 import com.example.ui.screens.MoreScreen
 import com.example.ui.screens.OrderHistoryScreen
 import com.example.ui.screens.PaymentFailedScreen
@@ -124,7 +123,6 @@ object Routes {
     const val COMMUNITY = "community"
     const val ADMIN_PANEL = "admin_panel"
     const val PICKUP_GUARD = "owner_pickup_guard"
-    const val OLA_ADMIN_FILTER = "owner_ola_global_filter"
     const val FINISH_SETUP = "finish_setup"
     const val SECURITY_LOCK = "security_lock"
     const val UPDATE_REQUIRED = "update_required"
@@ -1454,7 +1452,6 @@ fun SmartDrivoApp(
                 onNavigateToReadOnlyProfile = { navController.navigate(Routes.PROFILE_DETAILS) },
                 onNavigateToAdminPanel = { navController.navigate(Routes.ADMIN_PANEL) },
                 onNavigateToPickupGuard = { navController.navigate(Routes.PICKUP_GUARD) },
-                onNavigateToOlaAdminFilter = { navController.navigate(Routes.OLA_ADMIN_FILTER) },
                 onLogout = {
                     repository.stopOwnMembershipSync()
                     PhoneAuthManager.signOut()
@@ -1491,15 +1488,6 @@ fun SmartDrivoApp(
                 androidx.compose.runtime.LaunchedEffect(Unit) { navController.popBackStack() }
             } else {
                 PickupGuardScreen(prefs = prefs, onBack = { navController.popBackStack() })
-            }
-        }
-
-        composable(Routes.OLA_ADMIN_FILTER) {
-            if (!com.example.auth.PickupGuardOwnerAccess.authorized(userProfile)) {
-                androidx.compose.runtime.LaunchedEffect(Unit) { navController.popBackStack() }
-            } else {
-                OlaAdminFilterScreen(prefs = prefs,
-                    onBack = { navController.popBackStack() })
             }
         }
 

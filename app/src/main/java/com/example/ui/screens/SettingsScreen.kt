@@ -72,7 +72,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.PreferencesManager
-import com.example.data.OlaDiagnosticStore
 import com.example.ui.theme.BlueContainer
 import com.example.ui.theme.BluePrimary
 import com.example.ui.theme.BlueSecondary
@@ -97,7 +96,6 @@ fun SettingsScreen(
     onBack: () -> Unit
 ) {
     val settings by prefs.appSettings.collectAsState()
-    val diagnosticContext = LocalContext.current
 
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -457,7 +455,7 @@ fun SettingsScreen(
                     }
                 }
             }
-            // 3. SUPPORTED PLATFORMS (Rapido, Uber, Ola toggles)
+            // 3. SUPPORTED PLATFORMS (Rapido only)
             item {
                 SectionHeader("3. SUPPORTED PLATFORMS")
                 Card(
@@ -485,52 +483,11 @@ fun SettingsScreen(
 
                         HorizontalDivider(color = CardBorderDefault)
 
-                        // UBER_DISABLED_OLA_FOCUS_V1
-                        // Uber hidden while SmartDrivo focuses on Ola.
-
-                        // Ola Toggle
-                        SettingToggleRow(
-                            icon = Icons.Default.Layers,
-                            iconTint = PlatformOla,
-                            title = "Ola",
-                            subtitle = "Auto-accept orders for Ola Driver",
-                            isChecked = settings.olaEnabled,
-                            onCheckedChange = { isEnabled ->
-                                prefs.saveAppSettings(settings.copy(olaEnabled = isEnabled))
-                                showSavedSnackbar()
-                            }
-                        )
+                        // Ola controls removed for v1.0.10.
                     }
                 }
             }
 
-            item {
-                SectionHeader("4. OLA DIAGNOSTICS")
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = CardBackground),
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, CardBorderDefault),
-                    modifier = Modifier.fillMaxWidth().testTag("ola_diagnostics_card")
-                ) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Ola Order Debug Report", fontWeight = FontWeight.Bold, color = TextDarkPrimary)
-                        Text("No Developer Options or USB needed. Only event codes; no passenger details or addresses.", fontSize = 12.sp, color = TextDarkSecondary)
-                        Button(onClick = {
-                            val clip = diagnosticContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clip.setPrimaryClip(ClipData.newPlainText("Ola Report", OlaDiagnosticStore.export(diagnosticContext)))
-                        }, modifier = Modifier.fillMaxWidth().testTag("copy_ola_report")) { Text("Copy Ola Report") }
-                        OutlinedButton(onClick = {
-                            val intent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_SUBJECT, "SmartDrivo Ola Report")
-                                putExtra(Intent.EXTRA_TEXT, OlaDiagnosticStore.export(diagnosticContext))
-                            }
-                            diagnosticContext.startActivity(Intent.createChooser(intent, "Share Ola Report"))
-                        }, modifier = Modifier.fillMaxWidth().testTag("share_ola_report")) { Text("Share Ola Report") }
-                        TextButton(onClick = { OlaDiagnosticStore.clear(diagnosticContext) }) { Text("Clear Ola Logs") }
-                    }
-                }
-            }
             item {
                 Spacer(modifier = Modifier.height(24.dp))
             }
