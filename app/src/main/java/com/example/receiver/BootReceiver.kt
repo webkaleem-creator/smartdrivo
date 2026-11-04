@@ -8,7 +8,11 @@ import com.example.data.PreferencesManager
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
-        if (intent?.action == Intent.ACTION_BOOT_COMPLETED) {
+        if (intent?.action == Intent.ACTION_BOOT_COMPLETED ||
+            intent?.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            // Reschedule local reminders after reboot or an in-place APK update.
+            com.example.notifications.MembershipExpiryReminderScheduler.refresh(context)
+
             val prefs = PreferencesManager(context)
             if (prefs.appSettings.value.autostartOnBoot) {
                 Log.i("BootReceiver", "SmartDrivo autostart triggered on boot")
