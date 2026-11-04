@@ -147,12 +147,17 @@ class RapidoLiveHistoryDetectionTest {
         try {
             state.value=AdminPickupBlockSettings(true,listOf("tadbun"))
             guardState.value=previousGuard.copy(enabled=true)
+            set("currentOlaState",SmartDrivoAccessibilityService.OlaState.OLA_DETECTED)
             val root=AccessibilityNodeInfo.obtain().apply { packageName="com.rapido.passenger";isVisibleToUser=true }
             val partial=RapidoOrderData(totalFare=45f,baseFare=45f,pickupKm=.9f,dropKm=null,dropAddress="Synthetic drop")
             handler.invoke(service,root,RapidoPopupValidation(true,fare=45f,pickupDistKm=.9f,orderData=partial),1L)
             val row=withTimeout(5000) { history.allHistory.first { it.size==1 && it.single().status==OrderStatus.IGNORED.name } }.single()
             assertEquals("ADMIN_PICKUP_OWNER_UNAVAILABLE",row.decisionReasonCode)
             assertEquals(0,row.timesClicked)
+            val busy=SmartDrivoAccessibilityService::class.java.getDeclaredField("isProcessing").apply { isAccessible=true }
+            val ola=SmartDrivoAccessibilityService::class.java.getDeclaredField("currentOlaState").apply { isAccessible=true }
+            assertTrue(busy.getBoolean(service))
+            assertEquals(SmartDrivoAccessibilityService.OlaState.OLA_DETECTED,ola.get(service))
         } finally { state.value=previous; guardState.value=previousGuard }
     }
 

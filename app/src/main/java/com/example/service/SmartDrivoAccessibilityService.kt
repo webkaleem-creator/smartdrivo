@@ -1139,7 +1139,7 @@ private val processingTimeoutRunnable = Runnable {
      * Returns true when owner block has consumed the offer. A verified X/Skip
      * may be actioned once; ACTION_CLICK success is NOT proof of server rejection.
      */
-    private fun handleAdminPickupBlock(root: AccessibilityNodeInfo, candidate: RideCandidate, recordId: String): Boolean {
+    private fun handleAdminPickupBlock(root: AccessibilityNodeInfo, candidate: RideCandidate, recordId: String, cleanupProcessing: Boolean = true): Boolean {
         val decision = adminPickupBlockDecision(root, candidate) ?: return false
         if (decision is com.example.engine.AdminPickupBlockPolicy.Decision.Allow) return false
         val blocked = decision is com.example.engine.AdminPickupBlockPolicy.Decision.Blocked
@@ -1156,7 +1156,7 @@ private val processingTimeoutRunnable = Runnable {
                 else { shieldActionRecords[candidate.platform] = recordId; true }
             }
             if (reserved) serviceScope.launch { runPriorityRapidoShield(root, candidate, recordId) }
-            if (activeRapidoPopupOrderId == recordId) resetRapidoProcessing(recordId)
+            if (cleanupProcessing && activeRapidoPopupOrderId == recordId) resetRapidoProcessing(recordId)
             return true
         }
         var attempted = false
@@ -1203,7 +1203,9 @@ private val processingTimeoutRunnable = Runnable {
             onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED, code,
                 "$reason | No verified Reject/Skip action; manual handling required")
         }
-        if (candidate.platform == Platform.OLA) setOlaState(OlaState.IDLE) else resetProcessing()
+        if (cleanupProcessing) {
+            if (candidate.platform == Platform.OLA) setOlaState(OlaState.IDLE) else resetProcessing()
+        }
         return true
     }
 
@@ -2576,7 +2578,7 @@ private val processingTimeoutRunnable = Runnable {
             val veto = adminPickupBlockDecision(filterRoot, filteredCandidate)
             if (veto !is com.example.engine.AdminPickupBlockPolicy.Decision.Allow) {
                 val vetoId = prioritySession?.id ?: return true
-                handleAdminPickupBlock(filterRoot, filteredCandidate, vetoId)
+                handleAdminPickupBlock(filterRoot, filteredCandidate, vetoId, cleanupProcessing = false)
                 return true
             }
         }
@@ -2665,7 +2667,7 @@ private val processingTimeoutRunnable = Runnable {
             val veto = adminPickupBlockDecision(filterRoot, filteredCandidate)
             if (veto !is com.example.engine.AdminPickupBlockPolicy.Decision.Allow) {
                 val vetoId = prioritySession?.id ?: return true
-                handleAdminPickupBlock(filterRoot, filteredCandidate, vetoId)
+                handleAdminPickupBlock(filterRoot, filteredCandidate, vetoId, cleanupProcessing = false)
                 return true
             }
         }
@@ -8615,7 +8617,7 @@ private val processingTimeoutRunnable = Runnable {
         if (shieldEnabled && preferencesManager.isAutoAcceptEnabled) {
             shieldSession = detectRapidoOffer(candidate, eventUptimeMs) ?: return
             if (shieldSession.attempted) return
-            if (handleAdminPickupBlock(root, candidate, shieldSession.id)) return
+            if (handleAdminPickupBlock(root, candidate, shieldSession.id, cleanupProcessing = false)) return
         }
         // RAPIDO_COMPLETE_HISTORY_V4
         // Wait for the complete card before inserting History.
