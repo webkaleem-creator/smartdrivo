@@ -1239,7 +1239,7 @@ private val processingTimeoutRunnable = Runnable {
         // The action was already dispatched exactly once before this observer.
         serviceScope.launch(Dispatchers.IO) {
             var homeConfirmed = false
-            repeat(10) {
+            for (attempt in 0 until 10) {
                 delay(200L)
                 var matchingOfferStillVisible = false
                 var rapidoHomeVisible = false
@@ -1266,7 +1266,7 @@ private val processingTimeoutRunnable = Runnable {
                 }
                 if (!matchingOfferStillVisible && rapidoHomeVisible) {
                     homeConfirmed = true
-                    return@repeat
+                    break
                 }
             }
             val event = com.example.engine.PickupGuardRejectHistoryPolicy.forPhase(
