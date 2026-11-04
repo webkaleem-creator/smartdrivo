@@ -91,4 +91,55 @@ class RapidoIgnoredVisibleOfferGuardTest {
         guard.rememberIgnored(original, settings)
         assertTrue(guard.needsFilterRecheck(original, settings.copy(maxPickupDistanceKm = 2f)))
     }
+
+    @Test fun reappearingIgnoredAAfterConfirmedGapIsFresh() {
+        val guard = RapidoIgnoredVisibleOfferGuard()
+        val a = offer(fare = 93f, pickup = 0.8f, drop = 3.1f)
+        guard.rememberIgnored(a)
+        assertTrue(guard.isDuplicateIgnored(a))
+        assertFalse(guard.onNoCompleteOfferObserved(10_000L, true, false))
+        assertFalse(guard.onNoCompleteOfferObserved(10_500L, true, false))
+        assertTrue(guard.onNoCompleteOfferObserved(11_250L, true, false))
+        assertFalse(guard.isDuplicateIgnored(a))
+    }
+
+    @Test fun partiallyRenderedOrUntrustedFrameNeverStartsAnOfferGap() {
+        val guard = RapidoIgnoredVisibleOfferGuard()
+        val a = offer()
+        guard.rememberIgnored(a)
+        assertFalse(guard.onNoCompleteOfferObserved(10_000L, true, false))
+        assertFalse(guard.onNoCompleteOfferObserved(11_500L, true, true))
+        assertFalse(guard.onNoCompleteOfferObserved(12_000L, false, false))
+        assertFalse(guard.onNoCompleteOfferObserved(12_500L, true, false))
+        assertTrue(guard.isDuplicateIgnored(a))
+        guard.onCompleteOfferObserved()
+        assertFalse(guard.onNoCompleteOfferObserved(14_000L, true, false))
+        assertTrue(guard.isDuplicateIgnored(a))
+    }
+
+    @Test fun destinationChangeIsNotHiddenByEqualFarePickupAndTripFallbackId() {
+        val a = offer(fare = 99f, pickup = 0.8f, drop = 3f,
+            address = "Red Hills Lakdikapul Hyderabad")
+        val b = offer(fare = 99f, pickup = 0.8f, drop = 3f,
+            address = "Charminar Shah Ali Banda Hyderabad")
+        val id = "RAPIDO_99.0_0.8_3.0_single"
+        assertFalse(RapidoIgnoredVisibleOfferGuard.sameActivePopup(id, a, id, b))
+        assertTrue(RapidoIgnoredVisibleOfferGuard.sameActivePopup(id, a, id,
+            a.copy(pickupDistKm = 0.7f)))
+        assertFalse(RapidoIgnoredVisibleOfferGuard.sameActivePopup(id, a, "NEW_ID", a))
+    }
+
+    @Test fun ignoredAThenDistinctBThenDistinctCThenAIsProcessed() {
+        val guard = RapidoIgnoredVisibleOfferGuard()
+        val a = offer(fare = 67f, address = "Old City Hyderabad Address A")
+        val b = offer(fare = 82f, address = "Himayat Nagar Hyderabad Address B")
+        val c = offer(fare = 96f, address = "Mehdipatnam Hyderabad Address C")
+        guard.rememberIgnored(a)
+        assertTrue(guard.isDuplicateIgnored(a))
+        assertFalse(guard.isDuplicateIgnored(b))
+        guard.rememberIgnored(b)
+        assertFalse(guard.isDuplicateIgnored(c))
+        guard.rememberIgnored(c)
+        assertFalse(guard.isDuplicateIgnored(a))
+    }
 }

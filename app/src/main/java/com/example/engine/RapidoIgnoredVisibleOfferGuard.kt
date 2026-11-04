@@ -10,8 +10,9 @@ import kotlin.math.abs
  * Repeated accessibility events may change its pickup distance as the driver
  * moves. Do not convert those events into separate History records.
  *
- * Clear only on a confirmed Rapido Home transition, master OFF, or an offer
- * that differs in stable details. Never infer a new booking from pickup km.
+ * Clear on a verified offer-free transition, master OFF, or a different
+ * stable offer. Never treat one incomplete accessibility frame as a new ride.
+ * Never infer a new booking from pickup km alone.
  */
 class RapidoIgnoredVisibleOfferGuard {
     private var lastIgnored: RideCandidate? = null
@@ -21,6 +22,38 @@ class RapidoIgnoredVisibleOfferGuard {
         return context != filterContext || previous.pickupDistKm != candidate.pickupDistKm
     }
     private var firstIgnoredAtMs: Long = 0L
+    private var offerMissingSinceMs: Long? = null
+
+    @Synchronized
+    fun onCompleteOfferObserved() {
+        offerMissingSinceMs = null
+    }
+
+    /**
+     * A verified transition must contain two trustworthy no-offer reads
+     * separated by 1200 ms. Unrelated windows and partially loaded offer
+     * cards cannot terminate the previous presentation.
+     * Returns true only after a confirmed presentation gap.
+     */
+    @Synchronized
+    fun onNoCompleteOfferObserved(
+        nowMs: Long,
+        hasTrustedRapidoRoot: Boolean,
+        hasPartialOffer: Boolean
+    ): Boolean {
+        if (!hasTrustedRapidoRoot || hasPartialOffer) {
+            offerMissingSinceMs = null
+            return false
+        }
+        val since = offerMissingSinceMs
+        if (since == null || nowMs < since) {
+            offerMissingSinceMs = nowMs
+            return false
+        }
+        if (nowMs - since < 1_200L) return false
+        clear()
+        return true
+    }
 
     @Synchronized
     fun isDuplicateIgnored(candidate: RideCandidate): Boolean {
@@ -38,6 +71,7 @@ class RapidoIgnoredVisibleOfferGuard {
             lastIgnored = candidate
             filterContext = context
             firstIgnoredAtMs = System.currentTimeMillis()
+            offerMissingSinceMs = null
         }
     }
 
@@ -46,9 +80,22 @@ class RapidoIgnoredVisibleOfferGuard {
         lastIgnored = null
         filterContext = null
         firstIgnoredAtMs = 0L
+        offerMissingSinceMs = null
     }
 
     companion object {
+        /**
+         * The service's fast fallback ID contains fare/pickup/trip only.
+         * Do not hide a different destination merely because this ID matches.
+         */
+        fun sameActivePopup(
+            activeId: String?,
+            previous: RideCandidate?,
+            incomingId: String,
+            incoming: RideCandidate
+        ): Boolean = activeId == incomingId &&
+            (previous == null || sameVisibleOffer(previous, incoming))
+
         // RAPIDO_SAME_VISIBLE_PRICE_DRIFT_V1
         // A live card can temporarily show â‚¹128 then â‚¹129 as text nodes update.
         // This is NOT a general same-destination matcher. Require same complete

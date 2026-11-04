@@ -394,6 +394,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
 
     @Volatile
     private var activeRapidoPopupOrderId: String? = null
+    @Volatile private var activeRapidoPopupCandidate: RideCandidate? = null
 
     // RAPIDO_VISIBLE_IGNORED_DEDUP_V1
     // When Auto Reject is OFF, an unmatched popup stays visible.
@@ -579,6 +580,7 @@ private val processingTimeoutRunnable = Runnable {
             isRapidoEventProcessing = false
         }
         activeRapidoPopupOrderId = null
+        activeRapidoPopupCandidate = null
         rapidoIgnoredVisibleOfferGuard.clear()
         activeOrderRecordIds.clear()
 
@@ -2223,6 +2225,7 @@ private val processingTimeoutRunnable = Runnable {
         }
 
         // Consume Auto Priority events; do not route them into a bypassing fallback.
+        rapidoIgnoredVisibleOfferGuard.onCompleteOfferObserved()
         lastValidRapidoPopupAt =
             System.currentTimeMillis()
 
@@ -2357,11 +2360,15 @@ private val processingTimeoutRunnable = Runnable {
 
             if (isProcessing) return true
             val offerId = getOrderIdentifier(filteredCandidate)
-            if (activeRapidoPopupOrderId == offerId) return true
+            if (com.example.engine.RapidoIgnoredVisibleOfferGuard.sameActivePopup(
+                    activeRapidoPopupOrderId, activeRapidoPopupCandidate,
+                    offerId, filteredCandidate
+                )) return true
             isProcessing = true
             handler.removeCallbacks(processingTimeoutRunnable)
             handler.postDelayed(processingTimeoutRunnable, 750L)
             activeRapidoPopupOrderId = offerId
+            activeRapidoPopupCandidate = filteredCandidate
             val recordId = onOrderDetectedFast(filteredCandidate)
             handleRapidoFilterFailure(
                 root = filterRoot,
@@ -3241,7 +3248,7 @@ private val processingTimeoutRunnable = Runnable {
                         sourceDropKm > 0f
 
                 if (sourceIsComplete) {
-
+                    rapidoIgnoredVisibleOfferGuard.onCompleteOfferObserved()
                     lastValidRapidoPopupAt =
                         System.currentTimeMillis()
 
@@ -3298,7 +3305,7 @@ private val processingTimeoutRunnable = Runnable {
                 if (directValidation.isValid &&
                     (directValidation.orderData?.dropKm ?: 0f) > 0f
                 ) {
-
+                    rapidoIgnoredVisibleOfferGuard.onCompleteOfferObserved()
                     lastValidRapidoPopupAt =
                         System.currentTimeMillis()
 
@@ -3395,6 +3402,7 @@ private val processingTimeoutRunnable = Runnable {
 
             if (validatedRoot != null && validatedPopup != null) {
                 // RAPIDO_VALID_POPUP_V4
+                rapidoIgnoredVisibleOfferGuard.onCompleteOfferObserved()
                 lastValidRapidoPopupAt = System.currentTimeMillis()
                 Log.i(
                     TAG,
@@ -3430,6 +3438,21 @@ private val processingTimeoutRunnable = Runnable {
                     RapidoAdapter.isRapidoHomeScreen(it)
                 }
 
+            // A previously ignored card can disappear and reappear later
+            // with exactly the same fare/km. Only a confirmed interval with
+            // no fully or partially loaded offer ends that presentation.
+            if (rapidoIgnoredVisibleOfferGuard.onNoCompleteOfferObserved(
+                    nowMs = android.os.SystemClock.uptimeMillis(),
+                    hasTrustedRapidoRoot = candidateRoots.isNotEmpty(),
+                    hasPartialOffer = partialRapidoOfferSeenInPass
+                )
+            ) {
+                activeRapidoPopupOrderId = null
+                activeRapidoPopupCandidate = null
+                lastValidRapidoPopupAt = 0L
+                rapidoMiss("OFFER_GAP_CONFIRMED")
+            }
+
             if (anyRapidoHome) {
                 // RAPIDO_TRANSIENT_GAP_FINAL_V2
                 // Rapido can expose Home for a moment while the same
@@ -3444,6 +3467,7 @@ private val processingTimeoutRunnable = Runnable {
                     popupGapMs > 1_200L
                 ) {
                     activeRapidoPopupOrderId = null
+                    activeRapidoPopupCandidate = null
                     rapidoIgnoredVisibleOfferGuard.clear()
                     lastValidRapidoPopupAt = 0L
                 }
@@ -3457,6 +3481,7 @@ private val processingTimeoutRunnable = Runnable {
             }
 
             activeRapidoPopupOrderId = null
+            activeRapidoPopupCandidate = null
 
             Log.d(
                 TAG,
@@ -8326,7 +8351,11 @@ private val processingTimeoutRunnable = Runnable {
         }
         if (recheckIgnored) rapidoMiss("IGNORED_FILTER_RECHECK")
 
-        if (!recheckIgnored && activeRapidoPopupOrderId == orderId) {
+        if (!recheckIgnored &&
+            com.example.engine.RapidoIgnoredVisibleOfferGuard.sameActivePopup(
+                activeRapidoPopupOrderId, activeRapidoPopupCandidate, orderId, candidate
+            )
+        ) {
             rapidoMiss("CURRENT_OFFER_DUPLICATE")
             Log.i(
                 TAG,
@@ -8363,6 +8392,7 @@ private val processingTimeoutRunnable = Runnable {
             System.currentTimeMillis()
 
         activeRapidoPopupOrderId = orderId
+        activeRapidoPopupCandidate = candidate
 
         val recordId = reusedIgnoredRecord ?: onOrderDetectedFast(candidate)
         Log.i(TAG, "⚡ Rapido order detected & inserted to Room [PROCESSING]: Fare=₹${candidate.fare}, pickup=${candidate.pickupAddress}")
