@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +50,7 @@ fun OlaShizukuSetupScreen(onBack: () -> Unit) {
     val preview by OlaReadOnlyPreviewStore.state.collectAsState()
     var tick by remember { mutableIntStateOf(0) }
     var message by remember { mutableStateOf("") }
+    var showDeveloperOptionsWarning by remember { mutableStateOf(false) }
     val binderListener = remember {
         Shizuku.OnBinderReceivedListener { tick++ }
     }
@@ -98,6 +101,42 @@ fun OlaShizukuSetupScreen(onBack: () -> Unit) {
     val versionText = if (serviceRunning) runCatching {
         "Shizuku server API: " + Shizuku.getVersion()
     }.getOrDefault("Shizuku service detected") else ""
+
+    // A real Android Settings workflow, never a stealth setting override.
+    if (showDeveloperOptionsWarning) {
+        AlertDialog(
+            onDismissRequest = { showDeveloperOptionsWarning = false },
+            title = { Text("Developer Options • system setting") },
+            text = { Text(
+                "This opens Android's real Developer Options. Turning them OFF " +
+                    "can stop Wireless Debugging, Shizuku, and admin diagnostics. " +
+                    "SmartDrivo will not hide or spoof this state from Ola. " +
+                    "To restore, turn Developer Options ON again and restart Shizuku. " +
+                    "Ola online access is not guaranteed."
+            ) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeveloperOptionsWarning = false
+                    try {
+                        context.startActivity(
+                            Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+                        )
+                    } catch (_: Exception) {
+                        runCatching {
+                            context.startActivity(Intent(Settings.ACTION_SETTINGS))
+                        }.onFailure {
+                            message = "Android Settings could not be opened."
+                        }
+                    }
+                }) { Text("Open system settings") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeveloperOptionsWarning = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -163,6 +202,35 @@ fun OlaShizukuSetupScreen(onBack: () -> Unit) {
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Official Shizuku download & instructions") }
+                }
+            }
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("Developer Options • Ola compatibility",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold)
+                    Text(
+                        "Open Android's genuine Developer Options to turn them OFF or " +
+                            "restore them manually. This is not a hidden bypass."
+                    )
+                    Text(
+                        "Turning OFF may disconnect Wireless Debugging and Shizuku; " +
+                            "you may need to turn them ON and restart Shizuku before " +
+                            "SmartDrivo can use its Shizuku permission again."
+                    )
+                    Text("Shizuku now: " + if (serviceRunning) "Running" else "Not running")
+                    Button(
+                        onClick = { showDeveloperOptionsWarning = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Open Developer Options • OFF / Restore") }
+                    Text(
+                        "No automatic change, security-check spoofing, or ADB " +
+                            "state modification is performed.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
             }
             Card(modifier = Modifier.fillMaxWidth()) {
