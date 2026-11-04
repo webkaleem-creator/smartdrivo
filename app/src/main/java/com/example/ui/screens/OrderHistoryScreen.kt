@@ -132,7 +132,7 @@ fun OrderHistoryScreen(
         historyEntities.asSequence()
             .filter { it.detectedAt >= yesterdayStart && it.detectedAt < tomorrowStart }
             .sortedByDescending { it.detectedAt }
-            .map { it.toOrderHistoryItem() }.toList()
+            .map { HistoryPendingPresentation.forDisplay(it.toOrderHistoryItem()) }.toList()
     }
     val totalAccepted by viewModel.acceptedCount.collectAsStateWithLifecycle()
 
@@ -1038,7 +1038,7 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                         )
 
                 val statusLabel = when {
-                    effectiveStatus == OrderStatus.PROCESSING -> "PROCESSING"
+                    effectiveStatus == OrderStatus.PROCESSING -> "PENDING"
                     // Keep unresolved legacy rows truthful without the confusing
                     // user-facing label. Only real confirmation counts as ACCEPTED.
                     effectiveStatus == OrderStatus.UNCONFIRMED -> "ACCEPT SENT"
@@ -1513,18 +1513,10 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                             Spacer(modifier = Modifier.width(6.dp))
                             Column {
                                 Text(
-                                    text = "Processing Order",
+                                    text = HistoryPendingPresentation.LABEL,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFFE65100)
-                                )
-                                Spacer(modifier = Modifier.height(1.dp))
-                                Text(
-                                    text = item.decisionReasonText.ifBlank { item.reason.ifBlank { "Evaluating ride filters..." } },
-                                    fontSize = 11.sp,
-                                    lineHeight = 15.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = TextDarkPrimary
                                 )
                             }
                         }

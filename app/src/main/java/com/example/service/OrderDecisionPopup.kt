@@ -18,7 +18,8 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.example.model.OrderStatus
 import com.example.engine.OrderPopupStatusPolicy
-import java.util.concurrent.ConcurrentHashMap
+import com.example.engine.OrderPopupLifecycle
+import com.example.data.HistoryLatencyTrace
 
 /**
  * Short, non-interactive SmartDrivo decision banner.
@@ -34,8 +35,7 @@ object OrderDecisionPopup {
     private val mainHandler =
         Handler(Looper.getMainLooper())
 
-    private val recentKeys =
-        ConcurrentHashMap<String, Long>()
+    private val lifecycle = OrderPopupLifecycle()
 
     private var activeView: View? = null
     private var activeWindowManager: WindowManager? = null
@@ -44,37 +44,21 @@ object OrderDecisionPopup {
 
     fun pauseForBankingMode() {
         bankingPaused = true
-        latestOrderKey = ""
+        lifecycle.invalidate()
         mainHandler.post { removeActive() }
     }
 
     fun resumeAfterBanking() {
         bankingPaused = false
     }
-    // Accessed on the UI thread only. Preserve confirmed status over queued uncertainty.
-    private val shownStates = mutableMapOf<String, Pair<OrderStatus, Long>>()
-
-    // SHORT_POPUP_V7
-    @Volatile
-    private var latestOrderKey: String = ""
-
     fun onNewOrderDetected(recordKey: String) {
-        if (bankingPaused) return
-        val key = recordKey.trim()
-        if (key.isBlank() || key == latestOrderKey) return
-
-        latestOrderKey = key
-
-        // Async UI work only. Never block Rapido order processing.
-        mainHandler.post {
-            if (latestOrderKey == key) {
-                removeActive()
-            }
-        }
+        if (!bankingPaused) lifecycle.detect(recordKey.trim())
+        // Keep the existing window until the next persisted final decision can replace it in place.
     }
 
+    fun onHistoryResolved(provisional: String, persisted: String) { lifecycle.alias(provisional, persisted) }
+
     private const val DISPLAY_MS = 13_000L
-    private const val DEDUPE_MS = 5000L
 
     private data class Style(
         val label: String,
@@ -157,69 +141,24 @@ object OrderDecisionPopup {
         }
 
         val key = recordKey.trim()
-
-        // A previous order must never overwrite a newer popup.
-        if (
-            key.isNotBlank() &&
-            latestOrderKey.isNotBlank() &&
-            key != latestOrderKey
-        ) return
-
-        val safeKey = "$key:${status.name}"
-
-        val now =
-            System.currentTimeMillis()
-
-        val last =
-            recentKeys[safeKey]
-
-        if (
-            last != null &&
-            now - last < DEDUPE_MS
-        ) {
-            return
-        }
-
-        recentKeys[safeKey] = now
-
-        recentKeys.entries.removeIf {
-            now - it.value > 30_000L
-        }
-
-        val appContext =
-            context.applicationContext
-
+        val epoch = lifecycle.epoch()
+        val appContext = context.applicationContext
+        val finalReason = if (status == OrderStatus.UNCONFIRMED)
+            "${platform.replaceFirstChar { it.uppercase() }} confirmation not found. Check ${platform} trip screen."
+            else reason
+        val content = listOf(status, platform, fare, finalReason, pickupKm, tripKm, destination, tipAmount)
         mainHandler.post {
             if (bankingPaused) return@post
-            if (
-                key.isNotBlank() &&
-                latestOrderKey.isNotBlank() &&
-                key != latestOrderKey
-            ) return@post
-
-            // The repository may upgrade UNCONFIRMED -> ACCEPTED later.
-            // Pending callbacks must not downgrade an already-confirmed card.
-            val previous = shownStates[key]?.first
-            if (!OrderPopupStatusPolicy.mayReplace(previous, status)) return@post
-            if (key.isNotBlank()) {
-                val shownAt = System.currentTimeMillis()
-                shownStates[key] = status to shownAt
-                shownStates.entries.removeAll { shownAt - it.value.second > 120_000L }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(appContext)) return@post
+            val decision = lifecycle.publish(key, status, content, epoch)
+            if (decision != OrderPopupLifecycle.Result.PUBLISH) {
+                HistoryLatencyTrace.mark(key, platform.uppercase(java.util.Locale.ROOT), "popup_suppressed_${decision.name}")
+                return@post
             }
-
-            showOnMain(
-                context = appContext,
-                status = status,
-                platform = platform,
-                fare = fare,
-                reason = if (status == OrderStatus.UNCONFIRMED)
-                    "${platform.replaceFirstChar { it.uppercase() }} confirmation not found. Check ${platform} trip screen."
-                else reason,
-                pickupKm = pickupKm,
-                tripKm = tripKm,
-                destination = destination,
-                tipAmount = tipAmount
-            )
+            val updating = activeView != null
+            val rendered = showOnMain(appContext, status, platform, fare, finalReason, pickupKm, tripKm, destination, tipAmount)
+            HistoryLatencyTrace.mark(key, platform.uppercase(java.util.Locale.ROOT),
+                if (!rendered) "popup_render_failed" else if (updating) "popup_updated" else "popup_created")
         }
     }
 
@@ -233,23 +172,23 @@ object OrderDecisionPopup {
         tripKm: Float?,
         destination: String,
         tipAmount: Float?
-    ) {
-        if (bankingPaused) return
+    ): Boolean {
+        if (bankingPaused) return false
         if (
             Build.VERSION.SDK_INT >=
                 Build.VERSION_CODES.M &&
             !Settings.canDrawOverlays(context)
         ) {
-            return
+            return false
         }
 
-        removeActive()
-
+        dismissRunnable?.let(mainHandler::removeCallbacks)
+        dismissRunnable = null
         val wm =
             context.getSystemService(
                 Context.WINDOW_SERVICE
             ) as? WindowManager
-                ?: return
+                ?: return false
 
         val density =
             context.resources
@@ -271,7 +210,8 @@ object OrderDecisionPopup {
                 setColor(color)
             }
 
-        val root = LinearLayout(context).apply {
+        val root = ((activeView as? LinearLayout) ?: LinearLayout(context)).apply {
+            removeAllViews()
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(10), dp(12), dp(10))
             background = GradientDrawable().apply {
@@ -446,10 +386,8 @@ object OrderDecisionPopup {
             }
 
         try {
-            wm.addView(
-                root,
-                params
-            )
+            if (activeView === root) wm.updateViewLayout(root, params)
+            else wm.addView(root, params)
 
             activeView =
                 root
@@ -469,8 +407,10 @@ object OrderDecisionPopup {
                 runnable,
                 DISPLAY_MS
             )
+            return true
         } catch (_: Exception) {
             removeActive()
+            return false
         }
     }
 

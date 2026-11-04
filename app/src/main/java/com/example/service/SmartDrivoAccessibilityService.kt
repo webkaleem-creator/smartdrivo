@@ -67,6 +67,7 @@ class SmartDrivoAccessibilityService : AccessibilityService() {
     private val rideHistoryRepository by lazy { com.example.data.db.RideHistoryRepository.getInstance(applicationContext) }
     private val rapidoOffers = com.example.engine.RapidoVisibleOffer()
     private val rapidoDetectionLock = Any()
+    private val historyDetections = com.example.engine.HistoryDetectionRegistry()
     private val activeOrderRecordIds = java.util.Collections.synchronizedMap(mutableMapOf<com.example.model.Platform, String>())
     private val handler = Handler(Looper.getMainLooper())
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -1148,6 +1149,16 @@ private val processingTimeoutRunnable = Runnable {
             blocked -> "Pickup Shield: saved pickup word matched"
             else -> "Pickup Shield: no trusted pickup-only field; no automatic action"
         }
+        if (blocked && candidate.platform == Platform.RAPIDO) {
+            rapidoIgnoredVisibleOfferGuard.rememberIgnored(candidate, rapidoFilterContext(), ownerVeto = true)
+            val reserved = synchronized(shieldActionRecords) {
+                if (shieldActionRecords[candidate.platform] == recordId) false
+                else { shieldActionRecords[candidate.platform] = recordId; true }
+            }
+            if (reserved) serviceScope.launch { runPriorityRapidoShield(root, candidate, recordId) }
+            if (activeRapidoPopupOrderId == recordId) resetRapidoProcessing(recordId)
+            return true
+        }
         var attempted = false
         var acknowledged = false
         if (blocked && preferencesManager.isAutoAcceptEnabled && !bankingModeSuspended && apkIntegrityAllowed &&
@@ -1196,6 +1207,55 @@ private val processingTimeoutRunnable = Runnable {
         return true
     }
 
+    private val shieldActionRecords = java.util.concurrent.ConcurrentHashMap<Platform, String>()
+
+    private suspend fun runPriorityRapidoShield(root: AccessibilityNodeInfo, candidate: RideCandidate, recordId: String) {
+        val uid = prefs.userProfile.value.uid
+        var actionAttempted = false
+        try {
+            for (wait in listOf(0L, 150L, 350L)) {
+                if (wait > 0) delay(wait)
+                if (!preferencesManager.isAutoAcceptEnabled || bankingModeSuspended || !apkIntegrityAllowed ||
+                    !prefs.appSettings.value.rapidoEnabled || prefs.userProfile.value.uid != uid ||
+                    !prefs.adminPickupBlockSettings.value.enabled || !rapidoOffers.owns(recordId) ||
+                    shieldActionRecords[Platform.RAPIDO] != recordId ||
+                    !com.example.auth.PickupGuardOwnerAccess.authorized(prefs.userProfile.value)) {
+                    onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED, "ADMIN_PICKUP_CANCELLED",
+                        "Pickup Shield stopped before an action; offer not dismissed")
+                    return
+                }
+                val fresh = getRapidoOrderRootNode(if (wait == 0L) root else null) ?: continue
+                if (!fresh.refresh() || !adminPickupBlockSameOffer(fresh, candidate)) continue
+                if (adminPickupBlockDecision(fresh, candidate) !is com.example.engine.AdminPickupBlockPolicy.Decision.Blocked) {
+                    shieldActionRecords.remove(Platform.RAPIDO, recordId)
+                    dispatchRapidoRead(null, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, android.os.SystemClock.uptimeMillis())
+                    return
+                }
+                val node = findShieldRapidoReject(fresh) ?: continue
+                if (!node.refresh() || !node.isEnabled || !node.isClickable || !node.isVisibleToUser ||
+                    node.windowId != fresh.windowId || node.packageName?.toString() != fresh.packageName?.toString() ||
+                    !node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK } ||
+                    !rapidoOffers.isCurrent(recordId, candidate) ||
+                    adminPickupBlockDecision(fresh, candidate) !is com.example.engine.AdminPickupBlockPolicy.Decision.Blocked) continue
+                actionAttempted = true
+                onOrderActionAttemptFast(recordId)
+                shieldDiag("stage=reject_start window=${node.windowId}")
+                val acknowledged = runCatching { node.performAction(AccessibilityNodeInfo.ACTION_CLICK) }.getOrDefault(false)
+                shieldDiag("stage=reject_return ack=${if (acknowledged) 1 else 0}")
+                watchShieldDismissal(candidate, recordId, acknowledged)
+                return
+            }
+            onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED, "ADMIN_PICKUP_BLOCKED_NO_CONTROL",
+                "Blocked pickup protected from Accept; no identifiable Reject/Skip control. Offer not dismissed")
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) {
+            if (actionAttempted) onOrderActionCompletedFast(recordId, candidate, OrderStatus.UNCONFIRMED,
+                "ADMIN_PICKUP_ACTION_UNCONFIRMED", "Reject/Skip attempted; dismissal result unavailable", false)
+            else onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED, "ADMIN_PICKUP_CONTROL_UNAVAILABLE",
+                "Blocked pickup protected from Accept; control unavailable. Offer not dismissed")
+        }
+    }
+
     private fun findShieldRapidoReject(root: AccessibilityNodeInfo): AccessibilityNodeInfo? =
         com.example.engine.PickupShieldRejectReader.read(root, ::shieldDiag)
 
@@ -1207,16 +1267,42 @@ private val processingTimeoutRunnable = Runnable {
             if (acknowledged) for (poll in 0 until 8) {
                 delay(200L)
                 if (prefs.userProfile.value.uid != uid || !preferencesManager.isAutoAcceptEnabled) break
-                val liveRoot = getRapidoOrderRootNode() ?: continue // No root is not dismissal evidence.
-                if (!isRapidoPackage(liveRoot.packageName?.toString().orEmpty())) continue
-                val popup = RapidoAdapter.validateRapidoOrderPopup(liveRoot)
-                val live = if (popup.isValid) captureRapidoFastSnapshot(liveRoot, popup)?.candidate else null
-                val replaced = live != null && !com.example.engine.RapidoVisibleOffer.samePresentation(candidate, live)
-                val observed = watch.observe(!popup.isValid && RapidoAdapter.isRapidoHomeScreen(liveRoot),
-                    live?.let { com.example.engine.RapidoVisibleOffer.samePresentation(candidate, it) }, replaced)
+                val roots = linkedMapOf<Int, AccessibilityNodeInfo>()
+                var complete = true
+                fun add(node: AccessibilityNodeInfo?) {
+                    if (node == null || node.packageName?.toString() !in RapidoAdapter.RAPIDO_PACKAGES) return
+                    if (node.windowId < 0 || !node.isVisibleToUser) { complete = false; return }
+                    roots[node.windowId] = node
+                }
+                add(rootInActiveWindow)
+                try {
+                    val snapshot = windows
+                    if (snapshot.isEmpty() || snapshot.size > 12) complete = false
+                    snapshot.take(12).forEach { window ->
+                        val tree = window.root
+                        if (tree == null && window.type == AccessibilityWindowInfo.TYPE_APPLICATION) complete = false
+                        add(tree)
+                    }
+                } catch (_: Exception) { complete = false }
+                var home = false; var sameVisible = false; var controlVisible = false
+                var replacement: RideCandidate? = null
+                for (liveRoot in roots.values) {
+                    if (!liveRoot.refresh()) { complete = false; continue }
+                    val popup = RapidoAdapter.validateRapidoOrderPopup(liveRoot)
+                    val live = if (popup.isValid) captureRapidoFastSnapshot(liveRoot, popup)?.candidate else null
+                    if (live != null) {
+                        controlVisible = true
+                        if (com.example.engine.RapidoVisibleOffer.samePresentation(candidate, live)) sameVisible = true
+                        else replacement = live
+                    }
+                    if (findStrictRapidoAcceptNode(liveRoot) != null) controlVisible = true
+                    if (!popup.isValid && RapidoAdapter.isRapidoHomeScreen(liveRoot)) home = true
+                }
+                val observed = watch.observe(home, if (sameVisible) true else null,
+                    replacement != null && !sameVisible, otherOfferVisible = controlVisible, windowsComplete = complete)
                 if (observed == com.example.engine.PickupShieldEvidence.Dismissal.REPLACED) {
-                    if (com.example.engine.AutoPriorityHistoryGate.hasUsableHistory(live!!)) {
-                        detectRapidoOffer(live, android.os.SystemClock.uptimeMillis())
+                    replacement?.takeIf { com.example.engine.AutoPriorityHistoryGate.hasUsableHistory(it) }?.let {
+                        detectRapidoOffer(it, android.os.SystemClock.uptimeMillis())
                         dispatchRapidoRead(null, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, android.os.SystemClock.uptimeMillis())
                     }
                     state = observed; break
@@ -2481,27 +2567,22 @@ private val processingTimeoutRunnable = Runnable {
             baseFare = orderData.baseFare.takeIf { it > 0f },
             tipAmount = orderData.tipAmount.takeIf { it > 0f }
         )
-        val prioritySession = if (com.example.engine.AutoPriorityHistoryGate.hasUsableHistory(filteredCandidate))
+        val prioritySession = if (com.example.engine.AutoPriorityHistoryGate.hasUsableHistory(filteredCandidate) ||
+            (prefs.adminPickupBlockSettings.value.enabled && filteredCandidate.fare?.let { it.isFinite() && it > 0f } == true &&
+                com.example.engine.RapidoDistanceValidity.isValidPickup(filteredCandidate.pickupDistKm)))
             detectRapidoOffer(filteredCandidate, android.os.SystemClock.uptimeMillis()) else null
-        if (prioritySession != null && (prioritySession.attempted || rapidoAutoPriorityFastBusy ||
-                now - rapidoAutoPriorityLastClickAt < 450L)) {
-            rapidoNeedsRecovery = true
-            return true
-        }
+        if (prioritySession?.attempted == true) return true
         if (prefs.adminPickupBlockSettings.value.enabled) {
             val veto = adminPickupBlockDecision(filterRoot, filteredCandidate)
             if (veto !is com.example.engine.AdminPickupBlockPolicy.Decision.Allow) {
-                // Never create a blank/provisional priority History card.
-                if (filteredCandidate.fare?.let { it > 0f } != true ||
-                    filteredCandidate.pickupDistKm == null ||
-                    filteredCandidate.dropDistKm?.let { it > 0f } != true ||
-                    filteredCandidate.dropAddress.isNullOrBlank() ||
-                    filteredCandidate.dropAddress == "Address unavailable") return true
-                if (rapidoIgnoredVisibleOfferGuard.isDuplicateIgnored(filteredCandidate)) return true
                 val vetoId = prioritySession?.id ?: return true
                 handleAdminPickupBlock(filterRoot, filteredCandidate, vetoId)
                 return true
             }
+        }
+        if (rapidoAutoPriorityFastBusy || now - rapidoAutoPriorityLastClickAt < 450L) {
+            rapidoNeedsRecovery = true
+            return true
         }
         val priorityDecision = com.example.engine.RapidoAutoPriorityFilterEngine.evaluate(
             candidate = filteredCandidate,
@@ -2583,13 +2664,6 @@ private val processingTimeoutRunnable = Runnable {
         if (prefs.adminPickupBlockSettings.value.enabled) {
             val veto = adminPickupBlockDecision(filterRoot, filteredCandidate)
             if (veto !is com.example.engine.AdminPickupBlockPolicy.Decision.Allow) {
-                // Never create a blank/provisional priority History card.
-                if (filteredCandidate.fare?.let { it > 0f } != true ||
-                    filteredCandidate.pickupDistKm == null ||
-                    filteredCandidate.dropDistKm?.let { it > 0f } != true ||
-                    filteredCandidate.dropAddress.isNullOrBlank() ||
-                    filteredCandidate.dropAddress == "Address unavailable") return true
-                if (rapidoIgnoredVisibleOfferGuard.isDuplicateIgnored(filteredCandidate)) return true
                 val vetoId = prioritySession?.id ?: return true
                 handleAdminPickupBlock(filterRoot, filteredCandidate, vetoId)
                 return true
@@ -8536,6 +8610,13 @@ private val processingTimeoutRunnable = Runnable {
                 "fare=${candidate.fare}, pickup=${candidate.pickupDistKm}, " +
                 "trip=${candidate.dropDistKm}"
         )
+        var shieldSession: com.example.engine.RapidoVisibleOffer.Session? = null
+        val shieldEnabled = prefs.adminPickupBlockSettings.value.enabled
+        if (shieldEnabled && preferencesManager.isAutoAcceptEnabled) {
+            shieldSession = detectRapidoOffer(candidate, eventUptimeMs) ?: return
+            if (shieldSession.attempted) return
+            if (handleAdminPickupBlock(root, candidate, shieldSession.id)) return
+        }
         // RAPIDO_COMPLETE_HISTORY_V4
         // Wait for the complete card before inserting History.
         // This prevents Trip:N/A + a second full row for the same offer.
@@ -8560,7 +8641,7 @@ private val processingTimeoutRunnable = Runnable {
         }
         rapidoMiss("VALID_OFFER")
         val bookingId = candidate.bookingId
-        val detected = detectRapidoOffer(candidate, eventUptimeMs) ?: return
+        val detected = shieldSession ?: detectRapidoOffer(candidate, eventUptimeMs) ?: return
         val orderId = detected.id
         val detectedRecordId = detected.id
         if (detected.attempted) {
@@ -8629,7 +8710,7 @@ private val processingTimeoutRunnable = Runnable {
         Log.i(TAG, "⚡ Rapido order detected & inserted to Room [PROCESSING]: Fare=₹${candidate.fare}, pickup=${candidate.pickupAddress}")
 
         rapidoMiss("HISTORY_QUEUED")
-        if (handleAdminPickupBlock(root, candidate, recordId)) return
+        if (!shieldEnabled && handleAdminPickupBlock(root, candidate, recordId)) return
         if (handleOwnerPickupGuard(root, candidate, recordId)) return
 
         // Auto-Accept and Auto-Reject are independent.
@@ -11271,6 +11352,11 @@ private val processingTimeoutRunnable = Runnable {
         }
     }
 
+    private fun persistedPopupCandidate(candidate: RideCandidate,
+        row: com.example.data.db.entity.RideHistoryEntity): RideCandidate = candidate.copy(
+        fare = row.fare, pickupDistKm = row.pickupDistanceKm, dropDistKm = row.dropDistanceKm,
+        dropAddress = row.dropAddress, dropArea = row.dropArea, baseFare = row.baseFare, tipAmount = row.tipAmount)
+
     private fun showOrderReasonPopupIfEnabled(
         recordKey: String,
         candidate: RideCandidate,
@@ -11329,6 +11415,7 @@ private val processingTimeoutRunnable = Runnable {
             val observed = rapidoOffers.observe(candidate)
             val current = observed.session
             com.example.data.HistoryLatencyTrace.mark(current.id, "RAPIDO", "parsed", eventUptime)
+            historyDetections.remember(candidate, current.id)
             if (observed.created) {
                 // Ignore/filter memory belongs to the previous presentation only.
                 rapidoIgnoredVisibleOfferGuard.clear()
@@ -11350,7 +11437,7 @@ private val processingTimeoutRunnable = Runnable {
     }
 
     private fun onOrderDetectedFast(candidate: RideCandidate, olaRecordId: String? = null,
-        rapidoRecordId: String? = null): String {
+        rapidoRecordId: String? = null, announcePopup: Boolean = true): String {
         // MASTER OFF: do not create new history records.
         if (!preferencesManager.isAutoAcceptEnabled) {
             return candidate.bookingId?.ifBlank { null } ?: "PAUSED"
@@ -11359,32 +11446,37 @@ private val processingTimeoutRunnable = Runnable {
         val tempId = rapidoRecordId ?: olaRecordId ?: com.example.data.db.HistoryRecordIdentity.id(candidate)
         com.example.data.HistoryLatencyTrace.mark(tempId, candidate.platform.name, "enqueue")
         val queuedAt = android.os.SystemClock.elapsedRealtime()
-        activeOrderRecordIds[candidate.platform] = tempId
+        historyDetections.remember(candidate, tempId, announcePopup)
+        if (announcePopup) activeOrderRecordIds[candidate.platform] = tempId
 
         val insert = historyInserts.begin(tempId) ?: return tempId
         val isOla = candidate.platform == Platform.OLA
 
         // SHORT_POPUP_V7: new valid order supersedes old banner.
         // No database or network work on the click-critical path.
-        if (prefs.appSettings.value.showOrderReasonPopups) {
+        if (announcePopup && prefs.appSettings.value.showOrderReasonPopups) {
             OrderDecisionPopup.onNewOrderDetected(tempId)
         }
 
         val insertJob = serviceScope.launch(Dispatchers.IO) {
             var inserted = false
             try {
-                val entity = rideHistoryRepository.onOrderDetected(
+                val entity = com.example.engine.HistoryInsertRetry.run(
+                    retryable = { it is android.database.sqlite.SQLiteException },
+                    onRetry = { com.example.data.HistoryLatencyTrace.mark(tempId, candidate.platform.name, "insert_retry_$it") }
+                ) { rideHistoryRepository.onOrderDetected(
                     candidate = candidate,
                     initialReasonCode = "PROCESSING",
-                    initialReasonText = "Evaluating ride filters...",
+                    initialReasonText = "",
                     olaRecordId = olaRecordId,
                     rapidoRecordId = rapidoRecordId
-                )
+                ) }
                 // HISTORY_ACTIVE_ID_RACE_V2
                 // A slower previous coroutine must not steal the active ID
                 // from a newer detection.
                 activeOrderRecordIds.replace(candidate.platform, tempId, entity.id)
                 com.example.data.HistoryLatencyTrace.alias(tempId, entity.id)
+                OrderDecisionPopup.onHistoryResolved(tempId, entity.id)
                 com.example.data.HistoryLatencyTrace.mark(entity.id, candidate.platform.name, "insert")
 
                 inserted = true
@@ -11480,10 +11572,10 @@ private val processingTimeoutRunnable = Runnable {
                 // Never show its obsolete REJECTED/IGNORED banner.
                 if (finalUpdated.status == status.name) {
                     showOrderReasonPopupIfEnabled(
-                        recordKey = recordId,
-                        candidate = candidate,
+                        recordKey = finalUpdated.id,
+                        candidate = persistedPopupCandidate(candidate, finalUpdated),
                         status = status,
-                        reasonText = reasonText
+                        reasonText = finalUpdated.decisionReasonText
                     )
                 }
                 com.example.data.HistoryLatencyTrace.mark(finalUpdated.id, candidate.platform.name, "decision_${finalUpdated.status}")
@@ -11584,10 +11676,10 @@ private val processingTimeoutRunnable = Runnable {
                 if (finalUpdated != null) {
                     if (finalUpdated.status == status.name) {
                         showOrderReasonPopupIfEnabled(
-                            recordKey = recordId,
-                            candidate = candidate,
+                            recordKey = finalUpdated.id,
+                            candidate = persistedPopupCandidate(candidate, finalUpdated),
                             status = status,
-                            reasonText = reasonText
+                            reasonText = finalUpdated.decisionReasonText
                         )
                     }
                     com.example.data.HistoryLatencyTrace.mark(finalUpdated.id, candidate.platform.name, "final_${finalUpdated.status}")
@@ -11628,9 +11720,8 @@ private val processingTimeoutRunnable = Runnable {
         timesClicked: Int = 1
     ) {
         // MASTER OFF: legacy history logger disabled.
-        if (!preferencesManager.isAutoAcceptEnabled) {
-            return
-        }
+        val knownRecord = historyDetections.find(candidate)
+        if (!preferencesManager.isAutoAcceptEnabled && knownRecord == null) return
         val now = System.currentTimeMillis()
         val effectiveReason = when (status) {
             OrderStatus.ACCEPTED -> {
@@ -11657,63 +11748,18 @@ private val processingTimeoutRunnable = Runnable {
         }
 
         val reasonCode = mapReasonToCode(status, effectiveReason)
-        val activeId = activeOrderRecordIds[candidate.platform]
-
-        // ORDER_REASON_POPUP_LEGACY_V1
-        showOrderReasonPopupIfEnabled(
-            recordKey =
-                activeId
-                    ?: getOrderIdentifier(candidate),
-            candidate = candidate,
-            status = status,
-            reasonText = effectiveReason
-        )
-
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                // If record was already created on detection, update it. Otherwise create then update.
-                val record = if (activeId != null) {
-                    rideHistoryRepository.getById(activeId) ?: rideHistoryRepository.onOrderDetected(candidate, "PROCESSING", "Evaluating...")
-                } else {
-                    rideHistoryRepository.onOrderDetected(candidate, "PROCESSING", "Evaluating...")
-                }
-
-                if (status == OrderStatus.ACCEPTED) {
-                    rideHistoryRepository.onOrderDecision(record.id, OrderStatus.ACCEPTED, reasonCode, effectiveReason)
-                    rideHistoryRepository.onOrderActionAttempt(record.id)
-                    val completed = rideHistoryRepository.onOrderActionCompleted(
-                        id = record.id,
-                        status = OrderStatus.ACCEPTED,
-                        reasonCode = reasonCode,
-                        reasonText = effectiveReason,
-                        actionSucceeded = true,
-                        timesClicked = timesClicked
-                    )
-                    if (completed != null) {
-                        repository.recordOrderHistory(completed.toOrderHistoryItem())
-                    }
-                    val platformName = if (candidate.platform == Platform.RAPIDO) "Rapido" else candidate.platform.displayName
-                    prefs.saveAcceptedOrder(
-                        platform = platformName,
-                        timestamp = now,
-                        fareAmount = candidate.fare ?: 0f
-                    )
-                } else {
-                    val updated = rideHistoryRepository.onOrderDecision(
-                        id = record.id,
-                        status = status,
-                        reasonCode = reasonCode,
-                        reasonText = effectiveReason
-                    )
-                    if (updated != null) {
-                        repository.recordOrderHistory(updated.toOrderHistoryItem())
-                    }
-                }
-                prefs.notifyOrderHistoryChanged()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error logging order event", e)
-            }
+        if (knownRecord == null && candidate.platform == Platform.RAPIDO &&
+            !com.example.engine.AutoPriorityHistoryGate.hasUsableHistory(candidate)) {
+            rapidoMiss("LEGACY_HISTORY_INCOMPLETE")
+            return
         }
+        val recordId = knownRecord ?: onOrderDetectedFast(candidate,
+            announcePopup = historyDetections.mayAnnounce(candidate))
+        com.example.data.HistoryLatencyTrace.mark(recordId, candidate.platform.name, "legacy_final_queued")
+        if (status == OrderStatus.ACCEPTED) {
+            onOrderActionAttemptFast(recordId)
+            onOrderActionCompletedFast(recordId, candidate, status, reasonCode, effectiveReason, true, timesClicked)
+        } else onOrderDecisionFast(recordId, candidate, status, reasonCode, effectiveReason)
     }
 
     private fun collectAllNodeText(node: AccessibilityNodeInfo?, outList: MutableList<String>, skipPickupAddressNodes: Boolean = false) {

@@ -45,10 +45,16 @@ class RapidoVisibleOffer {
 
     companion object {
         private fun clean(s: String?) = s.orEmpty().trim().lowercase(Locale.ROOT).replace(Regex("\\s+"), " ")
-        fun bookingId(text: String): String? = Regex(
-            """\b(?:CRN|booking\s*(?:id|number|no\.?)|order\s*(?:id|number|no\.?)|ID)\s*[:#-]?\s*([A-Z0-9-]{3,32})\b""",
-            RegexOption.IGNORE_CASE).findAll(text).map { it.groupValues[1] }
-            .firstOrNull { value -> value.any(Char::isDigit) }
+        fun bookingId(text: String): String? {
+            val labelled = Regex(
+                """\b(?:CRN|booking\s*(?:id|number|no\.?)|order\s*(?:id|number|no\.?))\s*[:#-]?\s*([A-Z0-9-]{3,32})\b""",
+                RegexOption.IGNORE_CASE).findAll(text).map { it.groupValues[1] }
+                .firstOrNull { value -> value.any(Char::isDigit) }
+            if (labelled != null) return labelled
+            // A standalone ID field is supported; Driver/Customer/Vehicle ID prose is not booking evidence.
+            return Regex("""^ID\s*[:#-]?\s*([A-Z0-9-]{3,32})$""", RegexOption.IGNORE_CASE)
+                .matchEntire(text.trim())?.groupValues?.get(1)?.takeIf { it.any(Char::isDigit) }
+        }
         fun samePresentation(a: RideCandidate, b: RideCandidate): Boolean {
             if (a.platform != Platform.RAPIDO || b.platform != Platform.RAPIDO) return false
             val x = a.bookingId?.takeIf { it.isNotBlank() }; val y = b.bookingId?.takeIf { it.isNotBlank() }

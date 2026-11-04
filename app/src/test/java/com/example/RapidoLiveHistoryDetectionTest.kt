@@ -21,6 +21,15 @@ import org.robolectric.annotation.Config
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import android.database.sqlite.SQLiteException
+import android.os.Looper
+import com.example.data.db.dao.RideHistoryDao
+import com.example.service.OrderDecisionPopup
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowSettings
+import java.lang.reflect.Proxy
+import java.lang.reflect.InvocationTargetException
+import java.util.concurrent.atomic.AtomicInteger
 
 /** Exercises the production handler/queues with already-validated synthetic offer snapshots, not phone UI. */
 @RunWith(RobolectricTestRunner::class)
@@ -49,7 +58,8 @@ class RapidoLiveHistoryDetectionTest {
             isAutoRejectBadFaresEnabled = false))
         prefs.saveUserProfile(UserProfile(uid = "synthetic-driver", isApproved = true,
             planExpireMillis = System.currentTimeMillis()+86_400_000L))
-        service = Robolectric.buildService(SmartDrivoAccessibilityService::class.java).get()
+        service = Robolectric.buildService(SmartDrivoAccessibilityService::class.java).create().get()
+        OrderDecisionPopup.pauseForBankingMode(); shadowOf(Looper.getMainLooper()).idle(); OrderDecisionPopup.resumeAfterBanking()
         set("prefs",prefs); set("rideHistoryRepository\$delegate",lazyOf(history))
         val remote = FirebaseRepository(context,prefs)
         // Explicitly disconnect all remote handles; these tests must never write production data.
@@ -61,6 +71,7 @@ class RapidoLiveHistoryDetectionTest {
     @After fun close() {
         val field = SmartDrivoAccessibilityService::class.java.getDeclaredField("serviceScope").apply { isAccessible = true }
         (field.get(service) as CoroutineScope).cancel()
+        OrderDecisionPopup.pauseForBankingMode(); shadowOf(Looper.getMainLooper()).idle(); OrderDecisionPopup.resumeAfterBanking()
         io.close(); db.close(); prefs.saveAppSettings(oldSettings); prefs.saveUserProfile(oldProfile)
     }
     private fun detect(index: Int, same: Boolean = false) {
@@ -74,6 +85,76 @@ class RapidoLiveHistoryDetectionTest {
     }
     private fun end() = SmartDrivoAccessibilityService::class.java.getDeclaredMethod("endRapidoPresentation",String::class.java)
         .apply { isAccessible = true }.invoke(service,"TEST_OFFER_DISAPPEARED")
+
+    private fun legacy(candidate:RideCandidate, reason:String) = SmartDrivoAccessibilityService::class.java.getDeclaredMethod(
+        "logOrderEvent",RideCandidate::class.java,OrderStatus::class.java,String::class.java,java.lang.Long.TYPE,java.lang.Integer.TYPE
+    ).apply { isAccessible=true }.invoke(service,candidate,OrderStatus.IGNORED,reason,System.currentTimeMillis(),0)
+    private fun register(candidate:RideCandidate):RapidoVisibleOffer.Session = SmartDrivoAccessibilityService::class.java.getDeclaredMethod(
+        "detectRapidoOffer",RideCandidate::class.java,java.lang.Long.TYPE).apply { isAccessible=true }
+        .invoke(service,candidate,1L) as RapidoVisibleOffer.Session
+    private fun synthetic(index:Int)=RideCandidate(45f,.9f,2.2f,"Address unavailable","Synthetic legacy $index","Area",
+        Platform.RAPIDO,VehicleType.AUTO,detectionTimeMs=System.currentTimeMillis())
+    private fun activePopup() = OrderDecisionPopup::class.java.getDeclaredField("activeView").apply { isAccessible=true }.get(null)
+    private fun failInserts(failCount:Int):AtomicInteger {
+        val calls=AtomicInteger(); val real=db.rideHistoryDao()
+        val proxy=Proxy.newProxyInstance(RideHistoryDao::class.java.classLoader,arrayOf(RideHistoryDao::class.java)) { _,method,args ->
+            if(method.name=="insert" && calls.incrementAndGet()<=failCount) throw SQLiteException("Synthetic failure")
+            try { method.invoke(real,*(args?:emptyArray())) } catch(error:InvocationTargetException) { throw error.cause!! }
+        } as RideHistoryDao
+        history=RideHistoryRepository(proxy,io); set("rideHistoryRepository\$delegate",lazyOf(history))
+        return calls
+    }
+    @Test fun legacyFinalWaitsThroughTransientInsertFailureAndPublishesOnlyPersistedRow() = runBlocking {
+        ShadowSettings.setCanDrawOverlays(true)
+        prefs.saveAppSettings(prefs.appSettings.value.copy(showOrderReasonPopups=true))
+        val calls=failInserts(1); val candidate=synthetic(1)
+        register(candidate); legacy(candidate,"Persisted synthetic decision")
+        withTimeout(5000) { while(calls.get()==0) yield() }
+        shadowOf(Looper.getMainLooper()).idle(); assertNull(activePopup())
+        val rows=withTimeout(5000) { history.allHistory.first { it.size==1 && it.single().status==OrderStatus.IGNORED.name } }
+        withTimeout(5000) { while(activePopup()==null) { shadowOf(Looper.getMainLooper()).idle(); yield() } }
+        assertEquals("Persisted synthetic decision",rows.single().decisionReasonText)
+        assertEquals(2,calls.get())
+    }
+    @Test fun permanentInsertFailureNeverShowsLegacyDecisionPopupOrInventsARow() = runBlocking {
+        ShadowSettings.setCanDrawOverlays(true)
+        prefs.saveAppSettings(prefs.appSettings.value.copy(showOrderReasonPopups=true))
+        val calls=failInserts(Int.MAX_VALUE); val candidate=synthetic(1)
+        val session=register(candidate); legacy(candidate,"Must never display")
+        val gate=SmartDrivoAccessibilityService::class.java.getDeclaredField("historyInserts").apply { isAccessible=true }.get(service) as HistoryInsertGate
+        assertFalse(withTimeout(5000) { gate.await(session.id) })
+        shadowOf(Looper.getMainLooper()).idle()
+        assertNull(activePopup()); assertEquals(3,calls.get()); assertTrue(db.rideHistoryDao().getAllHistoryList().isEmpty())
+    }
+    @Test fun legacyCallbackUpdatesOriginalSnapshotInsteadOfNewPlatformActiveRecord() = runBlocking {
+        val first=synthetic(1); val old=register(first)
+        val second=synthetic(2); val fresh=register(second)
+        legacy(first,"Old snapshot final")
+        val rows=withTimeout(5000) { history.allHistory.first { list -> list.size==2 &&
+            list.any { it.id==old.id && it.decisionReasonText=="Old snapshot final" } } }
+        assertEquals(OrderStatus.PROCESSING.name,rows.single { it.id==fresh.id }.status)
+        end()
+        withTimeout(5000) { history.allHistory.first { it.none { row -> row.status==OrderStatus.PROCESSING.name } } }
+        Unit
+    }
+    @Test fun shieldRunsBeforeTripCompletionProcessingAndPickupGuardWithoutAcceptingUnreadableInput() = runBlocking {
+        val state=PreferencesManager::class.java.getDeclaredField("_adminPickupBlockSettings").apply { isAccessible=true }
+            .get(prefs) as kotlinx.coroutines.flow.MutableStateFlow<AdminPickupBlockSettings>
+        val previous=state.value
+        val guardState=PreferencesManager::class.java.getDeclaredField("_pickupGuardSettings").apply { isAccessible=true }
+            .get(prefs) as kotlinx.coroutines.flow.MutableStateFlow<PickupGuardSettings>
+        val previousGuard=guardState.value
+        try {
+            state.value=AdminPickupBlockSettings(true,listOf("tadbun"))
+            guardState.value=previousGuard.copy(enabled=true)
+            val root=AccessibilityNodeInfo.obtain().apply { packageName="com.rapido.passenger";isVisibleToUser=true }
+            val partial=RapidoOrderData(totalFare=45f,baseFare=45f,pickupKm=.9f,dropKm=null,dropAddress="Synthetic drop")
+            handler.invoke(service,root,RapidoPopupValidation(true,fare=45f,pickupDistKm=.9f,orderData=partial),1L)
+            val row=withTimeout(5000) { history.allHistory.first { it.size==1 && it.single().status==OrderStatus.IGNORED.name } }.single()
+            assertEquals("ADMIN_PICKUP_OWNER_UNAVAILABLE",row.decisionReasonCode)
+            assertEquals(0,row.timesClicked)
+        } finally { state.value=previous; guardState.value=previousGuard }
+    }
 
     @Test fun tenRapidOffersSurviveProcessingLockAndDelayedInsertWithoutBlockingCaller() = runBlocking {
         val entered = CountDownLatch(1); val release = CountDownLatch(1)

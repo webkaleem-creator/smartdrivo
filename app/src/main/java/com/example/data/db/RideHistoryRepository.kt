@@ -352,6 +352,9 @@ class RideHistoryRepository(
             val existing = resolveActionRecord(id) ?: return@withContext null
             // A late filter decision must not overwrite a completed action.
             if (existing.actionCompletedAt > 0L) return@withContext existing
+            if (existing.status == status.name && existing.decisionReasonCode == reasonCode &&
+                existing.decisionReasonText == reasonText && existing.matchedGoToGroup == matchedGoTo &&
+                existing.matchedNoGoGroup == matchedNoGo) return@withContext existing
             val now = System.currentTimeMillis()
             val decisionLatency = (now - existing.detectedAt).coerceAtLeast(0L)
             val totalProcessing = if (status != OrderStatus.ACCEPTED) decisionLatency else existing.totalProcessingMs

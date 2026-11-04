@@ -23,7 +23,8 @@ object AdminPickupAddressReader {
             val id = node.viewIdResourceName
             val text = if (safe) node.text?.toString()?.trim() else null
             val desc = if (safe) node.contentDescription?.toString()?.trim() else null
-            fields += PickupShieldEvidence.Field(ownKey, parentKey, text, desc, id, safe)
+            fields += PickupShieldEvidence.Field(ownKey, parentKey, text, desc, id, safe,
+                node.isClickable || node.isEditable, node.className?.toString())
             if (!safe) continue
             PickupOnlyLabel.fromField(text, id)?.let { return it }
             PickupOnlyLabel.fromField(desc, id)?.let { return it }
@@ -38,6 +39,7 @@ object AdminPickupAddressReader {
             diagnostics?.invoke("stage=pickup_structure reason=NO_TRUSTED_PICKUP nodes=${fields.size} " +
                 "labels=${fields.count { PickupOnlyLabel.isLabel(it.text) || PickupOnlyLabel.isLabel(it.description) }} " +
                 "untrusted=${fields.count { !it.trusted }} ids=${ids.joinToString(",")}")
+            diagnostics?.invoke("stage=pickup_shape tree=${PickupShieldEvidence.structure(fields)}")
         }
         return value
     }

@@ -12,6 +12,8 @@ object PickupGuardOwnerAccess {
     private val lease = OwnerClaimLease()
 
     fun authorized(profile: UserProfile): Boolean {
+        if (!profile.isAdmin || !profile.isActive || profile.isBlocked ||
+            profile.isDeviceBlacklisted || profile.uid.isBlank()) return false
         val current = FirebaseAuth.getInstance().currentUser?.uid
         val now = System.currentTimeMillis()
         return profile.isAdmin && profile.isActive && !profile.isBlocked &&

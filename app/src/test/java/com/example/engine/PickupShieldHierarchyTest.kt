@@ -38,6 +38,14 @@ class PickupShieldHierarchyTest {
         assertNull(AdminPickupAddressReader.read(root, Platform.RAPIDO, logs::add))
         assertTrue(logs.isNotEmpty()); assertFalse(logs.joinToString().contains("PRIVATE_ADDRESS_SENTINEL"))
     }
+    @Test fun nestedReadOnlyPickupValueIsSupportedButCamelCaseDropIdIsNotPickupEvidence() {
+        val root=node(rect=Rect(0,0,1080,2200)); val section=node(); val nested=node()
+        add(root,section); add(section,node("Pickup")); add(section,nested)
+        val address=node("TadBun Falaknuma","$pkg:id/address"); add(nested,address)
+        assertEquals("TadBun Falaknuma",AdminPickupAddressReader.read(root,Platform.RAPIDO))
+        address.viewIdResourceName="$pkg:id/tvDropAddress"
+        assertNull(AdminPickupAddressReader.read(root,Platform.RAPIDO))
+    }
     @Test fun strictRejectRequiresActualSemanticEvidenceAndNeverSubstitutesParent() {
         val root = node(rect = Rect(0,0,1080,2200))
         val minus = node("−", click = true); add(root,minus)

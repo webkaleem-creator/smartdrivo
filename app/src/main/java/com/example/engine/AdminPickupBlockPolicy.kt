@@ -111,7 +111,8 @@ object PickupOnlyLabel {
         if (isLabel(clean) || lower.startsWith("drop:") ||
             lower.startsWith("destination:")) return false
         if (lower in setOf("pickup", "pick up", "drop", "drop location", "destination",
-                "accept", "decline", "address unavailable")) return false
+                "accept", "decline", "reject", "skip", "pass", "navigate", "directions",
+                "view", "view details", "go to", "nearby", "services", "address unavailable")) return false
         // Mixed pickup/drop text must never be mistaken for a pickup-only field.
         if (Regex("""(?:^|\s)(?:drop|destination)(?:\s+(?:address|location|area|landmark))?\s*[:：\-]""", RegexOption.IGNORE_CASE).containsMatchIn(clean)) return false
         return true

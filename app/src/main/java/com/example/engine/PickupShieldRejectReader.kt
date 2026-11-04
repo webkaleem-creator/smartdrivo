@@ -16,7 +16,17 @@ object PickupShieldRejectReader {
             if (node.packageName?.toString() != root.packageName?.toString() ||
                 node.windowId != root.windowId || !node.isVisibleToUser) continue
             val text = node.text?.toString(); val description = node.contentDescription?.toString()
-            if (text?.trim() in setOf("-", "−", "–", "—")) ambiguous++
+            if (text?.trim() in setOf("-", "−", "–", "—")) {
+                ambiguous++
+                if (ambiguous <= 3) {
+                    val bounds = Rect(); node.getBoundsInScreen(bounds)
+                    val id = node.viewIdResourceName?.substringAfterLast('/')
+                        ?.takeIf { it.matches(Regex("[A-Za-z_]{1,64}")) } ?: "?"
+                    diagnostic("stage=reject_ambiguous window=${node.windowId} id=$id enabled=${node.isEnabled} " +
+                        "clickable=${node.isClickable} action=${node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }} " +
+                        "x=${bounds.left} y=${bounds.top} width=${bounds.width()} height=${bounds.height()}")
+                }
+            }
             if (PickupShieldEvidence.rejectLabel(text, description, node.viewIdResourceName) &&
                 node.isEnabled && node.isClickable && node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }) {
                 val bounds = Rect(); node.getBoundsInScreen(bounds)
