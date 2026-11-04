@@ -1037,7 +1037,7 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                         )
 
                 val statusLabel = when {
-                    effectiveStatus == OrderStatus.PROCESSING -> "PROCESSING"
+                    effectiveStatus == OrderStatus.PROCESSING -> "PENDING"
                     // Keep unresolved legacy rows truthful without the confusing
                     // user-facing label. Only real confirmation counts as ACCEPTED.
                     effectiveStatus == OrderStatus.UNCONFIRMED -> "ACCEPT SENT"
@@ -1497,37 +1497,10 @@ private fun HistoryCard(item: OrderHistoryItem, appSettings: AppSettings) {
                     }
                 }
                 OrderStatus.PROCESSING -> {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFFFFF9C4), RoundedCornerShape(10.dp))
-                            .border(BorderStroke(1.dp, Color(0xFFFBC02D).copy(alpha = 0.6f)), RoundedCornerShape(10.dp))
-                            .padding(horizontal = 6.dp, vertical = 4.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("⏳", fontSize = 13.sp)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Column {
-                                Text(
-                                    text = "Processing Order",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFE65100)
-                                )
-                                Spacer(modifier = Modifier.height(1.dp))
-                                Text(
-                                    text = item.decisionReasonText.ifBlank { item.reason.ifBlank { "Evaluating ride filters..." } },
-                                    fontSize = 11.sp,
-                                    lineHeight = 15.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = TextDarkPrimary
-                                )
-                            }
-                        }
-                    }
+                    // Keep this genuine pending row in All History, but do not
+                    // flash a temporary evaluation explanation before the real
+                    // Pickup Guard / filter decision is persisted. The PENDING
+                    // status badge above already communicates the truthful state.
                 }
                 OrderStatus.FAILED -> {
                     Box(
