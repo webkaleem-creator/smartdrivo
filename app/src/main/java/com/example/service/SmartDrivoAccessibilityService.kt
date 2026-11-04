@@ -1234,9 +1234,7 @@ private val processingTimeoutRunnable = Runnable {
                     return
                 }
                 val node = findShieldRapidoReject(fresh) ?: continue
-                if (!node.refresh() || !node.isEnabled || !node.isClickable || !node.isVisibleToUser ||
-                    node.windowId != fresh.windowId || node.packageName?.toString() != fresh.packageName?.toString() ||
-                    !node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK } ||
+                if (!node.refresh() || !com.example.engine.PickupShieldRejectReader.isSafeTarget(fresh, node) ||
                     !rapidoOffers.isCurrent(recordId, candidate) ||
                     adminPickupBlockDecision(fresh, candidate) !is com.example.engine.AdminPickupBlockPolicy.Decision.Blocked) continue
                 actionAttempted = true

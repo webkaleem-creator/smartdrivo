@@ -37,7 +37,7 @@ object PickupShieldEvidence {
             "text${if (f.text.isNullOrBlank()) 0 else 1}:desc${if (f.description.isNullOrBlank()) 0 else 1}"
     }
 
-    private fun isDrop(f: Field): Boolean = listOfNotNull(f.text, f.description,
+    private fun isDrop(f: Field): Boolean = PickupOnlyLabel.isDropResourceId(f.resourceId) || listOfNotNull(f.text, f.description,
         f.resourceId?.replace(Regex("([a-z])([A-Z])"), "$1_$2")).any {
         Regex("""(?:^|[/_\s])(?:drop|dropoff|destination|dest)(?:$|[_\s:：])""", RegexOption.IGNORE_CASE).containsMatchIn(it)
     }

@@ -70,6 +70,12 @@ object PickupOnlyLabel {
     )
     private val dropId = Regex("""(?:^|_)(?:drop|dropoff|drop_off|destination|dest|to|end)(?:_|$)""", RegexOption.IGNORE_CASE)
 
+    private fun normalizedId(raw: String?): String = raw?.substringAfterLast('/')
+        ?.replace(Regex("([a-z])([A-Z])"), "$1_$2")
+        ?.replace('-', '_')?.lowercase(Locale.ROOT).orEmpty()
+
+    fun isDropResourceId(raw: String?): Boolean = dropId.containsMatchIn(normalizedId(raw))
+
     fun trustedNode(rootPackage: String, nodePackage: String, platform: Platform,
         rootWindow: Int, nodeWindow: Int, visible: Boolean): Boolean {
         if (!visible || rootWindow != nodeWindow || rootPackage != nodePackage) return false
@@ -84,10 +90,8 @@ object PickupOnlyLabel {
     fun fromField(text: String?, resourceId: String?): String? {
         val raw = text?.trim().orEmpty()
         if (!plausible(raw)) return null
-        val id = resourceId?.substringAfterLast('/')
-            ?.replace(Regex("([a-z])([A-Z])"), "$1_$2")
-            ?.replace('-', '_')?.lowercase(Locale.ROOT).orEmpty()
-        if (dropId.containsMatchIn(id)) return null
+        val id = normalizedId(resourceId)
+        if (isDropResourceId(resourceId)) return null
         if (id.isNotBlank() && pickupId.containsMatchIn(id) &&
             addressId.containsMatchIn(id) && !distanceId.containsMatchIn(id)
         ) return raw

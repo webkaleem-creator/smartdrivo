@@ -60,4 +60,13 @@ class PickupShieldHierarchyTest {
         skip.isEnabled = true; skip.packageName = "com.other.app"
         assertNull(PickupShieldRejectReader.read(root))
     }
+    @Test fun selectedTargetMustStillBeRejectAfterRefreshEvenWithAnOldRejectResourceId() {
+        val root=node(rect=Rect(0,0,1080,2200))
+        val target=node("Skip","$pkg:id/btn_decline",click=true); add(root,target)
+        assertTrue(PickupShieldRejectReader.isSafeTarget(root,target))
+        target.text="Accept"
+        assertFalse(PickupShieldRejectReader.isSafeTarget(root,target))
+        target.text="Skip"; target.setBoundsInScreen(Rect(0,0,1080,2200))
+        assertFalse(PickupShieldRejectReader.isSafeTarget(root,target))
+    }
 }

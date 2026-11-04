@@ -6,6 +6,16 @@ import java.util.ArrayDeque
 
 /** Only a self-clickable, explicitly identified Reject/Skip control; no geometry guesses or ancestor substitution. */
 object PickupShieldRejectReader {
+    fun isSafeTarget(root: AccessibilityNodeInfo, node: AccessibilityNodeInfo): Boolean {
+        if (root.packageName?.toString() !in RapidoAdapter.RAPIDO_PACKAGES ||
+            node.packageName?.toString() != root.packageName?.toString() || node.windowId != root.windowId ||
+            !node.isVisibleToUser || !node.isEnabled || !node.isClickable ||
+            !node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK } ||
+            !PickupShieldEvidence.rejectLabel(node.text?.toString(), node.contentDescription?.toString(), node.viewIdResourceName)) return false
+        val bounds = Rect(); node.getBoundsInScreen(bounds)
+        val rootBounds = Rect(); root.getBoundsInScreen(rootBounds)
+        return !bounds.isEmpty && !rootBounds.isEmpty && rootBounds.contains(bounds) && bounds != rootBounds
+    }
     fun read(root: AccessibilityNodeInfo, diagnostic: (String) -> Unit = {}): AccessibilityNodeInfo? {
         if (root.packageName?.toString() !in RapidoAdapter.RAPIDO_PACKAGES) return null
         val queue = ArrayDeque<AccessibilityNodeInfo>(); queue.add(root)
@@ -27,11 +37,7 @@ object PickupShieldRejectReader {
                         "x=${bounds.left} y=${bounds.top} width=${bounds.width()} height=${bounds.height()}")
                 }
             }
-            if (PickupShieldEvidence.rejectLabel(text, description, node.viewIdResourceName) &&
-                node.isEnabled && node.isClickable && node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }) {
-                val bounds = Rect(); node.getBoundsInScreen(bounds)
-                if (!bounds.isEmpty && !rootBounds.isEmpty && rootBounds.contains(bounds) && bounds != rootBounds) return node
-            }
+            if (isSafeTarget(root, node)) return node
             for (i in 0 until node.childCount.coerceAtMost(45)) node.getChild(i)?.let(queue::addLast)
         }
         diagnostic("stage=reject_missing nodes=$visited ambiguousMinus=$ambiguous window=${root.windowId}")

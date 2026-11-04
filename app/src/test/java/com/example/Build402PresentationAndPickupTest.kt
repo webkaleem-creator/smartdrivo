@@ -27,7 +27,9 @@ class Build402PresentationAndPickupTest {
         val settings=AdminPickupBlockSettings(true,AdminPickupBlockPolicy.parse("tadbun, other"))
         assertEquals(AdminPickupBlockPolicy.Decision.Blocked("tadbun"),AdminPickupBlockPolicy.evaluate(settings,pickup))
         assertEquals(AdminPickupBlockPolicy.Decision.Allow,AdminPickupBlockPolicy.evaluate(settings,"NotTadbun Street"))
-        assertNull(PickupShieldEvidence.labelledPickup(fields.map { if(it.key==3) it.copy(resourceId="pkg:id/tvDropAddress") else it }))
+        for(id in listOf("tvDropAddress","to_address","end_location","destination_address")) {
+            assertNull(PickupShieldEvidence.labelledPickup(fields.map { if(it.key==3) it.copy(resourceId="pkg:id/$id") else it }))
+        }
         assertNull(PickupShieldEvidence.labelledPickup(fields+f(4,2,"Destination")))
         assertNull(PickupShieldEvidence.labelledPickup(fields.map { if(it.key==3) it.copy(interactive=true) else it }))
         assertFalse(PickupShieldEvidence.structure(fields).contains("TadBun Falaknuma"))
