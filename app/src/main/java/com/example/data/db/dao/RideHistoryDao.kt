@@ -17,6 +17,9 @@ interface RideHistoryDao {
     @Query("SELECT * FROM ride_history ORDER BY detectedAt DESC")
     suspend fun getAllHistoryList(): List<RideHistoryEntity>
 
+    @Query("SELECT * FROM ride_history WHERE status = 'PROCESSING' AND detectedAt <= :cutoff")
+    suspend fun getStaleProcessing(cutoff: Long): List<RideHistoryEntity>
+
     @Query("SELECT * FROM ride_history ORDER BY detectedAt DESC LIMIT :limit")
     fun getRecentHistory(limit: Int): Flow<List<RideHistoryEntity>>
 

@@ -1521,7 +1521,7 @@ fun SmartDrivoApp(
 
         // 18. Admin Panel Screen
         composable(Routes.ADMIN_PANEL) {
-            if (!userProfile.isAdmin) {
+            if (!repository.hasAdminAccess()) {
                 LaunchedEffect(Unit) {
                     navController.navigate(Routes.HOME) {
                         popUpTo(Routes.ADMIN_PANEL) { inclusive = true }

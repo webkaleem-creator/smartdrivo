@@ -44,4 +44,24 @@ class OlaSingleActionTest {
         assertFalse(OlaOfferSafety.hasAcceptedUi("Accepted by another driver"))
         assertTrue(OlaOfferSafety.hasAcceptedUi("Booking accepted Navigate to pickup"))
     }
+
+    @Test fun countdownInEitherAccessibleLabelVetoesAReadyAlternateLabel() {
+        for ((text, desc) in listOf("Accept in 3" to "Accept", "Accept" to "Accept in 1")) {
+            assertFalse(OlaOfferSafety.isSafeDirectTarget(text, desc,
+                true, true, true, true, true, true, true))
+        }
+        assertTrue(OlaOfferSafety.isSafeDirectTarget("Accept", "Accept ride",
+            true, true, true, true, true, true, true))
+    }
+
+    @Test fun oldPositiveTextCannotConfirmWhileAnyOfferControlRemains() {
+        val positive = "Booking accepted Navigate to pickup"
+        assertFalse(OlaOfferSafety.confirmsBooking(positive, true))
+        assertTrue(OlaOfferSafety.confirmsBooking(positive, false))
+        assertFalse(OlaOfferSafety.confirmsBooking("Accepted by another driver", false))
+        assertFalse(OlaOfferSafety.confirmsBooking("Accept sent", false))
+        assertFalse(OlaOfferSafety.hasOfferControl(listOf("Booking accepted", "Navigate to pickup")))
+        assertTrue(OlaOfferSafety.hasOfferControl(listOf("Accept in", "3")))
+        assertTrue(OlaOfferSafety.hasOfferControl(listOf("Accept")))
+    }
 }

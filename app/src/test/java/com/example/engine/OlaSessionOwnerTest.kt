@@ -7,6 +7,16 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class OlaSessionOwnerTest {
+    @org.junit.Test fun accountChangeInvalidatesActionAndVerificationOwnership() {
+        val owner = OlaSessionOwner()
+        val session = owner.begin("ola_offer_one", "first-user")!!
+        org.junit.Assert.assertTrue(owner.isCurrent(session, "first-user"))
+        org.junit.Assert.assertFalse(owner.isCurrent(session, "next-user"))
+        owner.cancel()
+        val next = owner.begin("ola_offer_two", "next-user")!!
+        org.junit.Assert.assertFalse(owner.finish(session))
+        org.junit.Assert.assertTrue(owner.isCurrent(next, "next-user"))
+    }
     @Test fun concurrentEventsHaveExactlyOneOwner() {
         val owner = OlaSessionOwner()
         val pool = Executors.newFixedThreadPool(8)

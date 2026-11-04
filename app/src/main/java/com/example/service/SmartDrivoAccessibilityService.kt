@@ -1122,6 +1122,7 @@ private val processingTimeoutRunnable = Runnable {
         // Re-verify the SAME live offer before any reject action. Never tap
         // coordinates, guess an X, or use destination text to authorize Reject.
         var sent = false
+        var rejectAttempted = false
         if (blocked && preferencesManager.isAutoAcceptEnabled &&
             !bankingModeSuspended &&
             com.example.auth.PickupGuardOwnerAccess.authorized(prefs.userProfile.value) &&
@@ -1145,6 +1146,7 @@ private val processingTimeoutRunnable = Runnable {
                 node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK } &&
                 bounds.width() > 0 && bounds.height() > 0
             ) {
+                rejectAttempted = true
                 sent = runCatching {
                     node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 }.getOrDefault(false)
@@ -1153,9 +1155,12 @@ private val processingTimeoutRunnable = Runnable {
 
         // Avoid resurrecting an unchanged visible blocked order on next event.
         if (candidate.platform == Platform.RAPIDO) {
-            rapidoIgnoredVisibleOfferGuard.rememberIgnored(candidate)
+            rapidoIgnoredVisibleOfferGuard.rememberIgnored(candidate,
+                if (blocked) rapidoFilterContext() else null, ownerVeto = true)
         } else if (candidate.platform == Platform.OLA) {
-            olaVisibleOffer.markAttempted(candidate)
+            // Missing rendering is not an action or a permanent blacklist.
+            if (rejectAttempted) olaVisibleOffer.markAttempted(candidate)
+            else if (!blocked) olaLastEvaluated = null
         }
 
         val resultStatus = if (sent) OrderStatus.REJECTED else OrderStatus.IGNORED
@@ -6039,6 +6044,8 @@ private val processingTimeoutRunnable = Runnable {
     private val olaVisibleOffer = com.example.engine.OlaVisibleOffer()
     private var olaLastEvaluated: RideCandidate? = null
     private var olaLastRecordId: String? = null
+    private var olaLastFilterContext: Any? = null
+    private val historyWrites = com.example.engine.HistoryWriteOrder()
     private val olaWindowReadQueued = java.util.concurrent.atomic.AtomicBoolean(false)
     private val historyInserts = com.example.engine.HistoryInsertGate()
     private val olaSessionLock = Any()
@@ -6135,11 +6142,15 @@ private val processingTimeoutRunnable = Runnable {
                 return
             }
             val stableId = olaVisibleOffer.observe(candidate)
-            if (olaLastRecordId == stableId && olaLastEvaluated?.let {
+            val filterContext = listOf(prefs.appSettings.value, prefs.goToAreas.value,
+                prefs.noGoAreas.value, prefs.olaAdminFilterSettings.value,
+                prefs.adminPickupBlockSettings.value, prefs.pickupGuardSettings.value)
+            if (olaLastRecordId == stableId && olaLastFilterContext == filterContext && olaLastEvaluated?.let {
                     OlaOfferSafety.sameOffer(it, candidate)
                 } == true) return
             olaLastEvaluated = candidate
             olaLastRecordId = stableId
+            olaLastFilterContext = filterContext
             val recordId = onOrderDetectedFast(candidate, stableId)
             olaDiag(OlaDiagnosticStore.Stage.HISTORY_DETECTED)
             Log.i(TAG, "Ola offer detected; history queued")
@@ -6389,21 +6400,23 @@ private val processingTimeoutRunnable = Runnable {
         )
 
         val recordId = historyRecordId ?: onOrderDetectedFast(candidate, OlaOfferSafety.internalId())
-        val session = olaSessions.begin(recordId) ?: return
+        val session = olaSessions.begin(recordId, prefs.userProfile.value.uid) ?: return
         olaDiag(OlaDiagnosticStore.Stage.WATCH_STARTED)
         setOlaState(OlaState.OLA_DETECTED)
 
+        val historyOwner = rideHistoryRepository.holdProcessing(recordId)
         serviceScope.launch(Dispatchers.IO) {
-            runOlaReadyWatcherV5(candidate, session)
-        }
+            runOlaReadyWatcherV5(candidate, session, historyOwner)
+        }.invokeOnCompletion { rideHistoryRepository.releaseProcessing(recordId, historyOwner) }
     }
 
     private suspend fun runOlaReadyWatcherV5(
         candidate: RideCandidate,
-        session: com.example.engine.OlaSessionOwner.Session
+        session: com.example.engine.OlaSessionOwner.Session,
+        historyOwner: Any
     ) {
         val recordId = session.recordId
-        val sessionUid = prefs.userProfile.value.uid
+        val sessionUid = session.userId
         val ownerModeAtStart = prefs.olaAdminFilterSettings.value.enabled
         var replacementRoot: AccessibilityNodeInfo? = null
 
@@ -6421,7 +6434,7 @@ private val processingTimeoutRunnable = Runnable {
 
         try {
             while (
-                olaSessions.isCurrent(session) &&
+                olaSessions.isCurrent(session, prefs.userProfile.value.uid) &&
                 prefs.userProfile.value.uid == sessionUid &&
                 (!ownerModeAtStart || prefs.olaAdminFilterSettings.value.enabled) &&
                 olaMonitoringEnabled() &&
@@ -6477,7 +6490,7 @@ private val processingTimeoutRunnable = Runnable {
                         negativeReason == "Order expired" ||
                         negativeReason == "Accepted by another driver"
                     if (ownerModeAtStart && clickAttempts == 0 && explicitMiss &&
-                        olaSessions.isCurrent(session)) {
+                        olaSessions.isCurrent(session, prefs.userProfile.value.uid)) {
                         onOrderDecisionFast(recordId, candidate, OrderStatus.MISSED,
                             "OLA_CONFIRMED_MISSED_UI", negativeReason)
                     } else ended("OLA_ORDER_ENDED", negativeReason)
@@ -6487,7 +6500,7 @@ private val processingTimeoutRunnable = Runnable {
 
                 // Do not claim an auto-accepted ride when no click was attempted.
                 if (clickAttempts > 0 && isOlaAcceptedStateV5(allText)) {
-                    if (!olaSessions.isCurrent(session)) return
+                    if (!olaSessions.isCurrent(session, prefs.userProfile.value.uid)) return
                     onOlaAccepted(
                         candidate = candidate,
                         recordId = recordId, timesClicked = clickAttempts.coerceAtLeast(1)
@@ -6567,6 +6580,7 @@ private val processingTimeoutRunnable = Runnable {
                                 setOlaState(OlaState.OLA_CLICK_ATTEMPTED)
                                 olaVisibleOffer.markAttempted(candidate)
                                 olaDiag(OlaDiagnosticStore.Stage.SELECTED_TARGET_WINDOW, clickableTarget.windowId)
+                                onOrderActionAttemptFast(recordId)
                                 olaDiag(OlaDiagnosticStore.Stage.ACTION_CALL_STARTED)
                                 val callStart = android.os.SystemClock.uptimeMillis()
                                 val acknowledged = clickableTarget.performAction(AccessibilityNodeInfo.ACTION_CLICK)
@@ -6587,7 +6601,7 @@ private val processingTimeoutRunnable = Runnable {
 
                 olaDiag(if (actionResult) OlaDiagnosticStore.Stage.ACTION_CLICK_OK else OlaDiagnosticStore.Stage.ACTION_CLICK_FAILED)
                 if (waitForOlaAcceptedV5(8_000L, candidate, session)) {
-                    if (!olaSessions.isCurrent(session)) return
+                    if (!olaSessions.isCurrent(session, prefs.userProfile.value.uid)) return
                     onOlaAccepted(
                         candidate = candidate,
                         recordId = recordId, timesClicked = clickAttempts
@@ -6606,7 +6620,7 @@ private val processingTimeoutRunnable = Runnable {
 
             }
 
-            val cancelled = !olaSessions.isCurrent(session) || !olaMonitoringEnabled()
+            val cancelled = !olaSessions.isCurrent(session, prefs.userProfile.value.uid) || !olaMonitoringEnabled()
             ended(if (cancelled) "OLA_WATCH_CANCELLED" else "OLA_WATCH_TIMEOUT",
                 if (cancelled) "Ola watcher cancelled" else "Ola observation window ended without confirmed acceptance")
 
@@ -6614,6 +6628,7 @@ private val processingTimeoutRunnable = Runnable {
             Log.e(TAG, "OLA V5 watcher error", e)
             ended("OLA_WATCH_ERROR", "Ola observation stopped: ${e.javaClass.simpleName}")
         } finally {
+            rideHistoryRepository.releaseProcessing(recordId, historyOwner)
             synchronized(olaSessionLock) {
                 if (!olaSessions.finish(session)) return
                 if (currentOlaState != OlaState.OLA_ACCEPTED) setOlaState(OlaState.IDLE)
@@ -6659,7 +6674,7 @@ private val processingTimeoutRunnable = Runnable {
 
     private fun olaActionsAllowed(session: com.example.engine.OlaSessionOwner.Session? = null): Boolean =
         !prefs.pickupGuardSettings.value.enabled &&
-        (session == null || olaSessions.isCurrent(session)) &&
+        (session == null || olaSessions.isCurrent(session, prefs.userProfile.value.uid)) &&
         !isProcessing && !isRapidoEventProcessing && !isClickInProgress &&
         System.currentTimeMillis() >= clickBlockedUntilTimestamp &&
         olaMonitoringEnabled()
@@ -6790,22 +6805,23 @@ private val processingTimeoutRunnable = Runnable {
         while (
             System.currentTimeMillis() < end
         ) {
+            if (!olaSessions.isCurrent(session, prefs.userProfile.value.uid) || !olaMonitoringEnabled()) {
+                olaDiag(OlaDiagnosticStore.Stage.VERIFY_CANCELLED)
+                return false
+            }
             delay(200L)
-
-            val root =
-                findBestLiveOlaRoot()
+            if (!olaSessions.isCurrent(session, prefs.userProfile.value.uid) || !olaMonitoringEnabled()) return false
+            val root = findBestLiveOlaRoot()
             if (root == null) {
                 olaDiag(OlaDiagnosticStore.Stage.VERIFY_NO_ROOT)
                 continue
             }
             olaDiag(OlaDiagnosticStore.Stage.VERIFY_WINDOW, root.windowId)
 
-            val text =
-                OlaAdapter.collectAllNodeTexts(root)
-                    .joinToString(" ")
-                    .lowercase(Locale.ROOT)
+            val labels = OlaAdapter.collectAllNodeTexts(root)
+            val text = labels.joinToString(" ").lowercase(Locale.ROOT)
 
-            if (!olaSessions.isCurrent(session) || !olaMonitoringEnabled()) {
+            if (!olaSessions.isCurrent(session, prefs.userProfile.value.uid) || !olaMonitoringEnabled()) {
                 olaDiag(OlaDiagnosticStore.Stage.VERIFY_CANCELLED)
                 return false
             }
@@ -6813,7 +6829,7 @@ private val processingTimeoutRunnable = Runnable {
             val ready = findExactReadyOlaAcceptV5(root) != null
             olaDiag(OlaDiagnosticStore.Stage.POST_CLICK_STATE,
                 (if (confirmed) 1 else 0) or (if (ready) 2 else 0))
-            if (confirmed && !ready) {
+            if (OlaOfferSafety.confirmsBooking(text, OlaOfferSafety.hasOfferControl(labels))) {
                 olaDiag(OlaDiagnosticStore.Stage.VERIFY_FINISHED, 1)
                 return true
             }
@@ -8484,7 +8500,8 @@ private val processingTimeoutRunnable = Runnable {
         // An ignored popup may become eligible as pickup/settings change. Reevaluate
         // through every existing filter, reusing its history row rather than clicking here.
         val duplicateIgnored = (prefs.pickupGuardSettings.value.enabled ||
-            !prefs.appSettings.value.isAutoRejectBadFaresEnabled) &&
+            !prefs.appSettings.value.isAutoRejectBadFaresEnabled ||
+            rapidoIgnoredVisibleOfferGuard.hasOwnerVeto()) &&
             rapidoIgnoredVisibleOfferGuard.isDuplicateIgnored(candidate)
         val recheckIgnored = duplicateIgnored && !prefs.pickupGuardSettings.value.enabled &&
             rapidoIgnoredVisibleOfferGuard.needsFilterRecheck(candidate, rapidoFilterContext())
@@ -9420,6 +9437,10 @@ private val processingTimeoutRunnable = Runnable {
 
         // Verified popup and per-order guard already authorized this click.
         // Do not start a global 3-second lock for Rapido retries.
+        // A Shield toggle or pickup render can change during target acquisition.
+        // OFF remains a Boolean read; ON checks only the verified fresh Rapido root.
+        if (prefs.adminPickupBlockSettings.value.enabled &&
+            handleAdminPickupBlock(rapidoRoot, candidate, pinnedRecordId)) return
         rapidoMiss("ACCEPT_DISPATCH")
         val rapidoClickStartedNs = System.nanoTime()
         var clicked = false
@@ -10368,7 +10389,8 @@ private val processingTimeoutRunnable = Runnable {
      * - No blind coordinate taps.
      */
     private fun rapidoFilterContext(): Any = listOf(prefs.appSettings.value,
-        prefs.goToAreas.value, prefs.noGoAreas.value, prefs.fixAreaSettings.value)
+        prefs.goToAreas.value, prefs.noGoAreas.value, prefs.fixAreaSettings.value,
+        prefs.adminPickupBlockSettings.value)
 
     private fun handleRapidoFilterFailure(
         root: AccessibilityNodeInfo,
@@ -11225,13 +11247,7 @@ private val processingTimeoutRunnable = Runnable {
                 // HISTORY_ACTIVE_ID_RACE_V2
                 // A slower previous coroutine must not steal the active ID
                 // from a newer detection.
-                if (
-                    activeOrderRecordIds[candidate.platform] ==
-                        tempId
-                ) {
-                    activeOrderRecordIds[candidate.platform] =
-                        entity.id
-                }
+                activeOrderRecordIds.replace(candidate.platform, tempId, entity.id)
 
                 inserted = true
                 if (isOla) olaDiag(OlaDiagnosticStore.Stage.HISTORY_INSERTED)
@@ -11246,6 +11262,14 @@ private val processingTimeoutRunnable = Runnable {
             }
         }
         return tempId
+    }
+
+    private fun launchHistoryWrite(recordId: String, write: suspend () -> Unit) {
+        val ticket = historyWrites.enqueue(recordId)
+        serviceScope.launch(Dispatchers.IO) {
+            ticket.awaitPrevious()
+            write()
+        }.invokeOnCompletion { historyWrites.complete(recordId, ticket) }
     }
 
     private fun onOrderDecisionFast(
@@ -11265,12 +11289,12 @@ private val processingTimeoutRunnable = Runnable {
         // Always allow the final status to be written.
 
         if (candidate.platform == Platform.RAPIDO) rapidoMiss("DECISION_${status.name}")
-        serviceScope.launch(Dispatchers.IO) {
+        launchHistoryWrite(recordId) historyWrite@{
             try {
                 if (!historyInserts.await(recordId)) {
                     if (candidate.platform == Platform.OLA) olaDiag(OlaDiagnosticStore.Stage.HISTORY_INSERT_FAILED)
                     else Log.e("HistoryLatency", "stage=insert_failed platform=${candidate.platform.name}")
-                    return@launch
+                    return@historyWrite
                 }
                 // onOrderDetectedFast inserts PROCESSING asynchronously.
                 // A very fast decision can arrive before that insert finishes.
@@ -11304,7 +11328,7 @@ private val processingTimeoutRunnable = Runnable {
                         TAG,
                         "Decision update failed after waiting for history insert: id=$recordId status=$status reason=$reasonCode"
                     )
-                    return@launch
+                    return@historyWrite
                 }
 
                 // An old filter event can finish after a verified accept.
@@ -11329,9 +11353,9 @@ private val processingTimeoutRunnable = Runnable {
         if (!preferencesManager.isAutoAcceptEnabled) {
             return
         }
-        serviceScope.launch(Dispatchers.IO) {
+        launchHistoryWrite(recordId) historyWrite@{
             try {
-                if (!historyInserts.await(recordId)) return@launch
+                if (!historyInserts.await(recordId)) return@historyWrite
                 rideHistoryRepository.onOrderActionAttempt(recordId)
             } catch (e: Exception) {
                 Log.e(TAG, "Error in onOrderActionAttemptFast", e)
@@ -11372,12 +11396,12 @@ private val processingTimeoutRunnable = Runnable {
             actionLatencyMs = actionLatency,
             totalLatencyMs = totalLatency
         )
-        serviceScope.launch(Dispatchers.IO) {
+        launchHistoryWrite(recordId) historyWrite@{
             try {
                 if (!historyInserts.await(recordId)) {
                     if (candidate.platform == Platform.OLA) olaDiag(OlaDiagnosticStore.Stage.HISTORY_INSERT_FAILED)
                     else Log.e("HistoryLatency", "stage=insert_failed platform=${candidate.platform.name}")
-                    return@launch
+                    return@historyWrite
                 }
                 var updated =
                     rideHistoryRepository.onOrderActionCompleted(

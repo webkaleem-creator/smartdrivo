@@ -49,7 +49,18 @@ object OlaOfferSafety {
         enabled: Boolean, clickable: Boolean, clickAction: Boolean,
         driverPackage: Boolean, sameWindow: Boolean, validBounds: Boolean): Boolean =
         visible && enabled && clickable && clickAction && driverPackage && sameWindow && validBounds &&
+            !isCountdownLabel(label) && !isCountdownLabel(description) &&
             (isReadyLabel(label) || isReadyLabel(description))
+
+    fun isCountdownLabel(text: String?): Boolean = acceptCountdown.matches(normalize(text))
+
+    /** A still-visible offer control contradicts a confirmed post-offer screen. */
+    fun confirmsBooking(screenText: String, offerControlVisible: Boolean): Boolean =
+        !offerControlVisible && hasAcceptedUi(screenText)
+
+    fun hasOfferControl(labels: List<String>): Boolean = labels.any(::isAcceptLabel) ||
+        Regex("""\baccept\s+in\s*\d+\b""", RegexOption.IGNORE_CASE)
+            .containsMatchIn(labels.joinToString(" "))
 
     /** Presence only; never includes passenger text or identifiers. */
     fun fieldFlags(candidate: com.example.model.RideCandidate): Int {

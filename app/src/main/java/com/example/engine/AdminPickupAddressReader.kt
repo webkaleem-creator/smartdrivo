@@ -3,7 +3,6 @@ package com.example.engine
 import android.view.accessibility.AccessibilityNodeInfo
 import com.example.model.Platform
 import java.util.ArrayDeque
-import java.util.Locale
 
 /**
  * Runs ONLY while the owner pickup veto is enabled.
@@ -13,14 +12,17 @@ import java.util.Locale
 object AdminPickupAddressReader {
     fun read(root: AccessibilityNodeInfo, platform: Platform): String? {
         val rootPackage = root.packageName?.toString().orEmpty()
-        if (!belongs(rootPackage, platform)) return null
+        val rootWindow = root.windowId
+        fun trusted(node: AccessibilityNodeInfo) = PickupOnlyLabel.trustedNode(
+            rootPackage, node.packageName?.toString().orEmpty(), platform,
+            rootWindow, node.windowId, node.isVisibleToUser)
+        if (!trusted(root)) return null
         val pending: ArrayDeque<AccessibilityNodeInfo> = ArrayDeque()
         pending.add(root)
         var visited = 0
         while (pending.isNotEmpty() && visited++ < 350) {
             val node = pending.removeFirst()
-            val pkg = node.packageName?.toString().orEmpty()
-            if (pkg.isNotBlank() && !belongs(pkg, platform)) continue
+            if (!trusted(node)) continue
 
             val text = node.text?.toString()?.trim()
             val desc = node.contentDescription?.toString()?.trim()
@@ -36,12 +38,12 @@ object AdminPickupAddressReader {
                     val siblingCount = parent.childCount.coerceAtMost(12)
                     for (i in 0 until siblingCount) {
                         val sibling = parent.getChild(i) ?: continue
-                        if (sibling == node) continue
+                        if (sibling == node || !trusted(sibling)) continue
                         val t = sibling.text?.toString()?.trim()
                         val candidate = t?.takeIf(PickupOnlyLabel::plausible)
                         if (candidate != null && !PickupOnlyLabel.isLabel(candidate)) {
                             // Only a sibling with pickup-related view ID is trustworthy.
-                            val siblingId = sibling.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+                            val siblingId = sibling.viewIdResourceName.orEmpty()
                             if (PickupOnlyLabel.fromField(candidate, siblingId) != null) return candidate
                         }
                     }
@@ -54,11 +56,4 @@ object AdminPickupAddressReader {
         return null
     }
 
-    private fun belongs(pkg: String, platform: Platform): Boolean = when (platform) {
-        Platform.RAPIDO -> pkg.startsWith("com.rapido.", ignoreCase = true)
-        Platform.OLA -> pkg.startsWith("com.olacabs.", ignoreCase = true) ||
-            pkg.equals("ola.cabs", ignoreCase = true)
-        Platform.UBER -> pkg.startsWith("com.ubercab", ignoreCase = true) ||
-            pkg.startsWith("com.uber.driver", ignoreCase = true)
-    }
 }

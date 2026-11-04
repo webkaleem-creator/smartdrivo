@@ -3,6 +3,8 @@ package com.example
 import com.example.engine.AdminPickupBlockPolicy
 import com.example.engine.PickupOnlyLabel
 import com.example.model.AdminPickupBlockSettings
+import com.example.model.*
+import com.example.engine.RapidoIgnoredVisibleOfferGuard
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -72,5 +74,36 @@ class AdminPickupBlockPolicyTest {
             "com.rapido.captain:id/pickupKmDistance"))
         assertNull(PickupOnlyLabel.fromField("Pickup: 1.2 km", null))
         assertNull(PickupOnlyLabel.fromField("Drop: Tank Bund", null))
+    }
+
+    @Test fun wrongPackageWindowInvisibleAndDropFieldsCannotAuthorizePickupMatching() {
+        val pkg = "com.rapido.passenger"
+        assertTrue(PickupOnlyLabel.trustedNode(pkg, pkg, Platform.RAPIDO, 4, 4, true))
+        assertFalse(PickupOnlyLabel.trustedNode(pkg, "com.ubercab.driver", Platform.RAPIDO, 4, 4, true))
+        assertFalse(PickupOnlyLabel.trustedNode(pkg, pkg, Platform.RAPIDO, 4, 5, true))
+        assertFalse(PickupOnlyLabel.trustedNode(pkg, pkg, Platform.RAPIDO, 4, 4, false))
+        assertFalse(PickupOnlyLabel.trustedNode("com.example.fake", "com.example.fake", Platform.RAPIDO, 4, 4, true))
+        assertNull(PickupOnlyLabel.fromField("Pickup: Airport", "$pkg:id/drop_address"))
+        assertNull(PickupOnlyLabel.fromField("Pickup: Hitech City Destination address: Airport", null))
+    }
+
+    @Test fun blockedDuplicatesDoNotRetryButMissingPickupAndSettingChangesReevaluate() {
+        val candidate = RideCandidate(45f, .9f, 2.2f, "Address unavailable", "Destination", "Area",
+            Platform.RAPIDO, VehicleType.AUTO)
+        val guard = RapidoIgnoredVisibleOfferGuard()
+        val on = on("airport")
+        guard.rememberIgnored(candidate, on, ownerVeto = true)
+        repeat(20) {
+            assertTrue(guard.hasOwnerVeto()) // Even when normal Auto Reject is ON.
+            assertTrue(guard.isDuplicateIgnored(candidate))
+            assertFalse(guard.needsFilterRecheck(candidate, on))
+        }
+        assertTrue(guard.needsFilterRecheck(candidate, on.copy(enabled = false)))
+        guard.rememberIgnored(candidate, ownerVeto = true) // Unreadable is not a final blacklist.
+        assertTrue(guard.needsFilterRecheck(candidate, on))
+        assertEquals(AdminPickupBlockPolicy.Decision.Allow,
+            AdminPickupBlockPolicy.evaluate(on, "Hitech City"))
+        guard.clear()
+        assertFalse(guard.hasOwnerVeto())
     }
 }

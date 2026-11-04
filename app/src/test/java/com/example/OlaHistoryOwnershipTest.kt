@@ -82,4 +82,37 @@ class OlaHistoryOwnershipTest {
             assertEquals(before, history.getById(key))
         }
     }
+
+    @Test fun liveWatcherLeasePreventsRecoveryAndOldOwnerCannotReleaseReplacement() = runBlocking {
+        val candidate = offer().copy(detectionTimeMs = System.currentTimeMillis() - 60_000L)
+        val row = history.onOrderDetected(candidate, olaRecordId = "ola_offer_live")
+        val old = history.holdProcessing(row.id)
+        val fresh = history.holdProcessing(row.id)
+        history.releaseProcessing(row.id, old)
+        assertEquals(0, history.finalizeAllStaleProcessing())
+        assertEquals(OrderStatus.PROCESSING.name, history.getById(row.id)!!.status)
+        history.onOrderActionAttempt(row.id)
+        val first = history.getById(row.id)!!.actionAttemptAt
+        history.onOrderActionAttempt(row.id)
+        assertEquals(first, history.getById(row.id)!!.actionAttemptAt)
+        history.releaseProcessing(row.id, fresh)
+        assertEquals(1, history.finalizeAllStaleProcessing())
+        val recovered = history.getById(row.id)!!
+        assertEquals(OrderStatus.UNCONFIRMED.name, recovered.status)
+        assertTrue(recovered.decisionReasonText.contains("OLA"))
+    }
+
+    @Test fun completedActionCannotAcquireALateAttemptTimestampAndOtherPlatformsStillRecover() = runBlocking {
+        for (platform in Platform.entries) {
+            val candidate = offer().copy(platform = platform, detectionTimeMs = System.currentTimeMillis() - 60_000L)
+            val row = history.onOrderDetected(candidate)
+            history.onOrderActionCompleted(row.id, OrderStatus.ACCEPTED, "CONFIRMED", "Positive UI", true)
+            val before = history.getById(row.id)
+            history.onOrderActionAttempt(row.id)
+            assertEquals(before, history.getById(row.id))
+            history.onOrderDetected(candidate.copy(bookingId = "OTHER123"))
+        }
+        assertEquals(3, history.finalizeAllStaleProcessing())
+        assertEquals(3, history.getAllHistoryDirect().count { it.status == OrderStatus.ACCEPTED.name })
+    }
 }

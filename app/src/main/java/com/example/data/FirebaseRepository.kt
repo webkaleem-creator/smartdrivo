@@ -74,6 +74,14 @@ class FirebaseRepository(
 
     fun getCurrentUid(): String = auth?.currentUser?.uid.orEmpty()
 
+    fun hasAdminAccess(): Boolean {
+        val profile = prefs.userProfile.value
+        val uid = getCurrentUid()
+        if (uid.isBlank() || profile.uid != uid) return false
+        return com.example.auth.AdminAccessPolicy.canManage(profile, uid,
+            com.example.auth.PickupGuardOwnerAccess.authorized(profile))
+    }
+
     // ADMIN_DEVICE_INFO_V4
     // Privacy-safe metadata only.
     // No IMEI, serial number, MAC address or Android ID.
@@ -303,7 +311,7 @@ class FirebaseRepository(
 
     fun startAdminBackendSync() {
         val fs = firestore ?: return
-        if (!prefs.userProfile.value.isAdmin) return
+        if (!hasAdminAccess()) return
 
         adminUsersListener?.remove()
         adminPaymentsListener?.remove()
@@ -696,15 +704,16 @@ class FirebaseRepository(
     }
     // Privileged update: used when verified admin updates users from AdminPanel
     fun adminUpdateUserProfile(profile: UserProfile, onComplete: ((Boolean) -> Unit)? = null) {
-        val currentCaller = prefs.userProfile.value
-        if (!currentCaller.isAdmin) {
+        if (!hasAdminAccess()) {
             Log.e("FirebaseRepo", "Unauthorized attempt to write privileged fields")
             onComplete?.invoke(false)
             return
         }
         scope.launch {
             try {
-                firestore?.collection("users")?.document(profile.uid)?.set(
+                val fs = firestore ?: error("Firestore unavailable")
+                if (!hasAdminAccess()) error("Admin authorization expired")
+                fs.collection("users").document(profile.uid).set(
                     mapOf(
                         "uid" to profile.uid,
                         "name" to profile.name,
@@ -724,7 +733,7 @@ class FirebaseRepository(
                         "updatedAt" to System.currentTimeMillis()
                     ),
                     SetOptions.merge()
-                )?.await()
+                ).await()
                 onComplete?.invoke(true)
             } catch (e: Exception) {
                 Log.e("FirebaseRepo", "Admin user update failed: ${e.message}")
@@ -983,7 +992,7 @@ class FirebaseRepository(
         if (
             fs == null ||
             adminUid.isNullOrBlank() ||
-            !prefs.userProfile.value.isAdmin
+            !hasAdminAccess()
         ) {
             onComplete(false, "Admin authorization unavailable")
             return
@@ -1035,6 +1044,7 @@ class FirebaseRepository(
 
                 var approvedDays = 0
 
+                if (!hasAdminAccess() || getCurrentUid() != adminUid) error("Admin authorization expired")
                 fs.runTransaction { tx ->
 
                     val paymentDoc = tx.get(paymentRef)
@@ -1200,21 +1210,24 @@ class FirebaseRepository(
         val fs = firestore
         val adminUid = auth?.currentUser?.uid
 
-        if (fs == null || adminUid.isNullOrBlank() || !prefs.userProfile.value.isAdmin) {
+        if (fs == null || adminUid.isNullOrBlank() || !hasAdminAccess()) {
             onComplete(false, "Admin authorization unavailable")
             return
         }
 
         scope.launch {
             try {
-                fs.collection("payments").document(submission.paymentId).update(
-                    mapOf(
+                if (!hasAdminAccess() || getCurrentUid() != adminUid) error("Admin authorization expired")
+                val ref = fs.collection("payments").document(submission.paymentId)
+                fs.runTransaction { tx ->
+                    check(tx.get(ref).getString("status") == "PENDING") { "Only pending payments may be rejected" }
+                    tx.update(ref, mapOf(
                         "status" to "REJECTED",
                         "approvedAt" to null,
                         "rejectedAt" to System.currentTimeMillis(),
                         "rejectedBy" to adminUid
-                    )
-                ).await()
+                    ))
+                }.await()
 
                 prefs.updatePaymentStatus(
                     submission.paymentId,
@@ -1284,7 +1297,7 @@ class FirebaseRepository(
 
         if (
             cleanUpi.isBlank() ||
-            !prefs.userProfile.value.isAdmin
+            !hasAdminAccess()
         ) {
             onComplete(false)
             return
@@ -1514,6 +1527,7 @@ class FirebaseRepository(
 
     // --- Realtime Firestore Sync for Admin (Users & Payments) ---
     fun listenToAllUsers(onUsersChanged: ((List<UserProfile>) -> Unit)? = null): ListenerRegistration? {
+        if (!hasAdminAccess()) return null
         val fs = firestore ?: return null
         return try {
             fs.collection("users").addSnapshotListener { snapshot, error ->
@@ -1575,6 +1589,7 @@ class FirebaseRepository(
     }
 
     fun listenToAllPayments(onPaymentsChanged: ((List<PaymentSubmission>) -> Unit)? = null): ListenerRegistration? {
+        if (!hasAdminAccess()) return null
         val fs = firestore ?: return null
         return try {
             fs.collection("payments").addSnapshotListener { snapshot, error ->
@@ -1628,21 +1643,15 @@ class FirebaseRepository(
     }
 
     fun adminToggleUserActiveStatus(uid: String, currentActive: Boolean, onComplete: ((Boolean) -> Unit)? = null) {
-        val newActive = !currentActive
-        prefs.toggleUserActiveStatus(uid)
+        if (!hasAdminAccess()) { onComplete?.invoke(false); return }
         scope.launch {
-            try {
-                firestore?.collection("users")?.document(uid)?.update(
-                    mapOf(
-                        "isActive" to newActive,
-                        "updatedAt" to System.currentTimeMillis()
-                    )
-                )?.await()
-                onComplete?.invoke(true)
-            } catch (e: Exception) {
-                Log.w("FirebaseRepo", "Firestore toggleUserActiveStatus failed: ${e.message}")
-                onComplete?.invoke(false)
-            }
+            val success = runCatching {
+                if (!hasAdminAccess()) error("Admin authorization expired")
+                val fs = firestore ?: error("Firestore unavailable")
+                fs.collection("users").document(uid).update(mapOf(
+                    "isActive" to !currentActive, "updatedAt" to System.currentTimeMillis())).await()
+            }.isSuccess
+            kotlinx.coroutines.withContext(Dispatchers.Main) { onComplete?.invoke(success) }
         }
     }
 
@@ -1658,50 +1667,33 @@ class FirebaseRepository(
         }
     }
     fun adminRejectPayment(paymentId: String, onComplete: ((Boolean) -> Unit)? = null) {
-        prefs.updatePaymentStatus(paymentId, PaymentStatus.REJECTED)
-        scope.launch {
-            try {
-                val now = System.currentTimeMillis()
-                firestore?.collection("payments")?.document(paymentId)?.update(
-                    mapOf(
-                        "status" to PaymentStatus.REJECTED.name,
-                        "rejectedAt" to now
-                    )
-                )?.await()
-                onComplete?.invoke(true)
-            } catch (e: Exception) {
-                Log.w("FirebaseRepo", "Firestore adminRejectPayment failed: ${e.message}")
-                onComplete?.invoke(false)
-            }
-        }
+        if (!hasAdminAccess()) { onComplete?.invoke(false); return }
+        val submission = prefs.paymentSubmissions.value.firstOrNull { it.paymentId == paymentId }
+        if (submission == null) { onComplete?.invoke(false); return }
+        adminRejectPayment(submission) { success, _ -> onComplete?.invoke(success) }
     }
 
     fun adminExtendUserPlan(uid: String, daysToAdd: Int, planLabel: String, price: Int, onComplete: ((Boolean) -> Unit)? = null) {
-        prefs.extendUserPlan(uid, daysToAdd, planLabel, price)
+        if (!hasAdminAccess() || daysToAdd !in 1..365 || price < 0) {
+            onComplete?.invoke(false); return
+        }
         scope.launch {
-            try {
-                val now = System.currentTimeMillis()
-                val fs = firestore ?: return@launch
-                val userDoc = fs.collection("users").document(uid).get().await()
-                val currentExpiry = userDoc.getLong("planExpireMillis") ?: 0L
-                val baseTime = if (currentExpiry > now) currentExpiry else now
-                val newExpiry = baseTime + (daysToAdd * 86400000L)
-
-                fs.collection("users").document(uid).update(
-                    mapOf(
-                        "plan" to planLabel,
-                        "planPrice" to price,
-                        "planExpireMillis" to newExpiry,
-                        "isApproved" to true,
-                        "isActive" to true,
-                        "updatedAt" to now
-                    )
-                ).await()
-                onComplete?.invoke(true)
-            } catch (e: Exception) {
-                Log.w("FirebaseRepo", "Firestore adminExtendUserPlan failed: ${e.message}")
-                onComplete?.invoke(false)
-            }
+            val success = runCatching {
+                if (!hasAdminAccess()) error("Admin authorization expired")
+                val fs = firestore ?: error("Firestore unavailable")
+                val ref = fs.collection("users").document(uid)
+                fs.runTransaction { tx ->
+                    val user = tx.get(ref)
+                    check(user.exists()) { "Driver account not found" }
+                    val now = System.currentTimeMillis()
+                    val base = maxOf(user.getLong("planExpireMillis") ?: 0L, now)
+                    tx.update(ref, mapOf("plan" to planLabel, "planPrice" to price,
+                        "planExpireMillis" to base + daysToAdd * 86_400_000L,
+                        "isApproved" to true, "isActive" to true, "updatedAt" to now))
+                }.await()
+                // Live Firestore listeners own the local entitlement cache.
+            }.isSuccess
+            kotlinx.coroutines.withContext(Dispatchers.Main) { onComplete?.invoke(success) }
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.example.engine
 
 import com.example.model.AdminPickupBlockSettings
+import com.example.model.Platform
 import java.text.Normalizer
 import java.util.Locale
 
@@ -66,6 +67,18 @@ object PickupOnlyLabel {
     private val distanceId = Regex(
         """(?:distance|dist|kilomet|_km|km_|fare|amount|eta)""", RegexOption.IGNORE_CASE
     )
+    private val dropId = Regex("""(?:^|_)(?:drop|dropoff|drop_off|destination|dest|to|end)(?:_|$)""", RegexOption.IGNORE_CASE)
+
+    fun trustedNode(rootPackage: String, nodePackage: String, platform: Platform,
+        rootWindow: Int, nodeWindow: Int, visible: Boolean): Boolean {
+        if (!visible || rootWindow != nodeWindow || rootPackage != nodePackage) return false
+        return when (platform) {
+            Platform.RAPIDO -> rootPackage.startsWith("com.rapido.")
+            Platform.OLA -> OlaOfferSafety.isDriverPackage(rootPackage)
+            Platform.UBER -> rootPackage == "com.ubercab" || rootPackage.startsWith("com.ubercab.") ||
+                rootPackage == "com.uber.driver" || rootPackage.startsWith("com.uber.driver.")
+        }
+    }
 
     fun fromField(text: String?, resourceId: String?): String? {
         val raw = text?.trim().orEmpty()
@@ -73,6 +86,7 @@ object PickupOnlyLabel {
         val id = resourceId?.substringAfterLast('/')
             ?.replace(Regex("([a-z])([A-Z])"), "$1_$2")
             ?.replace('-', '_')?.lowercase(Locale.ROOT).orEmpty()
+        if (dropId.containsMatchIn(id)) return null
         if (id.isNotBlank() && pickupId.containsMatchIn(id) &&
             addressId.containsMatchIn(id) && !distanceId.containsMatchIn(id)
         ) return raw
@@ -98,7 +112,7 @@ object PickupOnlyLabel {
         if (lower in setOf("pickup", "pick up", "drop", "drop location", "destination",
                 "accept", "decline", "address unavailable")) return false
         // Mixed pickup/drop text must never be mistaken for a pickup-only field.
-        if (Regex("""(?:^|\s)(?:drop|destination)\s*[:：\-]""", RegexOption.IGNORE_CASE).containsMatchIn(clean)) return false
+        if (Regex("""(?:^|\s)(?:drop|destination)(?:\s+(?:address|location|area|landmark))?\s*[:：\-]""", RegexOption.IGNORE_CASE).containsMatchIn(clean)) return false
         return true
     }
 }

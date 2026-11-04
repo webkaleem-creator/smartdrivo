@@ -33,6 +33,11 @@ class RideHistoryRepository(
     val acceptedCount: Flow<Int> = dao.getAcceptedCount()
 
     private val mutex = Mutex()
+    private val processingOwners = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
+    /** In-memory lease: process death releases it; an old watcher cannot release a newer owner. */
+    fun holdProcessing(id: String): Any = Any().also { processingOwners[id] = it }
+    fun releaseProcessing(id: String, owner: Any) { processingOwners.remove(id, owner) }
     // Recent provisional IDs must resolve to the exact row returned by deduplication.
     // Bounded in-memory compatibility only; existing rows and schema are unchanged.
     private val detectionAliases = object : LinkedHashMap<String, String>(128, 0.75f, true) {
@@ -364,6 +369,7 @@ class RideHistoryRepository(
     suspend fun onOrderActionAttempt(id: String): RideHistoryEntity? = withContext(ioDispatcher) {
         mutex.withLock {
             val existing = resolveActionRecord(id) ?: return@withContext null
+            if (existing.actionCompletedAt > 0L || existing.actionAttemptAt > 0L) return@withContext existing
             val now = System.currentTimeMillis()
             val updated = existing.copy(actionAttemptAt = now)
             dao.update(updated)
@@ -420,10 +426,7 @@ class RideHistoryRepository(
         mutex.withLock {
             val now = System.currentTimeMillis()
 
-            val staleRows = dao.getAllHistoryList().filter { row ->
-                row.status == OrderStatus.PROCESSING.name &&
-                    (now - row.detectedAt) >= timeoutMs
-            }
+            val staleRows = dao.getStaleProcessing(now - timeoutMs)
 
             var fixedCount = 0
 
@@ -433,6 +436,7 @@ class RideHistoryRepository(
 
                 if (
                     latest != null &&
+                    !processingOwners.containsKey(latest.id) &&
                     latest.status == OrderStatus.PROCESSING.name &&
                     (System.currentTimeMillis() - latest.detectedAt) >= timeoutMs
                 ) {
@@ -452,7 +456,7 @@ class RideHistoryRepository(
                             totalProcessingMs = elapsed,
                             decisionReasonCode = if (actionAttempted) "ACCEPT_ATTEMPT_RECOVERY" else "PROCESSING_RECOVERY",
                             decisionReasonText = if (actionAttempted)
-                                "Accept was attempted; final Rapido result unavailable"
+                                "Accept was attempted; final ${latest.platform} result unavailable"
                             else
                                 "Order ended before SmartDrivo received a final result"
                         )

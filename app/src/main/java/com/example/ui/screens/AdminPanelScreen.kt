@@ -75,6 +75,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -123,6 +124,17 @@ fun AdminPanelScreen(
     val currentUpiId by prefs.upiId.collectAsState()
     val currentLinks by prefs.communityLinks.collectAsState()
     val currentUserProfile by prefs.userProfile.collectAsState()
+    if (!repository.hasAdminAccess()) {
+        LaunchedEffect(currentUserProfile) { onBack() }
+        return
+    }
+
+    fun extendPlan(days: Int, plan: String, price: Int, user: UserProfile) {
+        repository.adminExtendUserPlan(user.uid, days, plan, price) { success ->
+            Toast.makeText(context, if (success) "Plan updated in Firestore"
+                else "Plan update failed; membership unchanged", Toast.LENGTH_LONG).show()
+        }
+    }
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Users, 1: Payments, 2: UPI & QR, 3: Community
 
@@ -383,8 +395,9 @@ fun AdminPanelScreen(
                                 ).show()
                             }
                         },                        onReject = { sub ->
-                            repository.adminRejectPayment(sub.paymentId) {
-                                Toast.makeText(context, "Payment marked as REJECTED in Firestore", Toast.LENGTH_SHORT).show()
+                            repository.adminRejectPayment(sub.paymentId) { success ->
+                                Toast.makeText(context, if (success) "Payment rejected in Firestore"
+                                    else "Rejection failed; payment unchanged", Toast.LENGTH_SHORT).show()
                             }
                         },
                         onEditUtr = { sub ->
@@ -517,43 +530,23 @@ fun AdminPanelScreen(
 
                     // Plan Option Buttons
                     PlanChoiceButton(label = "3 Days Pass (₹59)", days = 3, planId = "3DAYS") {
-                        prefs.extendUserPlan(targetUser.uid, 3, "3DAYS", 59)
-                        prefs.allUsers.value.firstOrNull { it.uid == targetUser.uid }?.let { u ->
-                            repository.adminUpdateUserProfile(u)
-                        }
-                        Toast.makeText(context, "Added 3 Days to ${targetUser.name}", Toast.LENGTH_SHORT).show()
+                        extendPlan(3, "3DAYS", 59, targetUser)
                         userForPlanEdit = null
                     }
                     PlanChoiceButton(label = "7 Days Pass (₹129)", days = 7, planId = "7DAYS") {
-                        prefs.extendUserPlan(targetUser.uid, 7, "7DAYS", 129)
-                        prefs.allUsers.value.firstOrNull { it.uid == targetUser.uid }?.let { u ->
-                            repository.adminUpdateUserProfile(u)
-                        }
-                        Toast.makeText(context, "Added 7 Days to ${targetUser.name}", Toast.LENGTH_SHORT).show()
+                        extendPlan(7, "7DAYS", 129, targetUser)
                         userForPlanEdit = null
                     }
                     PlanChoiceButton(label = "15 Days Pass (₹199)", days = 15, planId = "15DAYS") {
-                        prefs.extendUserPlan(targetUser.uid, 15, "15DAYS", 199)
-                        prefs.allUsers.value.firstOrNull { it.uid == targetUser.uid }?.let { u ->
-                            repository.adminUpdateUserProfile(u)
-                        }
-                        Toast.makeText(context, "Added 15 Days to ${targetUser.name}", Toast.LENGTH_SHORT).show()
+                        extendPlan(15, "15DAYS", 199, targetUser)
                         userForPlanEdit = null
                     }
                     PlanChoiceButton(label = "1 Month Pass (₹329)", days = 30, planId = "1MONTH") {
-                        prefs.extendUserPlan(targetUser.uid, 30, "1MONTH", 329)
-                        prefs.allUsers.value.firstOrNull { it.uid == targetUser.uid }?.let { u ->
-                            repository.adminUpdateUserProfile(u)
-                        }
-                        Toast.makeText(context, "Added 30 Days to ${targetUser.name}", Toast.LENGTH_SHORT).show()
+                        extendPlan(30, "1MONTH", 329, targetUser)
                         userForPlanEdit = null
                     }
                     PlanChoiceButton(label = "1 Year Pass (₹2999)", days = 365, planId = "1YEAR") {
-                        prefs.extendUserPlan(targetUser.uid, 365, "1YEAR", 2999)
-                        prefs.allUsers.value.firstOrNull { it.uid == targetUser.uid }?.let { u ->
-                            repository.adminUpdateUserProfile(u)
-                        }
-                        Toast.makeText(context, "Added 1 Year to ${targetUser.name}", Toast.LENGTH_SHORT).show()
+                        extendPlan(365, "1YEAR", 2999, targetUser)
                         userForPlanEdit = null
                     }
                 }
