@@ -1200,7 +1200,19 @@ private val processingTimeoutRunnable = Runnable {
                 // Android ACTION_CLICK_OK does not prove rejection reached the platform.
                 if (clicked && candidate.platform == Platform.RAPIDO) {
                     rapidoIgnoredVisibleOfferGuard.rememberIgnored(candidate)
-                    observePickupGuardRapidoReject(recordId, candidate, decision.reason)
+                    // Commit the interim reason to Room right away. The prior
+                    // implementation kept the new row PROCESSING for up to
+                    // 2.2 seconds until polling had finished.
+                    val pending = com.example.engine.PickupGuardRejectHistoryPolicy.forPhase(
+                        com.example.engine.PickupGuardRejectHistoryPolicy.Phase.SKIP_SENT
+                    )
+                    onOrderDecisionFast(
+                        recordId, candidate, pending.status, pending.reasonCode,
+                        "${decision.reason} | ${pending.suffix}",
+                        onLocalPersisted = {
+                            observePickupGuardRapidoReject(recordId, candidate, decision.reason)
+                        }
+                    )
                     resetProcessing()
                     return true
                 }
@@ -1221,44 +1233,55 @@ private val processingTimeoutRunnable = Runnable {
         candidate: RideCandidate,
         reason: String
     ) {
-        fun check(attempt: Int) {
-            var matchingOfferStillVisible = false
-            var rapidoHomeVisible = false
-            try {
-                val roots = mutableListOf<AccessibilityNodeInfo>()
-                rootInActiveWindow?.let { roots.add(it) }
-                windows.take(12).forEach { window ->
-                    window.root?.let { roots.add(it) }
-                }
-                for (rapidoRoot in roots) {
-                    if (!isRapidoPackage(rapidoRoot.packageName?.toString().orEmpty())) continue
-                    val validated = RapidoAdapter.validateRapidoOrderPopup(rapidoRoot)
-                    if (validated.isValid) {
-                        val observed = captureRapidoFastSnapshot(rapidoRoot, validated)?.candidate
-                        if (observed != null &&
-                            com.example.engine.PickupGuardRapidoOfferIdentity.sameVisibleOffer(candidate, observed)
-                        ) matchingOfferStillVisible = true
-                    } else if (RapidoAdapter.isRapidoHomeScreen(rapidoRoot)) {
-                        rapidoHomeVisible = true
+        // No heavy root/window scan on Android main Handler. Each verification
+        // cycle previously walked up to 12 windows every 200ms on the main
+        // thread, causing UI stalls and delayed History reason visibility.
+        // The action was already dispatched exactly once before this observer.
+        serviceScope.launch(Dispatchers.IO) {
+            var homeConfirmed = false
+            repeat(10) {
+                delay(200L)
+                var matchingOfferStillVisible = false
+                var rapidoHomeVisible = false
+                try {
+                    val roots = mutableListOf<AccessibilityNodeInfo>()
+                    rootInActiveWindow?.let { roots.add(it) }
+                    windows.take(12).forEach { window ->
+                        window.root?.let { roots.add(it) }
                     }
+                    for (rapidoRoot in roots) {
+                        if (!isRapidoPackage(rapidoRoot.packageName?.toString().orEmpty())) continue
+                        val validated = RapidoAdapter.validateRapidoOrderPopup(rapidoRoot)
+                        if (validated.isValid) {
+                            val observed = captureRapidoFastSnapshot(rapidoRoot, validated)?.candidate
+                            if (observed != null &&
+                                com.example.engine.PickupGuardRapidoOfferIdentity.sameVisibleOffer(candidate, observed)
+                            ) matchingOfferStillVisible = true
+                        } else if (RapidoAdapter.isRapidoHomeScreen(rapidoRoot)) {
+                            rapidoHomeVisible = true
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.d(TAG, "PICKUP_GUARD_REJECT_VERIFY: visibility scan unavailable")
                 }
-            } catch (e: Exception) {
-                Log.d(TAG, "PICKUP_GUARD_REJECT_VERIFY: visibility scan unavailable")
+                if (!matchingOfferStillVisible && rapidoHomeVisible) {
+                    homeConfirmed = true
+                    return@repeat
+                }
             }
-
-            if (!matchingOfferStillVisible && rapidoHomeVisible) {
-                onOrderDecisionFast(recordId, candidate, OrderStatus.REJECTED,
-                    "PICKUP_GUARD_REJECT_UI_DISMISSED",
-                    "$reason | Rapido Skip action sent; home screen observed")
-            } else if (attempt < 9) {
-                handler.postDelayed({ check(attempt + 1) }, 200L)
-            } else {
-                onOrderDecisionFast(recordId, candidate, OrderStatus.IGNORED,
-                    "PICKUP_GUARD_REJECT_UNCONFIRMED",
-                    "$reason | Skip action sent, but dismissal not verified")
-            }
+            val event = com.example.engine.PickupGuardRejectHistoryPolicy.forPhase(
+                if (homeConfirmed)
+                    com.example.engine.PickupGuardRejectHistoryPolicy.Phase.RAPIDO_HOME_CONFIRMED
+                else com.example.engine.PickupGuardRejectHistoryPolicy.Phase.DISMISSAL_UNVERIFIED
+            )
+            // The first request already showed the user one immediate reason
+            // popup. Persist the verified outcome silently in the same row.
+            onOrderDecisionFast(
+                recordId, candidate, event.status, event.reasonCode,
+                "$reason | ${event.suffix}",
+                showReasonPopup = event.showPopup
+            )
         }
-        handler.postDelayed({ check(0) }, 200L)
     }
 
     private fun findPickupGuardNamedReject(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
@@ -11068,7 +11091,9 @@ private val processingTimeoutRunnable = Runnable {
         reasonCode: String,
         reasonText: String,
         matchedGoTo: String = "",
-        matchedNoGo: String = ""
+        matchedNoGo: String = "",
+        showReasonPopup: Boolean = true,
+        onLocalPersisted: (() -> Unit)? = null
     ) {        // ORDER_REASON_POPUP_DECISION_V2
         // Publish the popup only after Room resolves the true final status.
         // An older filter callback must not falsely label an accepted ride.
@@ -11121,7 +11146,7 @@ private val processingTimeoutRunnable = Runnable {
 
                 // An old filter event can finish after a verified accept.
                 // Never show its obsolete REJECTED/IGNORED banner.
-                if (finalUpdated.status == status.name) {
+                if (finalUpdated.status == status.name && showReasonPopup) {
                     showOrderReasonPopupIfEnabled(
                         recordKey = recordId,
                         candidate = candidate,
@@ -11129,6 +11154,9 @@ private val processingTimeoutRunnable = Runnable {
                         reasonText = reasonText
                     )
                 }
+                // Start a bounded follow-up verifier only after this local
+                // status is committed. Prevent out-of-order pending/final writes.
+                if (finalUpdated.status == status.name) onLocalPersisted?.invoke()
                 repository.recordOrderHistory(finalUpdated.toOrderHistoryItem())
                 prefs.notifyOrderHistoryChanged()
             } catch (e: Exception) {
