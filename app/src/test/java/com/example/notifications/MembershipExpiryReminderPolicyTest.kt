@@ -50,6 +50,20 @@ class MembershipExpiryReminderPolicyTest {
         assertEquals(-1, MembershipExpiryReminderPolicy.currentStage(now - hour, now))
     }
 
+    @Test fun threeDayPlanSkipsImmediatePurchaseNotification() {
+        val expiry = now + 72L * hour
+        val effectiveLast = MembershipExpiryReminderPolicy.effectiveLastSentStage("3DAYS", -1)
+        val schedule = MembershipExpiryReminderPolicy.next(expiry, now, effectiveLast)!!
+        assertEquals(1, schedule.stage)
+        assertEquals(expiry - 24L * hour, schedule.atMillis)
+    }
+
+    @Test fun sevenDayPlanKeepsThreeDayReminder() {
+        val expiry = now + 7L * 24L * hour
+        assertEquals(-1, MembershipExpiryReminderPolicy.effectiveLastSentStage("7DAYS", -1))
+        assertEquals(0, MembershipExpiryReminderPolicy.next(expiry, now, -1)!!.stage)
+    }
+
     @Test fun remainingTextIncludesDaysAndHours() {
         assertEquals("2 days 23 hours",
             MembershipExpiryReminderPolicy.remainingText(now + 71L * hour, now))
