@@ -210,6 +210,8 @@ class PreferencesManager(private val context: Context) {
         set(value) {
             prefs.edit().putBoolean(KEY_IS_LOGGED_IN, value).apply()
             _isLoggedIn.value = value
+            // Subscription reminders follow login/logout, independent of ride events.
+            com.example.notifications.MembershipExpiryReminderScheduler.refresh(context)
         }
 
     private val _hasOpenedBefore = MutableStateFlow(prefs.getBoolean(KEY_HAS_OPENED_BEFORE, false))
@@ -869,6 +871,8 @@ class PreferencesManager(private val context: Context) {
         _userProfile.value = profile
         _pickupGuardSettings.value = readPickupGuardSettings()
         updateUserInList(profile)
+        // Server-synced expiry or renewal replaces the previous alarm.
+        com.example.notifications.MembershipExpiryReminderScheduler.refresh(context)
     }
 
     private fun loadUserProfile(): UserProfile {
