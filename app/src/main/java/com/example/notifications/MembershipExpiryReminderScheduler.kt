@@ -126,7 +126,8 @@ object MembershipExpiryReminderScheduler {
 
         val last = store.getInt("last_sent_stage", -1)
         val schedule = MembershipExpiryReminderPolicy.next(
-            profile.planExpireMillis, System.currentTimeMillis(), last
+            profile.planExpireMillis, System.currentTimeMillis(),
+            MembershipExpiryReminderPolicy.effectiveLastSentStage(profile.plan, last)
         ) ?: return
 
         val alarm = app.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
