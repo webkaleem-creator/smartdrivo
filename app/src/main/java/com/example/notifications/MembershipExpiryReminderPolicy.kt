@@ -30,6 +30,12 @@ internal object MembershipExpiryReminderPolicy {
         return Schedule(nextStage, maxOf(nowMillis + 5_000L, dueAt))
     }
 
+    // The 3-day pass would otherwise receive a three-day reminder immediately
+    // upon purchase. Skip that stage; keep the 24h and 6h reminders.
+    fun effectiveLastSentStage(planId: String, lastSentStage: Int): Int =
+        if (planId.equals("3DAYS", ignoreCase = true)) maxOf(lastSentStage, 0)
+        else lastSentStage
+
     fun remainingText(expiryMillis: Long, nowMillis: Long): String {
         val hours = ((expiryMillis - nowMillis).coerceAtLeast(0L) + HOUR_MS - 1L) / HOUR_MS
         val days = hours / 24L
