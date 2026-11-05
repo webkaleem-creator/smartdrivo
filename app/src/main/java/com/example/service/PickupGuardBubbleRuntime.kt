@@ -1,6 +1,7 @@
 package com.example.service
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
@@ -30,8 +31,7 @@ internal object PickupGuardBubbleRuntime {
     private var bubbleUid: String? = null
     private var checkedOwnerUid: String? = null
     private var lastOwnerCheckAt = 0L
-    private var appRef: Application? = null
-
+    
     // Per-owner temporary Pause state. The timer is observed on the existing 2-second loop.
     private const val CONTROL_PREFS = "smartdrivo_owner_pg_quick_controls_v1"
     private const val PAUSE_UNTIL = "pause_until_"
@@ -40,7 +40,6 @@ internal object PickupGuardBubbleRuntime {
     fun start(app: Application) {
         if (started) return
         started = true
-        appRef = app
         prefs = PreferencesManager.getInstance(app)
         scope.launch { prefs.appSettings.collectLatest { sync(app) } }
         scope.launch { prefs.pickupGuardSettings.collectLatest { sync(app) } }
@@ -56,7 +55,7 @@ internal object PickupGuardBubbleRuntime {
     }
 
     private fun controlStore(app: Application) =
-        app.getSharedPreferences(CONTROL_PREFS, Application.MODE_PRIVATE)
+        app.getSharedPreferences(CONTROL_PREFS, Context.MODE_PRIVATE)
 
     private fun pauseUntil(app: Application, uid: String): Long =
         if (uid.isBlank()) 0L else controlStore(app).getLong(PAUSE_UNTIL + uid, 0L)
