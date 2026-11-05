@@ -19,8 +19,8 @@ android {
     applicationId = "com.smartdrivo.app"
     minSdk = 24
     targetSdk = 36
-    versionCode = 22
-    versionName = "1.0.13"
+    versionCode = 23
+    versionName = "1.0.14"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
