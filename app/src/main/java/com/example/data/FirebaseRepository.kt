@@ -11,6 +11,7 @@ import com.example.model.OrderHistoryItem
 import com.example.model.PaymentStatus
 import com.example.model.PaymentSubmission
 import com.example.model.UserProfile
+import com.example.model.SpecialOccasionOffer
 import com.example.model.VehicleType
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
@@ -271,7 +272,7 @@ class FirebaseRepository(
                         )
                     }
 
-                    if (!merged.isPlanValid && !merged.isAdmin) {
+                    if (!prefs.userProfile.value.isPlanValid && !merged.isAdmin) {
                         prefs.setAutoAcceptActive(false)
                     }
                 }
@@ -1333,6 +1334,57 @@ class FirebaseRepository(
             }
         }
     }
+    // Publishing from mobile Admin Panel uses the SAME Firestore config as web.
+    // Only admins can write /settings/global, enforced again in Firestore rules.
+    fun adminSaveSpecialOffer(
+        title: String, description: String, days: Int, enabled: Boolean,
+        onComplete: (Boolean, String) -> Unit
+    ) {
+        val fs = firestore
+        if (fs == null || auth?.currentUser == null ||
+            !prefs.userProfile.value.isAdmin || !prefs.userProfile.value.isActive) {
+            onComplete(false, "Admin permission unavailable")
+            return
+        }
+        val titleSafe = title.trim().take(80)
+        val descriptionSafe = description.trim().take(500)
+        if (days !in setOf(0, 1, 3, 7, 30) ||
+            (enabled && (titleSafe.isBlank() || descriptionSafe.isBlank()))) {
+            onComplete(false, "Enter title, description and duration")
+            return
+        }
+        scope.launch {
+            try {
+                val ref = fs.collection("settings").document("global")
+                fs.runTransaction { tx ->
+                    val old = SpecialOccasionOffer.fromMap(tx.get(ref).get("specialOffer"))
+                    val newlyEnabled = enabled && !old.enabled
+                    val campaignId = if (newlyEnabled || old.id.isBlank())
+                        java.util.UUID.randomUUID().toString() else old.id
+                    val start = if (newlyEnabled) System.currentTimeMillis()
+                        else old.startsAtMillis
+                    val payload = mapOf(
+                        "id" to campaignId,
+                        "enabled" to enabled,
+                        "title" to titleSafe,
+                        "description" to descriptionSafe,
+                        "days" to days,
+                        "startsAtMillis" to start
+                    )
+                    tx.set(ref, mapOf("specialOffer" to payload), SetOptions.merge())
+                    true
+                }.await()
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    onComplete(true, if (enabled) "Offer published" else "Offer stopped")
+                }
+            } catch (e: Exception) {
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    onComplete(false, "Offer save failed: " + e.message)
+                }
+            }
+        }
+    }
+
     // --- Realtime / Remote Plan & Settings Sync ---
     fun fetchGlobalSettings() {
         val fs = firestore ?: return
@@ -1358,8 +1410,15 @@ class FirebaseRepository(
                         doc == null ||
                         !doc.exists()
                     ) {
+                        prefs.updateSpecialOffer(SpecialOccasionOffer())
                         return@addSnapshotListener
                     }
+
+                    // Keep this outside Accessibility/order processing.
+                    prefs.updateSpecialOffer(
+                        if (doc.metadata.isFromCache) SpecialOccasionOffer()
+                        else SpecialOccasionOffer.fromMap(doc.get("specialOffer"))
+                    )
 
                     doc.getString("upiId")
                         ?.takeIf {

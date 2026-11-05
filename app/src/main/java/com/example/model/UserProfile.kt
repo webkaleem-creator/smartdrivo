@@ -34,7 +34,8 @@ data class UserProfile(
 
     val referralCode: String = "SMART50",
     val createdAt: Long = System.currentTimeMillis(),
-    val mobile: String = ""
+    val mobile: String = "",
+    val specialOfferUntilMillis: Long = 0L
 ) {
     val isFreeTrial: Boolean
         get() =
@@ -50,13 +51,10 @@ data class UserProfile(
                     System.currentTimeMillis()
 
     val isPlanValid: Boolean
-        get() =
-            planExpireMillis >
-                System.currentTimeMillis() &&
-                (
-                    isApproved ||
-                        isFreeTrial
-                )
+        get() = (planExpireMillis > System.currentTimeMillis() &&
+            (isApproved || isFreeTrial)) ||
+            (isActive && !isBlocked && !isDeviceBlacklisted &&
+                specialOfferUntilMillis > System.currentTimeMillis())
     val effectiveMobile: String
         get() = mobile.ifEmpty { phone }
 }

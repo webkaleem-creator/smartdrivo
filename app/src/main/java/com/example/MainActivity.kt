@@ -38,6 +38,8 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -66,6 +68,8 @@ import com.google.firebase.FirebaseApp
 import com.example.util.PermissionHelper
 import com.example.util.BankingModeController
 import com.example.model.MembershipPlan
+import com.example.model.SpecialOccasionOffer
+import com.example.notifications.SpecialOccasionNotifier
 import com.example.model.PaymentSubmission
 import com.example.ui.screens.AdminPanelScreen
 import com.example.ui.screens.AreaManagerScreen
@@ -281,6 +285,7 @@ fun SmartDrivoApp(
     val currentRoute = navBackStackEntry?.destination?.route
 
     val userProfile by prefs.userProfile.collectAsState()
+    val specialOffer by prefs.specialOffer.collectAsState()
     val loginFlag by prefs.isLoggedInFlow.collectAsState()
 
     val membershipPlans by
@@ -319,6 +324,43 @@ fun SmartDrivoApp(
     val isUserAdmin = userProfile.isAdmin
     val firebaseUser = PhoneAuthManager.getAuthInstance()?.currentUser
     val isLoggedIn = loginFlag && firebaseUser != null && firebaseUser.uid == userProfile.uid
+
+    // Offer announcements never scan accessibility events or ride windows.
+    var showSpecialOfferPopup by remember { mutableStateOf(false) }
+    val paidPlanValid = userProfile.planExpireMillis > System.currentTimeMillis() &&
+        (userProfile.isApproved || userProfile.isFreeTrial)
+    val mayShowOffer = isLoggedIn && !isUserAdmin && userProfile.isActive &&
+        !userProfile.isBlocked && !userProfile.isDeviceBlacklisted &&
+        !paidPlanValid && specialOffer.isLive()
+    LaunchedEffect(mayShowOffer, specialOffer.id, userProfile.uid) {
+        if (mayShowOffer && userProfile.uid.isNotBlank()) {
+            if (!prefs.specialOfferAlreadyNotified(userProfile.uid, specialOffer.id)) {
+                if (SpecialOccasionNotifier.show(appContext, specialOffer)) {
+                    prefs.markSpecialOfferNotified(userProfile.uid, specialOffer.id)
+                }
+            }
+            if (!prefs.specialOfferPopupSeen(userProfile.uid, specialOffer.id)) {
+                showSpecialOfferPopup = true
+                prefs.markSpecialOfferPopupSeen(userProfile.uid, specialOffer.id)
+            }
+        } else showSpecialOfferPopup = false
+    }
+    if (showSpecialOfferPopup && mayShowOffer) {
+        AlertDialog(
+            onDismissRequest = { showSpecialOfferPopup = false },
+            title = { Text(specialOffer.title) },
+            text = { Text(specialOffer.description + "\n" + specialOffer.durationLabel()) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showSpecialOfferPopup = false
+                    navController.navigate(Routes.PLAN_SELECTION) { launchSingleTop = true }
+                }) { Text("View Membership") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSpecialOfferPopup = false }) { Text("Later") }
+            }
+        )
+    }
 
     // Foreground renewal of server owner claim. Expired or failed verification
     // means no automatic Pickup Guard action; never fall back to normal auto-accept.
@@ -1211,14 +1253,14 @@ fun SmartDrivoApp(
         composable(Routes.PLAN_SELECTION) {
             PlanSelectionScreen(
                 plans = membershipPlans,
-                currentPlanId = userProfile.plan.ifEmpty { "7DAYS" },
-                currentPlanPrice = userProfile.planPrice,
-                planExpireMillis = userProfile.planExpireMillis,
+                currentPlanId = if ((!paidPlanValid && userProfile.specialOfferUntilMillis > System.currentTimeMillis())) "SPECIAL_OCCASION" else userProfile.plan.ifEmpty { "7DAYS" },
+                currentPlanPrice = if ((!paidPlanValid && userProfile.specialOfferUntilMillis > System.currentTimeMillis())) 0 else userProfile.planPrice,
+                planExpireMillis = if ((!paidPlanValid && userProfile.specialOfferUntilMillis > System.currentTimeMillis())) userProfile.specialOfferUntilMillis else userProfile.planExpireMillis,
                 isCurrentPlanActive =
                     userProfile.isPlanValid &&
                     userProfile.isActive,
                 isAdmin = userProfile.isAdmin,
-
+                specialOffer = specialOffer,
                 onPlanSelected = { plan ->
                     selectedPlanForPayment = plan
                     navController.navigate(Routes.PAYMENT)

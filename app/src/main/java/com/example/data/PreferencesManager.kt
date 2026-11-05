@@ -22,6 +22,7 @@ import com.example.model.PaymentStatus
 import com.example.model.PaymentSubmission
 import com.example.model.Platform
 import com.example.model.UserProfile
+import com.example.model.SpecialOccasionOffer
 import com.example.model.VehicleType
 import com.example.security.SignatureIntegrity
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,6 +54,39 @@ class PreferencesManager(private val context: Context) {
     // Reactive StateFlows for UI
     private val _userProfile = MutableStateFlow(loadUserProfile())
     val userProfile: StateFlow<UserProfile> = _userProfile.asStateFlow()
+
+    // Firestore-admin promotion is RAM-only; never persist offline entitlement.
+    private val _specialOffer = MutableStateFlow(SpecialOccasionOffer())
+    val specialOffer: StateFlow<SpecialOccasionOffer> = _specialOffer.asStateFlow()
+
+    private fun applySpecialOffer(profile: UserProfile): UserProfile {
+        val offer = _specialOffer.value
+        // Keep a separate promotional overlay even while a paid plan is active,
+        // so an expiring paid plan can fall back to the still-live campaign.
+        val eligible = !profile.isAdmin && profile.isActive && !profile.isBlocked &&
+            !profile.isDeviceBlacklisted
+        return profile.copy(specialOfferUntilMillis =
+            if (eligible && offer.isLive()) offer.endAtMillis() else 0L)
+    }
+
+    fun updateSpecialOffer(offer: SpecialOccasionOffer) {
+        _specialOffer.value = offer
+        _userProfile.value = applySpecialOffer(_userProfile.value)
+        if (!_userProfile.value.isAdmin && !_userProfile.value.isPlanValid)
+            setAutoAcceptActive(false)
+    }
+
+    fun specialOfferAlreadyNotified(uid: String, id: String): Boolean =
+        prefs.getString("occasion_notify_" + uid, "") == id
+    fun markSpecialOfferNotified(uid: String, id: String) {
+        prefs.edit().putString("occasion_notify_" + uid, id).apply()
+    }
+    fun specialOfferPopupSeen(uid: String, id: String): Boolean =
+        prefs.getString("occasion_popup_" + uid, "") == id
+    fun markSpecialOfferPopupSeen(uid: String, id: String) {
+        prefs.edit().putString("occasion_popup_" + uid, id).apply()
+    }
+
 
     // Per-user storage; OFF by default. Active only with a short-lived server owner claim.
     private val _pickupGuardSettings = MutableStateFlow(readPickupGuardSettings())
@@ -868,9 +902,10 @@ class PreferencesManager(private val context: Context) {
             putString(KEY_REFERRAL, profile.referralCode)
             apply()
         }
-        _userProfile.value = profile
+        val effective = applySpecialOffer(profile)
+        _userProfile.value = effective
         _pickupGuardSettings.value = readPickupGuardSettings()
-        updateUserInList(profile)
+        updateUserInList(effective)
         // Server-synced expiry or renewal replaces the previous alarm.
         com.example.notifications.MembershipExpiryReminderScheduler.refresh(context)
     }

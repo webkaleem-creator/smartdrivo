@@ -74,6 +74,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -121,6 +122,7 @@ fun AdminPanelScreen(
     val currentUpiId by prefs.upiId.collectAsState()
     val currentLinks by prefs.communityLinks.collectAsState()
     val currentUserProfile by prefs.userProfile.collectAsState()
+    val specialOffer by prefs.specialOffer.collectAsState()
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Users, 1: Payments, 2: UPI & QR, 3: Community
 
@@ -309,6 +311,14 @@ fun AdminPanelScreen(
                         )
                     }
                 )
+                Tab(
+                    selected = selectedTab == 4,
+                    onClick = { selectedTab = 4 },
+                    text = {
+                        Text("Free Offer", fontSize = 9.sp,
+                            fontWeight = if (selectedTab == 4) FontWeight.Bold else FontWeight.Normal)
+                    }
+                )
             }
 
             // Tab Content
@@ -404,6 +414,14 @@ fun AdminPanelScreen(
                         }
                     )
                 }
+                4 -> SpecialOccasionAdminSection(
+                    offer = specialOffer,
+                    onSave = { title, description, days, enabled ->
+                        repository.adminSaveSpecialOffer(title, description, days, enabled) { success, msg ->
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                )
                 3 -> {
                     // TAB 3: COMMUNITY LINKS
                     CommunityLinksSection(

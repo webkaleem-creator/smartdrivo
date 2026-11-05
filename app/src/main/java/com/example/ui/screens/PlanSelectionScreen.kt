@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.MembershipPlan
+import com.example.model.SpecialOccasionOffer
 import com.example.ui.theme.AccentGreen
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -57,6 +58,7 @@ fun PlanSelectionScreen(
     planExpireMillis: Long = 0L,
     isCurrentPlanActive: Boolean = false,
     isAdmin: Boolean = false,
+    specialOffer: SpecialOccasionOffer = SpecialOccasionOffer(),
     onPlanSelected: (plan: MembershipPlan) -> Unit,
     onBack: (() -> Unit)? = null
 ) {
@@ -67,6 +69,9 @@ fun PlanSelectionScreen(
     val uriHandler = LocalUriHandler.current
 
     // FREE_TRIAL_UI_POLISH_V4
+    val isSpecialOccasion = currentPlanId == "SPECIAL_OCCASION"
+    // This appears before paid plans and current-membership cards.
+    val showSpecialOffer = specialOffer.isLive() && !isAdmin
     val isFreeTrial =
         currentPlanId.equals(
             "FREE_TRIAL",
@@ -81,8 +86,8 @@ fun PlanSelectionScreen(
     val now = System.currentTimeMillis()
     val oneDayMs = 24L * 60L * 60L * 1000L
 
-    val remainingDays = remember(planExpireMillis, isAdmin) {
-        if (isAdmin) {
+    val remainingDays = remember(planExpireMillis, isAdmin, isSpecialOccasion, specialOffer.days) {
+        if (isAdmin || (isSpecialOccasion && specialOffer.days == 0)) {
             -1
         } else {
             val diff = planExpireMillis - System.currentTimeMillis()
@@ -95,8 +100,10 @@ fun PlanSelectionScreen(
         }
     }
 
-    val expiryText = remember(planExpireMillis) {
-        if (planExpireMillis > 0L) {
+    val expiryText = remember(planExpireMillis, isSpecialOccasion, specialOffer.days) {
+        if (isSpecialOccasion && specialOffer.days == 0) {
+            "While offer is ON"
+        } else if (planExpireMillis > 0L) {
             SimpleDateFormat(
                 "dd MMM yyyy",
                 Locale.getDefault()
@@ -175,7 +182,35 @@ fun PlanSelectionScreen(
             item {
                 Spacer(modifier = Modifier.height(4.dp))
             }
-
+            if (showSpecialOffer) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(15.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3D8))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("SPECIAL OCCASION • FREE",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp, color = Color(0xFF9A5700))
+                            Text(specialOffer.title,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 20.sp, color = Color(0xFF4B2C00))
+                            Text(specialOffer.description, fontSize = 13.sp,
+                                color = Color(0xFF5C4324))
+                            Text(specialOffer.durationLabel(),
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF8A4A00))
+                            Text("Auto-enabled for eligible free users. No UPI or UTR needed. " +
+                                "Admin OFF ends this offer. Paid membership is unchanged.",
+                                fontSize = 11.sp, color = Color(0xFF705A3C))
+                        }
+                    }
+                }
+            }
 
             // ------------------------------------------------
             // CURRENT ACTIVE MEMBERSHIP
@@ -240,6 +275,8 @@ fun PlanSelectionScreen(
                                             isAdmin ->
                                                 "Admin Membership"
 
+                                            isSpecialOccasion -> specialOffer.title
+
                                             isFreeTrial ->
                                                 "1-Day Free Trial"
 
@@ -260,6 +297,9 @@ fun PlanSelectionScreen(
                                         text = when {
                                             isAdmin ->
                                                 "Full SmartDrivo access"
+
+                                            isSpecialOccasion ->
+                                                "Special occasion free access"
 
                                             isFreeTrial ->
                                                 "Full SmartDrivo access - Free"
@@ -320,7 +360,7 @@ fun PlanSelectionScreen(
 
                                         Text(
                                             text = when {
-                                                isAdmin ->
+                                                isAdmin || (isSpecialOccasion && specialOffer.days == 0) ->
                                                     "Unlimited"
 
                                                 remainingDays == 1 ->
@@ -374,10 +414,14 @@ fun PlanSelectionScreen(
 
                                 Text(
                                     text =
-                                        if (isFreeTrial)
-                                            "Your 1-day free trial includes full SmartDrivo access. After it ends, choose a membership plan to continue."
-                                        else
-                                            "Your current membership keeps working while a renewal payment is waiting for admin approval.",
+                                        when {
+                                            isSpecialOccasion ->
+                                                "Free occasion access lasts for the chosen duration or until admin turns it OFF. Paid membership remains unchanged."
+                                            isFreeTrial ->
+                                                "Your 1-day free trial includes full SmartDrivo access. After it ends, choose a membership plan to continue."
+                                            else ->
+                                                "Your current membership keeps working while a renewal payment is waiting for admin approval."
+                                        },
                                     fontSize = 11.5.sp,
                                     color = Color(0xFF64748B)
                                 )

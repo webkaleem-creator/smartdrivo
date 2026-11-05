@@ -465,6 +465,24 @@
         <i class="fa-solid fa-floppy-disk"></i> Save Plan Prices
       </button>
 
+      <!-- ADMIN OCCASION FREE PLAN (independent from paid membership prices) -->
+      <h2 class="panel-title" style="margin-top:34px;"><i class="fa-solid fa-gift" style="color:#F59E0B;"></i> Special Occasion Free Plan</h2>
+      <p class="panel-desc">Diwali, Dasera or any event. Admin controls free access and message for eligible drivers. Paid memberships are never overwritten.</p>
+      <div class="card" style="padding:18px; border:1px solid #6B521A;">
+        <div class="form-group"><label>Offer title</label><input type="text" id="specialOfferTitle" maxlength="80" placeholder="Diwali Free Offer"></div>
+        <div class="form-group"><label>Message shown to drivers</label><textarea id="specialOfferDescription" maxlength="500" rows="3" placeholder="A festive gift from SmartDrivo"></textarea></div>
+        <div class="form-group"><label>Free duration</label><select id="specialOfferDays">
+          <option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="30">30 days</option><option value="0">Unlimited (until OFF)</option>
+        </select></div>
+        <label style="display:flex; align-items:center; gap:10px; margin:12px 0;">
+          <input type="checkbox" id="specialOfferEnabled" style="width:auto;"> <strong>Enable special occasion offer</strong>
+        </label>
+        <p id="specialOfferStatus" style="color:#94A3B8;font-size:12px;">OFF — not yet published</p>
+        <p style="font-size:12px;color:#FBBF24;">Duration starts when switched ON. OFF immediately ends free promotional access when users reconnect. Unlimited is not permanent. Paid plans stay unchanged.</p>
+        <button class="btn" id="saveSpecialOfferBtn" onclick="saveSpecialOffer()"><i class="fa-solid fa-floppy-disk"></i> Save &amp; Publish</button>
+        <button class="btn btn-danger" style="margin-left:8px;" onclick="stopSpecialOffer()">STOP OFFER</button>
+      </div>
+
       <!-- MINIMUM_VERSION_LOCK_ADMIN_V1 -->
       <h2 class="panel-title" style="margin-top: 32px;">
         <i class="fa-solid fa-cloud-arrow-up" style="color: var(--accent);"></i>
@@ -1070,6 +1088,18 @@
 
 
           // MINIMUM_VERSION_LOCK_ADMIN_V1
+          // SPECIAL OCCASION OFFER (same shared Firestore config as mobile admin)
+          const occasion = data.specialOffer || {};
+          document.getElementById("specialOfferTitle").value = occasion.title || "";
+          document.getElementById("specialOfferDescription").value = occasion.description || "";
+          document.getElementById("specialOfferDays").value = [0,1,3,7,30].includes(Number(occasion.days)) ? String(occasion.days) : "1";
+          document.getElementById("specialOfferEnabled").checked = occasion.enabled === true;
+          const occasionEnd = Number(occasion.days) === 0 ? Infinity : Number(occasion.startsAtMillis || 0) + Number(occasion.days || 1) * 86400000;
+          const occasionLive = occasion.enabled === true && Number(occasion.startsAtMillis) > 0 && occasionEnd > Date.now();
+          document.getElementById("specialOfferStatus").textContent = occasionLive
+            ? "LIVE: " + (occasion.title || "Special occasion") + " (" + (Number(occasion.days) === 0 ? "Unlimited until OFF" : occasion.days + " days") + ")"
+            : "OFF / EXPIRED — no promotional grant";
+
           const minimumCode =
             Number(data.minimumAppVersionCode || 6);
 
@@ -1626,6 +1656,39 @@
     }
 
     // 9. SAVE PLAN PRICES
+    // Special-offer write is admin-only through existing Firestore rules.
+    async function saveSpecialOffer(forceOff = false) {
+      const title = document.getElementById("specialOfferTitle").value.trim().slice(0, 80);
+      const description = document.getElementById("specialOfferDescription").value.trim().slice(0, 500);
+      const days = Number(document.getElementById("specialOfferDays").value);
+      const enabled = !forceOff && document.getElementById("specialOfferEnabled").checked;
+      if (![0,1,3,7,30].includes(days)) return showToast("Choose a valid duration", "error");
+      if (enabled && (!title || !description)) return showToast("Title and description required", "error");
+      if (forceOff && !confirm('Stop the special offer now? All free promotional access will end. Paid plans remain active.')) return;
+      const btn = document.getElementById("saveSpecialOfferBtn");
+      btn.disabled = true;
+      try {
+        const ref = db.collection("settings").doc("global");
+        await db.runTransaction(async (transaction) => {
+          const snap = await transaction.get(ref);
+          const old = (snap.exists && snap.data().specialOffer) || {};
+          const newlyEnabled = enabled && old.enabled !== true;
+          const id = newlyEnabled || !old.id
+            ? "occasion-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10)
+            : String(old.id);
+          const startsAtMillis = newlyEnabled ? Date.now() : Number(old.startsAtMillis || 0);
+          transaction.set(ref, { specialOffer: {
+            id, enabled, title, description, days, startsAtMillis
+          } }, { merge: true });
+        });
+        showToast(enabled ? "Special free offer LIVE!" : "Special offer OFF", "success");
+        logMessage("Special offer saved; enabled=" + enabled + ", days=" + days);
+      } catch (error) {
+        showToast("Special offer save failed: " + error.message, "error");
+      } finally { btn.disabled = false; }
+    }
+    function stopSpecialOffer() { saveSpecialOffer(true); }
+
     async function savePlanPrices() {
       const price3 = Number(document.getElementById('price3Days').value) || 59;
       const price7 = Number(document.getElementById('price7Days').value) || 129;
