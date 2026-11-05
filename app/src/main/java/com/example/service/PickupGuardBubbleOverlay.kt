@@ -315,13 +315,25 @@ internal class PickupGuardBubbleOverlay(
         }
         heading.addView(headingText, LinearLayout.LayoutParams(
             0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        // Hide dismisses ONLY the large Quick Controls menu.
+        // Main Auto Accept, Pickup Guard, and the PG bubble remain untouched.
+        heading.addView(
+            button("Hide", { hideMenu() }).apply {
+                gravity = Gravity.CENTER
+                setPadding(0, 0, 0, 0)
+                contentDescription = "Hide Quick Controls menu only"
+            },
+            LinearLayout.LayoutParams(dp(50), dp(34)).apply {
+                marginEnd = dp(4)
+            }
+        )
         heading.addView(
             button("×", { hideMenu() }).apply {
                 gravity = Gravity.CENTER
                 setPadding(0, 0, 0, 0)
                 contentDescription = "Close Quick Controls"
             },
-            LinearLayout.LayoutParams(dp(34), dp(34))
+            LinearLayout.LayoutParams(dp(30), dp(34))
         )
         panel.addView(heading)
         panel.addView(line())
