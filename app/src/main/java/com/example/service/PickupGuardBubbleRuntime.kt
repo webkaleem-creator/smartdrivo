@@ -45,7 +45,6 @@ internal object PickupGuardBubbleRuntime {
         scope.launch { prefs.pickupGuardSettings.collectLatest { sync(app) } }
         scope.launch { prefs.userProfile.collectLatest { sync(app) } }
         scope.launch { prefs.isLoggedInFlow.collectLatest { sync(app) } }
-        scope.launch { prefs.orderHistory.collectLatest { sync(app) } }
         scope.launch {
             while (isActive) {
                 sync(app)
@@ -123,15 +122,6 @@ internal object PickupGuardBubbleRuntime {
         PickupGuardOwnerAccess.refresh(profile) { sync(app) }
     }
 
-    private fun mostRecentReason(): String {
-        val recent = prefs.orderHistory.value.maxByOrNull { it.timestamp }
-            ?: return "No recent saved order reason"
-        val reason = recent.decisionReasonText.ifBlank { recent.reason }
-            .ifBlank { recent.decisionReasonCode }
-            .ifBlank { "No reason recorded" }
-        return recent.platform.name + " • " + recent.status.name + " • " + reason
-    }
-
     private fun sync(app: Application) {
         if (!started || !::prefs.isInitialized) return
         val profile = prefs.userProfile.value
@@ -142,7 +132,11 @@ internal object PickupGuardBubbleRuntime {
 
         val verified = PickupGuardOwnerAccess.authorized(profile)
         refreshOwnerClaimIfDue(app, profile, verified)
+        if (PickupGuardOwnerAccess.authorized(profile)) resumeExpiredPause(app, profile)
+        // The owner auth refresh and timed pause restoration run even while master is OFF.
+        // The floating bubble itself is STRICTLY gated on Main Auto Accept ON.
         if (!PickupGuardBubblePolicy.shouldShow(
+                masterOn = prefs.appSettings.value.isAutoAcceptActive,
                 serviceRunning = SmartDrivoAccessibilityService.isServiceRunning,
                 loggedIn = prefs.isLoggedIn,
                 ownerAuthorized = PickupGuardOwnerAccess.authorized(profile),
@@ -152,8 +146,6 @@ internal object PickupGuardBubbleRuntime {
             hideBubble()
             return
         }
-
-        resumeExpiredPause(app, profile)
 
         if (bubbleUid != profile.uid) {
             hideBubble()
@@ -175,7 +167,7 @@ internal object PickupGuardBubbleRuntime {
         }
         val guard = prefs.pickupGuardSettings.value
         bubble?.show(guard.enabled, prefs.appSettings.value.isAutoAcceptActive,
-            guard.maxPickupKm, pauseUntil(app, profile.uid), mostRecentReason())
+            guard.maxPickupKm, pauseUntil(app, profile.uid))
     }
 
     private fun setMaster(app: Application, enabled: Boolean) {

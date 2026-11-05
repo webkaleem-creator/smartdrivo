@@ -6,12 +6,13 @@ package com.example.service
  */
 internal object PickupGuardBubblePolicy {
     fun shouldShow(
+        masterOn: Boolean,
         serviceRunning: Boolean,
         loggedIn: Boolean,
         ownerAuthorized: Boolean,
         bankingActive: Boolean,
         overlayAllowed: Boolean
-    ): Boolean = serviceRunning && loggedIn && ownerAuthorized && !bankingActive && overlayAllowed
+    ): Boolean = masterOn && serviceRunning && loggedIn && ownerAuthorized && !bankingActive && overlayAllowed
 
     fun snapX(x: Int, left: Int, right: Int): Int {
         if (left >= right) return left

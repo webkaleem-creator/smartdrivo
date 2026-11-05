@@ -39,7 +39,6 @@ internal class PickupGuardBubbleOverlay(
         val mainOn: Boolean,
         val maxPickup: Float,
         val pausedUntil: Long,
-        val lastReason: String,
         val locked: Boolean
     )
     private val windows = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -49,7 +48,7 @@ internal class PickupGuardBubbleOverlay(
     private var bubble: TextView? = null
     private var params: WindowManager.LayoutParams? = null
     private var menu: LinearLayout? = null
-    private var menuState = MenuState(false, false, 0.6f, 0L, "", false)
+    private var menuState = MenuState(false, false, 0.6f, 0L, false)
     private var renderedMenuState: MenuState? = null
     private var pressedX = 0f
     private var pressedY = 0f
@@ -94,13 +93,13 @@ internal class PickupGuardBubbleOverlay(
 
     @SuppressLint("ClickableViewAccessibility")
     fun show(guardEnabled: Boolean, mainEnabled: Boolean, pickupKm: Float,
-             pausedUntil: Long, lastReason: String) {
+             pausedUntil: Long) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
             hide()
             return
         }
         val nextState = MenuState(guardEnabled, mainEnabled, pickupKm, pausedUntil,
-            lastReason.take(150), isPositionLocked())
+            isPositionLocked())
         if (menuState != nextState) {
             menuState = nextState
             renderMenu()
@@ -269,28 +268,71 @@ internal class PickupGuardBubbleOverlay(
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f)) }
         }
 
+    /** A green/red circle shows the actual persisted Main Auto Accept state. */
+    private fun mainAutoRow(enabled: Boolean): LinearLayout =
+        LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = GradientDrawable().apply {
+                cornerRadius = dp(10).toFloat()
+                setColor(0xFFEFF6FF.toInt())
+            }
+            isClickable = true
+            contentDescription = "Main Auto Accept " + if (enabled) "ON" else "OFF"
+            setOnClickListener { onToggleMainAuto() }
+            addView(
+                text("Main Auto Accept", 12f, 0xFF155E75.toInt(), true),
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            val status = text(if (enabled) "✓" else "×", 15f, 0xFFFFFFFF.toInt(), true).apply {
+                gravity = Gravity.CENTER
+                setPadding(0, 0, 0, 0)
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(if (enabled) 0xFF16A34A.toInt() else 0xFFDC2626.toInt())
+                }
+            }
+            addView(status, LinearLayout.LayoutParams(dp(27), dp(27)).apply {
+                marginEnd = dp(10)
+            })
+        }
+
     private fun renderMenu() {
         val panel = menu ?: return
         if (renderedMenuState == menuState) return
         renderedMenuState = menuState
         panel.removeAllViews()
         val state = menuState
-        panel.addView(row(
-            text("SmartDrivo Quick Controls", 14f, 0xFF0F172A.toInt(), true),
-            button("Close ×", { hideMenu() })
-        ))
+        // Fixed 34dp close button: title gets the remaining full width, never two lines.
+        val heading = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val headingText = text("SmartDrivo Quick Controls", 12f,
+            0xFF0F172A.toInt(), true).apply {
+            setSingleLine(true)
+            maxLines = 1
+        }
+        heading.addView(headingText, LinearLayout.LayoutParams(
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        heading.addView(
+            button("×", { hideMenu() }).apply {
+                gravity = Gravity.CENTER
+                setPadding(0, 0, 0, 0)
+                contentDescription = "Close Quick Controls"
+            },
+            LinearLayout.LayoutParams(dp(34), dp(34))
+        )
+        panel.addView(heading)
         panel.addView(line())
-        panel.addView(button("Main Auto Accept: " + if (state.mainOn) "ON ✓" else "OFF",
-            { onToggleMainAuto() }))
-        panel.addView(button("Pickup Guard: " + if (state.guardOn) "ON ✓  (Manual)" else "OFF",
-            { onToggleGuard() }))
+        panel.addView(mainAutoRow(state.mainOn))
         panel.addView(line())
         panel.addView(text("Max Pickup: " + state.maxPickup + " km", 12f,
             0xFF475569.toInt(), true))
         panel.addView(row(
-            button("0.3 km", { onPickupLimit(0.3f) }),
+            button("0.4 km", { onPickupLimit(0.4f) }),
             button("0.6 km", { onPickupLimit(0.6f) }),
-            button("1.0 km", { onPickupLimit(1.0f) })
+            button("0.8 km", { onPickupLimit(0.8f) })
         ))
         panel.addView(line())
         if (PickupGuardQuickControlPolicy.isPaused(state.pausedUntil,
@@ -308,9 +350,6 @@ internal class PickupGuardBubbleOverlay(
             ))
         }
         panel.addView(line())
-        panel.addView(text("Last order reason", 11f, 0xFF64748B.toInt(), true))
-        panel.addView(text(state.lastReason.ifBlank { "No recent saved order reason" },
-            11f, 0xFF334155.toInt()).apply { maxLines = 2 })
         panel.addView(button(if (state.locked) "🔒 Unlock popup position" else "🔓 Lock popup position", {
             togglePositionLock()
         }))

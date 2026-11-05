@@ -7,7 +7,7 @@ import org.junit.Test
 
 class PickupGuardQuickControlPolicyTest {
     @Test fun pickupPresetsAndBoundaries() {
-        assertEquals(listOf(0.3f, 0.6f, 1.0f), PickupGuardQuickControlPolicy.QUICK_PICKUP_LIMITS)
+        assertEquals(listOf(0.4f, 0.6f, 0.8f), PickupGuardQuickControlPolicy.QUICK_PICKUP_LIMITS)
         for (km in PickupGuardQuickControlPolicy.QUICK_PICKUP_LIMITS) {
             assertTrue(PickupGuardQuickControlPolicy.validPickup(km))
         }

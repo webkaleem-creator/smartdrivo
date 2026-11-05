@@ -3,7 +3,7 @@ package com.example.service
 /** Pure policy for owner-only Quick Controls. No platform order parsing or clicks. */
 internal object PickupGuardQuickControlPolicy {
     const val LONG_PRESS_MS = 500L
-    val QUICK_PICKUP_LIMITS = listOf(0.3f, 0.6f, 1.0f)
+    val QUICK_PICKUP_LIMITS = listOf(0.4f, 0.6f, 0.8f)
     val PAUSE_MINUTES = listOf(5, 10, 15)
 
     fun validPickup(value: Float): Boolean =
