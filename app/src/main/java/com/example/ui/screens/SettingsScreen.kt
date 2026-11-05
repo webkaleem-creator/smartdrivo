@@ -96,6 +96,8 @@ fun SettingsScreen(
     onBack: () -> Unit
 ) {
     val settings by prefs.appSettings.collectAsState()
+    val goToAreas by prefs.goToAreas.collectAsState()
+    val filterPause = FilterPausePolicy.resolve(settings, goToAreas)
 
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -259,6 +261,7 @@ fun SettingsScreen(
             // Legacy Filter 2 and 3 presets migrate to these independent rows.
             item {
                 SectionHeader("1. ORDER FILTERS")
+                PausedFilterCard(reason = filterPause.normalFilterPauseReason) {
                 UnlimitedRulesEditor(
                     title = "Order Filter Unlimited",
                     plus = false,
@@ -270,11 +273,13 @@ fun SettingsScreen(
                         if (notifySaved) showSavedSnackbar()
                     }
                 )
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // PLUS_AMOUNT_UNLIMITED_IN_PARENT_V2
-                // +Amount only applies to Rapido, as in V1.
+                // +Amount remains independent and usable when GO TO is ON.
+                PausedFilterCard(reason = filterPause.fastestPauseReason) {
                 UnlimitedRulesEditor(
                     title = "+ Amount Filter Unlimited",
                     plus = true,
@@ -286,6 +291,7 @@ fun SettingsScreen(
                         if (notifySaved) showSavedSnackbar()
                     }
                 )
+                }
 
                 Spacer(modifier = Modifier.height(5.dp))
                 Text(
@@ -300,6 +306,7 @@ fun SettingsScreen(
             item {
                 SectionHeader("2. BUNDLE ORDER")
 
+                PausedFilterCard(reason = filterPause.normalFilterPauseReason) {
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = if (settings.isBundleOrderEnabled) BlueContainer else CardBackground
@@ -453,6 +460,7 @@ fun SettingsScreen(
                                     TextDarkSecondary
                         )
                     }
+                }
                 }
             }
             // 3. SUPPORTED PLATFORMS (Rapido only)

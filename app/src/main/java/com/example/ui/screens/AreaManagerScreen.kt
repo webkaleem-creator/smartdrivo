@@ -107,6 +107,7 @@ fun AreaManagerScreen(
     val storedGoTo by prefs.goToAreas.collectAsState()
     val storedNoGo by prefs.noGoAreas.collectAsState()
     val savedFixArea by prefs.fixAreaSettings.collectAsState()
+    val settings by prefs.appSettings.collectAsState()
 
     var goToGroups by remember { mutableStateOf(cleanAreaGroups(prefs.goToAreas.value)) }
     var noGoGroups by remember { mutableStateOf(cleanAreaGroups(prefs.noGoAreas.value)) }
@@ -115,6 +116,7 @@ fun AreaManagerScreen(
     var editorGroup by remember { mutableStateOf<AreaGroup?>(null) }
     var showNewEditor by remember { mutableStateOf(false) }
     var deleteGroup by remember { mutableStateOf<AreaGroup?>(null) }
+    val filterPause = FilterPausePolicy.resolve(settings, goToGroups)
 
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -130,6 +132,7 @@ fun AreaManagerScreen(
     }
 
     fun persist(go: List<AreaGroup>, no: List<AreaGroup>) {
+        if (settings.isFastestModeEnabled) return
         val cleanGo = cleanAreaGroups(go)
         val cleanNo = cleanAreaGroups(no)
 
@@ -146,6 +149,7 @@ fun AreaManagerScreen(
     }
 
     fun saveGroup(saved: AreaGroup) {
+        if (settings.isFastestModeEnabled) return
         if (saved.name.isBlank()) return
 
         if (saved.type == AreaType.GO_TO) {
@@ -256,10 +260,13 @@ fun AreaManagerScreen(
             if (!selectedFixArea) {
                 FloatingActionButton(
                 onClick = {
-                    editorGroup = null
-                    showNewEditor = true
+                    if (!settings.isFastestModeEnabled) {
+                        editorGroup = null
+                        showNewEditor = true
+                    }
                 },
-                containerColor = accent,
+                containerColor = if (settings.isFastestModeEnabled)
+                    Color(0xFF9CA3AF) else accent,
                 contentColor = Color.White,
                 shape = RoundedCornerShape(18.dp)
             ) {
@@ -358,15 +365,19 @@ fun AreaManagerScreen(
             }
             if (selectedFixArea) {
                 item {
+                    PausedFilterCard(reason = filterPause.normalFilterPauseReason) {
                     FixAreaEditorCard(
                         saved = savedFixArea,
                         onSave = { updated ->
-                            prefs.saveFixAreaSettings(updated)
-                            scope.launch {
-                                snackbar.showSnackbar("Fix Area settings saved")
+                            if (filterPause.normalFilterPauseReason == null) {
+                                prefs.saveFixAreaSettings(updated)
+                                scope.launch {
+                                    snackbar.showSnackbar("Fix Area settings saved")
+                                }
                             }
                         }
                     )
+                    }
                 }
             } else if (visibleGroups.isEmpty()) {
                 item {
@@ -405,6 +416,7 @@ fun AreaManagerScreen(
                     items = visibleGroups,
                     key = { _, group -> group.id }
                 ) { _, group ->
+                    PausedFilterCard(reason = filterPause.fastestPauseReason) {
                     CompactAreaGroupCard(
                         group = group,
                         onEdit = {
@@ -437,9 +449,10 @@ fun AreaManagerScreen(
                             }
                         },
                         onDelete = {
-                            deleteGroup = group
+                            if (!settings.isFastestModeEnabled) deleteGroup = group
                         }
                     )
+                    }
                 }
             }
 

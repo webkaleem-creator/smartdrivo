@@ -97,6 +97,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.data.FirebaseRepository
 import com.example.data.PreferencesManager
+import com.example.ui.screens.FilterPausePolicy
 import com.example.model.FilterMode
 import com.example.model.OrderHistoryItem
 import com.example.model.OrderStatus
@@ -157,6 +158,7 @@ fun HomeScreen(
         historyEntities.map { it.toOrderHistoryItem() }
     }
 val goToAreas by prefs.goToAreas.collectAsState()
+    val filterPause = FilterPausePolicy.resolve(settings, goToAreas)
     val noGoAreas by prefs.noGoAreas.collectAsState()
     // HOME_FIX_AREA_COUNT_V1
     val fixArea by prefs.fixAreaSettings.collectAsState()
@@ -1404,9 +1406,9 @@ val goToAreas by prefs.goToAreas.collectAsState()
             }
             // HOME_FILTER_COMPACT_V1
             // ORDER_FILTER_1_UI_V1
-            // Same compact visual family as Order Filter 2 / 3.
-            // Existing Fare / Distance / Both behavior is unchanged.
+            // Paused presentation only: do not alter saved filter values.
             item {
+                PausedFilterCard(reason = filterPause.normalFilterPauseReason) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
@@ -2126,9 +2128,11 @@ val goToAreas by prefs.goToAreas.collectAsState()
                         }
                     }
                 }
+                }
             }
             // 7. Area Rules Engine card — COMPACT
             item {
+                PausedFilterCard(reason = filterPause.fastestPauseReason) {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -2213,6 +2217,7 @@ val goToAreas by prefs.goToAreas.collectAsState()
                             modifier = Modifier.size(18.dp)
                         )
                     }
+                }
                 }
             }
             item {
