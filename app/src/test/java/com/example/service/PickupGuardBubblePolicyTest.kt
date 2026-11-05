@@ -6,7 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PickupGuardBubblePolicyTest {
-    @Test fun ownerCanSeeBubbleOnlyWhileMasterEnabled() {
+    @Test fun ownerCanSeeBubbleWhileMasterOffIfServiceRunning() {
         assertTrue(PickupGuardBubblePolicy.shouldShow(true, true, true, false, true))
         assertFalse(PickupGuardBubblePolicy.shouldShow(false, true, true, false, true))
     }
