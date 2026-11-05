@@ -277,7 +277,7 @@ internal class PickupGuardBubbleOverlay(
         val state = menuState
         panel.addView(row(
             text("SmartDrivo Quick Controls", 14f, 0xFF0F172A.toInt(), true),
-            button("Close ×") { hideMenu() }
+            button("Close ×", { hideMenu() })
         ))
         panel.addView(line())
         panel.addView(button("Main Auto Accept: " + if (state.mainOn) "ON ✓" else "OFF",
@@ -288,32 +288,32 @@ internal class PickupGuardBubbleOverlay(
         panel.addView(text("Max Pickup: " + state.maxPickup + " km", 12f,
             0xFF475569.toInt(), true))
         panel.addView(row(
-            button("0.3 km") { onPickupLimit(0.3f) },
-            button("0.6 km") { onPickupLimit(0.6f) },
-            button("1.0 km") { onPickupLimit(1.0f) }
+            button("0.3 km", { onPickupLimit(0.3f) }),
+            button("0.6 km", { onPickupLimit(0.6f) }),
+            button("1.0 km", { onPickupLimit(1.0f) })
         ))
         panel.addView(line())
         if (PickupGuardQuickControlPolicy.isPaused(state.pausedUntil,
                 System.currentTimeMillis())) {
             panel.addView(row(
                 text("Automation paused", 12f, 0xFF9A3412.toInt(), true),
-                button("Resume") { onResume() }
+                button("Resume", { onResume() })
             ))
         } else {
             panel.addView(text("Pause automation", 12f, 0xFF475569.toInt(), true))
             panel.addView(row(
-                button("5 min") { onPause(5) },
-                button("10 min") { onPause(10) },
-                button("15 min") { onPause(15) }
+                button("5 min", { onPause(5) }),
+                button("10 min", { onPause(10) }),
+                button("15 min", { onPause(15) })
             ))
         }
         panel.addView(line())
         panel.addView(text("Last order reason", 11f, 0xFF64748B.toInt(), true))
         panel.addView(text(state.lastReason.ifBlank { "No recent saved order reason" },
             11f, 0xFF334155.toInt()).apply { maxLines = 2 })
-        panel.addView(button(if (state.locked) "🔒 Unlock popup position" else "🔓 Lock popup position") {
+        panel.addView(button(if (state.locked) "🔒 Unlock popup position" else "🔓 Lock popup position", {
             togglePositionLock()
-        })
+        }))
         panel.addView(line())
         panel.addView(button("⛔ Emergency Stop — Auto OFF + Guard OFF",
             { onEmergencyStop() }, danger = true))
