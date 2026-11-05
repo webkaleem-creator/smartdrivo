@@ -1011,29 +1011,13 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                     )
                                 }
 
-                                Text(
-                                    text = if (assistanceActive) "ON" else "OFF",
-                                    color = if (assistanceActive)
-                                        Color(0xFF1677F2)
-                                    else
-                                        Color(0xFF94A3B8),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-
-                                Spacer(Modifier.width(5.dp))
-
-                                Switch(
+                                // STYLE 3 OUTLINE TOGGLE — Home Smart Assistance only.
+                                // Reuses the original master setting handler and permission checks.
+                                HomeOutlineToggle(
                                     checked = assistanceActive,
                                     onCheckedChange = { enabled ->
                                         handleToggleAutoAccept(enabled)
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = Color(0xFF1677F2),
-                                        uncheckedThumbColor = Color.White,
-                                        uncheckedTrackColor = Color(0xFFCBD5E1)
-                                    )
+                                    }
                                 )
                             }
 
@@ -1100,29 +1084,13 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                     )
                                 }
 
-                                Text(
-                                    text = if (rejectEnabled) "ON" else "OFF",
-                                    color = if (rejectEnabled)
-                                        Color(0xFF09A84B)
-                                    else
-                                        Color(0xFF94A3B8),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-
-                                Spacer(Modifier.width(5.dp))
-
-                                Switch(
+                                // STYLE 3 OUTLINE TOGGLE — Home Auto Reject only.
+                                // Independent existing Auto Reject state/logic is unchanged.
+                                HomeOutlineToggle(
                                     checked = rejectEnabled,
                                     onCheckedChange = { enabled ->
                                         changeReject(enabled)
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = Color(0xFF09B34F),
-                                        uncheckedThumbColor = Color.White,
-                                        uncheckedTrackColor = Color(0xFFCBD5E1)
-                                    )
+                                    }
                                 )
                             }
                         }
