@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.util.Log
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
@@ -27,9 +28,10 @@ import java.util.concurrent.ConcurrentHashMap
  * - dark compact card
  * - status color strip/badge
  * - only platform + fare + final reason
- * - auto hides after 13 seconds; a new order immediately replaces the old one
+ * - auto hides after 5 seconds; a genuinely new offer replaces the old one
  */
 object OrderDecisionPopup {
+    private const val TAG = "SmartDrivoShortPopup"
 
     private val mainHandler =
         Handler(Looper.getMainLooper())
@@ -58,23 +60,21 @@ object OrderDecisionPopup {
     @Volatile
     private var latestOrderKey: String = ""
 
+    /** A repeat accessibility detection of the same offer must not erase its 5-second banner. */
     fun onNewOrderDetected(recordKey: String) {
         if (bankingPaused) return
-        val key = recordKey.trim()
-        if (key.isBlank() || key == latestOrderKey) return
+        val canonical = OrderDecisionPopupIdentity.canonical(recordKey)
+        if (canonical.isBlank() || canonical == latestOrderKey) return
 
-        latestOrderKey = key
-
-        // Async UI work only. Never block Rapido order processing.
+        latestOrderKey = canonical
+        // Never block the live Rapido event/click thread with WindowManager work.
         mainHandler.post {
-            if (latestOrderKey == key) {
-                removeActive()
-            }
+            if (latestOrderKey == canonical) removeActive()
         }
     }
 
-    private const val DISPLAY_MS = 5_000L
-    private const val DEDUPE_MS = 5000L
+    private const val DISPLAY_MS = OrderDecisionPopupIdentity.DISPLAY_MS
+    private const val DEDUPE_MS = OrderDecisionPopupIdentity.DEDUPE_MS
 
     private data class Style(
         val label: String,
@@ -152,62 +152,29 @@ object OrderDecisionPopup {
         destination: String = "",
         tipAmount: Float? = null
     ) {
-        if (bankingPaused || status == OrderStatus.PROCESSING) {
+        if (bankingPaused || status == OrderStatus.PROCESSING) return
+
+        val key = OrderDecisionPopupIdentity.canonical(recordKey)
+        if (!OrderDecisionPopupIdentity.isCurrent(latestOrderKey, key)) {
+            Log.d(TAG, "Skipped outdated order banner; different current offer")
             return
         }
-
-        val key = recordKey.trim()
-
-        // A previous order must never overwrite a newer popup.
-        if (
-            key.isNotBlank() &&
-            latestOrderKey.isNotBlank() &&
-            key != latestOrderKey
-        ) return
-
         val safeKey = "$key:${status.name}"
-
-        val now =
-            System.currentTimeMillis()
-
-        val last =
-            recentKeys[safeKey]
-
-        if (
-            last != null &&
-            now - last < DEDUPE_MS
-        ) {
-            return
-        }
-
-        recentKeys[safeKey] = now
-
-        recentKeys.entries.removeIf {
-            now - it.value > 30_000L
-        }
-
-        val appContext =
-            context.applicationContext
-
+        val appContext = context.applicationContext
+        // Dedupe & status state MUST update only after an overlay is actually displayed.
+        // Otherwise a missing permission or a newer offer suppresses legitimate retries.
         mainHandler.post {
             if (bankingPaused) return@post
-            if (
-                key.isNotBlank() &&
-                latestOrderKey.isNotBlank() &&
-                key != latestOrderKey
-            ) return@post
-
-            // The repository may upgrade UNCONFIRMED -> ACCEPTED later.
-            // Pending callbacks must not downgrade an already-confirmed card.
-            val previous = shownStates[key]?.first
-            if (!OrderPopupStatusPolicy.mayReplace(previous, status)) return@post
-            if (key.isNotBlank()) {
-                val shownAt = System.currentTimeMillis()
-                shownStates[key] = status to shownAt
-                shownStates.entries.removeAll { shownAt - it.value.second > 120_000L }
+            if (!OrderDecisionPopupIdentity.isCurrent(latestOrderKey, key)) {
+                Log.d(TAG, "Skipped queued banner for previous offer")
+                return@post
             }
+            val now = System.currentTimeMillis()
+            if (OrderDecisionPopupIdentity.isDuplicate(recentKeys[safeKey], now)) return@post
+            val previous = if (key.isNotBlank()) shownStates[key]?.first else null
+            if (!OrderPopupStatusPolicy.mayReplace(previous, status)) return@post
 
-            showOnMain(
+            val displayed = showOnMain(
                 context = appContext,
                 status = status,
                 platform = platform,
@@ -220,6 +187,15 @@ object OrderDecisionPopup {
                 destination = destination,
                 tipAmount = tipAmount
             )
+            if (displayed) {
+                recentKeys[safeKey] = now
+                recentKeys.entries.removeIf { now - it.value > 30_000L }
+                if (key.isNotBlank()) {
+                    shownStates[key] = status to now
+                    shownStates.entries.removeAll { now - it.value.second > 120_000L }
+                }
+                Log.d(TAG, "Shown ${platform.uppercase()} ${status.name} for 5 seconds")
+            }
         }
     }
 
@@ -233,14 +209,15 @@ object OrderDecisionPopup {
         tripKm: Float?,
         destination: String,
         tipAmount: Float?
-    ) {
-        if (bankingPaused) return
+    ): Boolean {
+        if (bankingPaused) return false
         if (
             Build.VERSION.SDK_INT >=
                 Build.VERSION_CODES.M &&
             !Settings.canDrawOverlays(context)
         ) {
-            return
+            Log.w(TAG, "Short popup blocked: Display over other apps permission missing")
+            return false
         }
 
         removeActive()
@@ -249,7 +226,7 @@ object OrderDecisionPopup {
             context.getSystemService(
                 Context.WINDOW_SERVICE
             ) as? WindowManager
-                ?: return
+                ?: return false
 
         val density =
             context.resources
@@ -469,8 +446,11 @@ object OrderDecisionPopup {
                 runnable,
                 DISPLAY_MS
             )
-        } catch (_: Exception) {
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not display 5-second order reason overlay", e)
             removeActive()
+            false
         }
     }
 
