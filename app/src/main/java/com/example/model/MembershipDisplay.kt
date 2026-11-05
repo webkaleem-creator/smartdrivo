@@ -7,7 +7,11 @@ import kotlin.math.ceil
 object MembershipDisplay {
     data class Summary(val plan: String, val status: String, val days: String, val active: Boolean)
 
-    fun of(user: UserProfile, now: Long = System.currentTimeMillis()): Summary {
+    fun of(
+        user: UserProfile,
+        now: Long = System.currentTimeMillis(),
+        specialOffer: SpecialOccasionOffer = SpecialOccasionOffer()
+    ): Summary {
         if (user.isAdmin) return Summary("Admin Access", "Active", "Unlimited", true)
         val stored = user.plan.trim()
         val code = stored.uppercase(Locale.ROOT).replace(Regex("[^A-Z0-9]"), "")
@@ -24,6 +28,25 @@ object MembershipDisplay {
         }
         val expiry = user.planExpireMillis
         val active = expiry > now && (user.isApproved || code == "FREETRIAL")
+        // The paid/free-trial plan always takes precedence while valid.
+        // A separate, server-verified occasion overlay is display-only and
+        // must not alter any persisted subscription record.
+        val offerActive = !active && user.isActive && !user.isBlocked &&
+            !user.isDeviceBlacklisted && user.specialOfferUntilMillis > now &&
+            specialOffer.isLive(now)
+        if (offerActive) {
+            val offerTitle = specialOffer.title.trim()
+                .ifBlank { "Special Occasion Free" }
+            val daysText = if (specialOffer.days == 0) "Unlimited"
+                else {
+                    val d = ceil(
+                        (user.specialOfferUntilMillis - now) / 86_400_000.0
+                    ).toLong().coerceAtLeast(1L)
+                    d.toString() + " " +
+                        (if (d == 1L) "day" else "days") + " left"
+                }
+            return Summary(offerTitle, "Active", daysText, true)
+        }
         val status = when {
             active -> "Active"
             expiry > 0L && expiry <= now -> "Expired"

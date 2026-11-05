@@ -151,6 +151,7 @@ fun HomeScreen(
     val context = LocalContext.current
     val settings by prefs.appSettings.collectAsState()
     val userProfile by prefs.userProfile.collectAsState()
+    val specialOffer by prefs.specialOffer.collectAsState()
     val historyEntities by historyViewModel.history.collectAsStateWithLifecycle()
     // Room is the single UI source of truth for ride history.
     // Avoid collecting the legacy SharedPreferences JSON history in parallel.
@@ -397,7 +398,9 @@ val goToAreas by prefs.goToAreas.collectAsState()
             membershipNow = System.currentTimeMillis()
         }
     }
-    val membership = MembershipDisplay.of(userProfile, membershipNow)
+    val membership = MembershipDisplay.of(
+        userProfile, membershipNow, specialOffer
+    )
     val membershipIsActive = membership.active
     val membershipTitle = if (membershipIsActive) "Membership Active" else "Membership Inactive"
     val membershipPlanText = membership.plan
