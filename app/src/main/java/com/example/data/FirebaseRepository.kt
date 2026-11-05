@@ -1409,7 +1409,7 @@ class FirebaseRepository(
     }
 
     private fun verifiedClaim(doc: DocumentSnapshot, uid: String): SpecialOccasionClaim {
-        if (doc.metadata.isFromCache || doc.metadata.hasPendingWrites || !doc.exists())
+        if (doc.metadata.isFromCache || doc.metadata.hasPendingWrites() || !doc.exists())
             return SpecialOccasionClaim()
         return SpecialOccasionClaim(
             uid = doc.getString("uid").orEmpty().take(128),
