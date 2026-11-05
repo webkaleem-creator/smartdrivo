@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.widget.Toast
+import android.app.Application
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Column
@@ -32,12 +33,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.auth.PickupGuardOwnerAccess
 import com.example.data.PreferencesManager
+import com.example.service.PickupGuardBubbleRuntime
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PickupGuardScreen(prefs: PreferencesManager, onBack: () -> Unit) {
     val owner by prefs.userProfile.collectAsState()
     val current by prefs.pickupGuardSettings.collectAsState()
+    val bubbleHidden by PickupGuardBubbleRuntime.bubbleHidden.collectAsState()
     val context = LocalContext.current
     if (!PickupGuardOwnerAccess.authorized(owner)) return
     var input by remember(owner.uid) { mutableStateOf(current.maxPickupKm.toString()) }
@@ -100,6 +103,22 @@ fun PickupGuardScreen(prefs: PreferencesManager, onBack: () -> Unit) {
                                 )
                             }
                         )
+                    }
+                    if (bubbleHidden) {
+                        Text(
+                            "Floating PG bubble is hidden. Auto Accept and Pickup Guard settings are unchanged.",
+                            color = Color(0xFF475569)
+                        )
+                        TextButton(onClick = {
+                            val app = context.applicationContext as? Application
+                            val shown = app != null && PickupGuardBubbleRuntime.showControlsAgain(app)
+                            val info = if (!shown) "Owner verification needed"
+                                else if (!prefs.appSettings.value.isAutoAcceptActive)
+                                    "Bubble enabled; turn Main Auto Accept ON to display"
+                                else "PG bubble will reappear"
+                            message = if (shown) "" else info
+                            Toast.makeText(context, info, Toast.LENGTH_SHORT).show()
+                        }) { Text("Show floating PG bubble") }
                     }
                     OutlinedTextField(
                         value = input,

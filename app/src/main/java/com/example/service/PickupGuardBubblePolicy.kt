@@ -11,8 +11,9 @@ internal object PickupGuardBubblePolicy {
         loggedIn: Boolean,
         ownerAuthorized: Boolean,
         bankingActive: Boolean,
-        overlayAllowed: Boolean
-    ): Boolean = masterOn && serviceRunning && loggedIn && ownerAuthorized && !bankingActive && overlayAllowed
+        overlayAllowed: Boolean,
+        hiddenByOwner: Boolean = false
+    ): Boolean = masterOn && serviceRunning && loggedIn && ownerAuthorized && !bankingActive && overlayAllowed && !hiddenByOwner
 
     fun snapX(x: Int, left: Int, right: Int): Int {
         if (left >= right) return left

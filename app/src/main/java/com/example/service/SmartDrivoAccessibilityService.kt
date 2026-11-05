@@ -9087,6 +9087,7 @@ private val processingTimeoutRunnable = Runnable {
             !prefs.appSettings.value
                 .showOrderReasonPopups
         ) {
+            Log.i(TAG, "Short order reason popup disabled in More > Notifications")
             return
         }
 

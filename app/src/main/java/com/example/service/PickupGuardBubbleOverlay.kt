@@ -28,6 +28,7 @@ internal class PickupGuardBubbleOverlay(
     private val ownerUid: String,
     private val onToggleGuard: () -> Unit,
     private val onLongPressMenu: () -> Unit,
+    private val onHideAllControls: () -> Unit,
     private val onToggleMainAuto: () -> Unit,
     private val onPickupLimit: (Float) -> Unit,
     private val onPause: (Int) -> Unit,
@@ -315,13 +316,25 @@ internal class PickupGuardBubbleOverlay(
         }
         heading.addView(headingText, LinearLayout.LayoutParams(
             0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        // Hide removes BOTH floating overlays without changing any automation setting.
+        // X only dismisses the expanded menu and retains the small PG bubble.
+        heading.addView(
+            button("Hide", { onHideAllControls() }).apply {
+                gravity = Gravity.CENTER
+                setPadding(0, 0, 0, 0)
+                contentDescription = "Hide Quick Controls and floating PG bubble; keep Auto Accept ON"
+            },
+            LinearLayout.LayoutParams(dp(50), dp(34)).apply {
+                marginEnd = dp(4)
+            }
+        )
         heading.addView(
             button("×", { hideMenu() }).apply {
                 gravity = Gravity.CENTER
                 setPadding(0, 0, 0, 0)
                 contentDescription = "Close Quick Controls"
             },
-            LinearLayout.LayoutParams(dp(34), dp(34))
+            LinearLayout.LayoutParams(dp(30), dp(34))
         )
         panel.addView(heading)
         panel.addView(line())
@@ -356,7 +369,7 @@ internal class PickupGuardBubbleOverlay(
         panel.addView(line())
         panel.addView(button("⛔ Emergency Stop — Auto OFF + Guard OFF",
             { onEmergencyStop() }, danger = true))
-        panel.addView(text("Hold PG bubble to reopen. Main ON does not override Guard manual mode.",
+        panel.addView(text("Hide: both controls disappear; show again in Pickup Guard. Main ON keeps Guard manual.",
             10f, 0xFF64748B.toInt()))
     }
 
