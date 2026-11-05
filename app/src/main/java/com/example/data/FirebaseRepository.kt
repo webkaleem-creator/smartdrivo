@@ -12,12 +12,15 @@ import com.example.model.PaymentStatus
 import com.example.model.PaymentSubmission
 import com.example.model.UserProfile
 import com.example.model.SpecialOccasionOffer
+import com.example.model.SpecialOfferSnapshotPolicy
+import com.example.model.SpecialOfferSyncStatus
 import com.example.model.VehicleType
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -1394,7 +1397,9 @@ class FirebaseRepository(
         globalSettingsListener =
             fs.collection("settings")
                 .document("global")
-                .addSnapshotListener {
+                // Required: cache -> server can be a metadata-ONLY transition
+                // when unchanged. Without INCLUDE the offer remains OFF.
+                .addSnapshotListener(MetadataChanges.INCLUDE) {
                     doc,
                     error ->
 
@@ -1403,6 +1408,9 @@ class FirebaseRepository(
                             "FirebaseRepo",
                             "Global settings error: ${error.message}"
                         )
+                        prefs.updateSpecialOffer(
+                            SpecialOccasionOffer(), SpecialOfferSyncStatus.SYNC_ERROR
+                        )
                         return@addSnapshotListener
                     }
 
@@ -1410,14 +1418,22 @@ class FirebaseRepository(
                         doc == null ||
                         !doc.exists()
                     ) {
-                        prefs.updateSpecialOffer(SpecialOccasionOffer())
+                        val isCached = doc?.metadata?.isFromCache ?: true
+                        prefs.updateSpecialOffer(
+                            SpecialOccasionOffer(),
+                            if (isCached) SpecialOfferSyncStatus.CACHE_ONLY
+                            else SpecialOfferSyncStatus.SERVER_NO_OFFER
+                        )
                         return@addSnapshotListener
                     }
 
                     // Keep this outside Accessibility/order processing.
+                    val offerSnapshot = SpecialOfferSnapshotPolicy.reconcile(
+                        fromCache = doc.metadata.isFromCache,
+                        data = doc.get("specialOffer")
+                    )
                     prefs.updateSpecialOffer(
-                        if (doc.metadata.isFromCache) SpecialOccasionOffer()
-                        else SpecialOccasionOffer.fromMap(doc.get("specialOffer"))
+                        offerSnapshot.offer, offerSnapshot.status
                     )
 
                     doc.getString("upiId")

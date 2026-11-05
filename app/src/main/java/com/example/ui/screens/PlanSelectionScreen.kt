@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.MembershipPlan
 import com.example.model.SpecialOccasionOffer
+import com.example.model.SpecialOfferSyncStatus
 import com.example.ui.theme.AccentGreen
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -59,6 +60,7 @@ fun PlanSelectionScreen(
     isCurrentPlanActive: Boolean = false,
     isAdmin: Boolean = false,
     specialOffer: SpecialOccasionOffer = SpecialOccasionOffer(),
+    specialOfferSyncStatus: SpecialOfferSyncStatus = SpecialOfferSyncStatus.CHECKING,
     onPlanSelected: (plan: MembershipPlan) -> Unit,
     onBack: (() -> Unit)? = null
 ) {
@@ -181,6 +183,16 @@ fun PlanSelectionScreen(
 
             item {
                 Spacer(modifier = Modifier.height(4.dp))
+            }
+            if (!showSpecialOffer && !isAdmin) {
+                item {
+                    Text(
+                        text = specialOfferSyncStatus.description(),
+                        fontSize = 11.sp,
+                        color = Color(0xFF64748B),
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
             }
             if (showSpecialOffer) {
                 item {

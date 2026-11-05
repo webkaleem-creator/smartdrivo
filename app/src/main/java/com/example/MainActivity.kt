@@ -69,6 +69,7 @@ import com.example.util.PermissionHelper
 import com.example.util.BankingModeController
 import com.example.model.MembershipPlan
 import com.example.model.SpecialOccasionOffer
+import com.example.model.SpecialOfferSyncStatus
 import com.example.notifications.SpecialOccasionNotifier
 import com.example.model.PaymentSubmission
 import com.example.ui.screens.AdminPanelScreen
@@ -286,6 +287,7 @@ fun SmartDrivoApp(
 
     val userProfile by prefs.userProfile.collectAsState()
     val specialOffer by prefs.specialOffer.collectAsState()
+    val specialOfferSyncStatus by prefs.specialOfferSyncStatus.collectAsState()
     val loginFlag by prefs.isLoggedInFlow.collectAsState()
 
     val membershipPlans by
@@ -495,6 +497,10 @@ fun SmartDrivoApp(
             }
         } else {
             SingleSessionGuard.stop()
+            // Do not carry a verified promotion into a different login session.
+            prefs.updateSpecialOffer(
+                SpecialOccasionOffer(), SpecialOfferSyncStatus.CHECKING
+            )
         }
     }
     // Verify profile with Firestore for existing users on startup
@@ -1261,6 +1267,7 @@ fun SmartDrivoApp(
                     userProfile.isActive,
                 isAdmin = userProfile.isAdmin,
                 specialOffer = specialOffer,
+                specialOfferSyncStatus = specialOfferSyncStatus,
                 onPlanSelected = { plan ->
                     selectedPlanForPayment = plan
                     navController.navigate(Routes.PAYMENT)

@@ -23,6 +23,7 @@ import com.example.model.PaymentSubmission
 import com.example.model.Platform
 import com.example.model.UserProfile
 import com.example.model.SpecialOccasionOffer
+import com.example.model.SpecialOfferSyncStatus
 import com.example.model.VehicleType
 import com.example.security.SignatureIntegrity
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -58,6 +59,10 @@ class PreferencesManager(private val context: Context) {
     // Firestore-admin promotion is RAM-only; never persist offline entitlement.
     private val _specialOffer = MutableStateFlow(SpecialOccasionOffer())
     val specialOffer: StateFlow<SpecialOccasionOffer> = _specialOffer.asStateFlow()
+    private val _specialOfferSyncStatus =
+        MutableStateFlow(SpecialOfferSyncStatus.CHECKING)
+    val specialOfferSyncStatus: StateFlow<SpecialOfferSyncStatus> =
+        _specialOfferSyncStatus.asStateFlow()
 
     private fun applySpecialOffer(profile: UserProfile): UserProfile {
         val offer = _specialOffer.value
@@ -69,7 +74,11 @@ class PreferencesManager(private val context: Context) {
             if (eligible && offer.isLive()) offer.endAtMillis() else 0L)
     }
 
-    fun updateSpecialOffer(offer: SpecialOccasionOffer) {
+    fun updateSpecialOffer(
+        offer: SpecialOccasionOffer,
+        syncStatus: SpecialOfferSyncStatus
+    ) {
+        _specialOfferSyncStatus.value = syncStatus
         _specialOffer.value = offer
         _userProfile.value = applySpecialOffer(_userProfile.value)
         if (!_userProfile.value.isAdmin && !_userProfile.value.isPlanValid)
