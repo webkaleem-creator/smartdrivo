@@ -138,8 +138,7 @@ internal object PickupGuardBubbleRuntime {
                     ownerProfileEligible(profile),
                 serviceRunning = SmartDrivoAccessibilityService.isServiceRunning,
                 bankingActive = BankingModeController.isActive(app),
-                overlayAllowed = overlayAllowed(app),
-                hiddenByOwner = hiddenByOwner
+                overlayAllowed = overlayAllowed(app)
             )) {
             setMaster(app, true)
         }
@@ -196,7 +195,8 @@ internal object PickupGuardBubbleRuntime {
                 loggedIn = prefs.isLoggedIn,
                 ownerAuthorized = PickupGuardOwnerAccess.authorized(profile),
                 bankingActive = BankingModeController.isActive(app),
-                overlayAllowed = overlayAllowed(app)
+                overlayAllowed = overlayAllowed(app),
+                hiddenByOwner = hiddenByOwner
             )) {
             hideBubble()
             return
