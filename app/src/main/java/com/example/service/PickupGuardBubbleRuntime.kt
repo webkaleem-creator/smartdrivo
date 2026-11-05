@@ -1,6 +1,8 @@
 package com.example.service
 
 import android.app.Application
+import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
@@ -18,11 +20,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * App-process coordinator for the owner-only bubble. It never reads ride windows,
- * changes Auto Accept, or accesses the Rapido click/decision path.
- *
- * Uses the existing Accessibility Service and overlay permission: no additional
- * foreground service, manifest entry, or battery-draining screen scanner.
+ * Owner-only Quick Controls coordinator. Uses existing master settings/broadcast:
+ * no independent order processor, click route, new permission, or background service.
  */
 internal object PickupGuardBubbleRuntime {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -32,28 +31,20 @@ internal object PickupGuardBubbleRuntime {
     private var bubbleUid: String? = null
     private var checkedOwnerUid: String? = null
     private var lastOwnerCheckAt = 0L
+    
+    // Per-owner temporary Pause state. The timer is observed on the existing 2-second loop.
+    private const val CONTROL_PREFS = "smartdrivo_owner_pg_quick_controls_v1"
+    private const val PAUSE_UNTIL = "pause_until_"
+    private const val PAUSE_RESTORE_MAIN = "pause_restore_main_"
 
     fun start(app: Application) {
         if (started) return
         started = true
         prefs = PreferencesManager.getInstance(app)
-
-        scope.launch {
-            prefs.appSettings.collectLatest { sync(app) }
-        }
-        scope.launch {
-            prefs.pickupGuardSettings.collectLatest { sync(app) }
-        }
-        scope.launch {
-            prefs.userProfile.collectLatest { sync(app) }
-        }
-        scope.launch {
-            prefs.isLoggedInFlow.collectLatest { sync(app) }
-        }
-        // An Accessibility Service may be enabled/disabled while the UI is in
-        // the background. Recheck its cached lifecycle flag without scanning UI.
-        // This also expires owner verification, catches overlay-permission changes
-        // and handles Banking Mode without touching order processing.
+        scope.launch { prefs.appSettings.collectLatest { sync(app) } }
+        scope.launch { prefs.pickupGuardSettings.collectLatest { sync(app) } }
+        scope.launch { prefs.userProfile.collectLatest { sync(app) } }
+        scope.launch { prefs.isLoggedInFlow.collectLatest { sync(app) } }
         scope.launch {
             while (isActive) {
                 sync(app)
@@ -62,10 +53,47 @@ internal object PickupGuardBubbleRuntime {
         }
     }
 
-    private fun masterReady(app: Application): Boolean =
-        prefs.appSettings.value.isAutoAcceptActive &&
-            prefs.isAutoAcceptEnabled &&
-            SmartDrivoAccessibilityService.isServiceRunning &&
+    private fun controlStore(app: Application) =
+        app.getSharedPreferences(CONTROL_PREFS, Context.MODE_PRIVATE)
+
+    private fun pauseUntil(app: Application, uid: String): Long =
+        if (uid.isBlank()) 0L else controlStore(app).getLong(PAUSE_UNTIL + uid, 0L)
+
+    private fun clearPause(app: Application, uid: String) {
+        if (uid.isBlank()) return
+        controlStore(app).edit()
+            .remove(PAUSE_UNTIL + uid)
+            .remove(PAUSE_RESTORE_MAIN + uid).apply()
+    }
+
+    /** A paused session never silently enables automation while still paused. */
+    private fun resumeExpiredPause(app: Application, profile: UserProfile) {
+        val uid = profile.uid
+        if (uid.isBlank()) return
+        val until = pauseUntil(app, uid)
+        if (until <= 0L) return
+        if (PickupGuardQuickControlPolicy.isPaused(until, System.currentTimeMillis())) {
+            // A manual Home switch ON overrides/cancels a pause; no forced OFF race.
+            if (prefs.appSettings.value.isAutoAcceptActive) clearPause(app, uid)
+            return
+        }
+        val wasMainOn = controlStore(app).getBoolean(PAUSE_RESTORE_MAIN + uid, false)
+        clearPause(app, uid) // clear first, so a Flow callback cannot run it twice
+        if (PickupGuardQuickControlPolicy.mayRestoreMaster(
+                wasOn = wasMainOn,
+                currentMasterOn = prefs.appSettings.value.isAutoAcceptActive,
+                ownerAuthorized = PickupGuardOwnerAccess.authorized(profile) &&
+                    ownerProfileEligible(profile),
+                serviceRunning = SmartDrivoAccessibilityService.isServiceRunning,
+                bankingActive = BankingModeController.isActive(app),
+                overlayAllowed = overlayAllowed(app)
+            )) {
+            setMaster(app, true)
+        }
+    }
+
+    private fun serviceReady(app: Application): Boolean =
+        SmartDrivoAccessibilityService.isServiceRunning &&
             !BankingModeController.isActive(app)
 
     private fun overlayAllowed(app: Application): Boolean =
@@ -74,6 +102,12 @@ internal object PickupGuardBubbleRuntime {
     private fun ownerProfileEligible(profile: UserProfile): Boolean =
         profile.uid.isNotBlank() && profile.isAdmin && profile.isActive &&
             !profile.isBlocked && !profile.isDeviceBlacklisted && prefs.isLoggedIn
+
+    private fun canControl(app: Application): Boolean {
+        val profile = prefs.userProfile.value
+        return serviceReady(app) && overlayAllowed(app) &&
+            ownerProfileEligible(profile) && PickupGuardOwnerAccess.authorized(profile)
+    }
 
     private fun refreshOwnerClaimIfDue(app: Application, profile: UserProfile, verified: Boolean) {
         val now = SystemClock.elapsedRealtime()
@@ -84,29 +118,26 @@ internal object PickupGuardBubbleRuntime {
         val nextCheck = if (verified) 7 * 60_000L else 60_000L
         if (lastOwnerCheckAt != 0L && now >= lastOwnerCheckAt &&
             now - lastOwnerCheckAt < nextCheck) return
-
         lastOwnerCheckAt = now
-        // Firebase refresh is asynchronous. Failure clears the owner authorization
-        // and the next sync hides the bubble (fail closed).
-        PickupGuardOwnerAccess.refresh(profile) {
-            sync(app)
-        }
+        PickupGuardOwnerAccess.refresh(profile) { sync(app) }
     }
 
     private fun sync(app: Application) {
         if (!started || !::prefs.isInitialized) return
-
         val profile = prefs.userProfile.value
-        val ready = masterReady(app) && ownerProfileEligible(profile) && overlayAllowed(app)
-        if (!ready) {
+        if (!ownerProfileEligible(profile) || !serviceReady(app) || !overlayAllowed(app)) {
             hideBubble()
             return
         }
 
         val verified = PickupGuardOwnerAccess.authorized(profile)
         refreshOwnerClaimIfDue(app, profile, verified)
+        if (PickupGuardOwnerAccess.authorized(profile)) resumeExpiredPause(app, profile)
+        // The owner auth refresh and timed pause restoration run even while master is OFF.
+        // The floating bubble itself is STRICTLY gated on Main Auto Accept ON.
         if (!PickupGuardBubblePolicy.shouldShow(
-                masterOn = masterReady(app),
+                masterOn = prefs.appSettings.value.isAutoAcceptActive,
+                serviceRunning = SmartDrivoAccessibilityService.isServiceRunning,
                 loggedIn = prefs.isLoggedIn,
                 ownerAuthorized = PickupGuardOwnerAccess.authorized(profile),
                 bankingActive = BankingModeController.isActive(app),
@@ -119,27 +150,114 @@ internal object PickupGuardBubbleRuntime {
         if (bubbleUid != profile.uid) {
             hideBubble()
             bubbleUid = profile.uid
-            bubble = PickupGuardBubbleOverlay(app, profile.uid) { toggle(app) }
+            bubble = PickupGuardBubbleOverlay(
+                app, profile.uid,
+                onToggleGuard = { toggleGuard(app) },
+                onLongPressMenu = {
+                    if (canControl(app)) {
+                        bubble?.openMenu()
+                    } else hideBubble()
+                },
+                onToggleMainAuto = { toggleMain(app) },
+                onPickupLimit = { savePickupLimit(app, it) },
+                onPause = { pause(app, it) },
+                onResume = { resume(app) },
+                onEmergencyStop = { emergencyStop(app) }
+            )
         }
-        bubble?.show(prefs.pickupGuardSettings.value.enabled)
+        val guard = prefs.pickupGuardSettings.value
+        bubble?.show(guard.enabled, prefs.appSettings.value.isAutoAcceptActive,
+            guard.maxPickupKm, pauseUntil(app, profile.uid))
     }
 
-    private fun toggle(app: Application) {
-        val profile = prefs.userProfile.value
-        if (!masterReady(app) || !ownerProfileEligible(profile) ||
-            !overlayAllowed(app) || !PickupGuardOwnerAccess.authorized(profile)) {
-            hideBubble()
-            return
-        }
+    private fun setMaster(app: Application, enabled: Boolean) {
+        prefs.isPendingAutoAcceptActivation = false
+        // Same persisted master setting as the Home switch. Don't overwrite filters.
+        prefs.setAutoAcceptActive(enabled)
+        app.sendBroadcast(Intent("com.example.TOGGLE_CHANGED")
+            .setPackage(app.packageName).putExtra("enabled", enabled))
+    }
+
+    private fun toggleGuard(app: Application) {
+        if (!canControl(app)) { hideBubble(); return }
         val saved = prefs.pickupGuardSettings.value
         val updated = saved.copy(enabled = !saved.enabled)
         if (prefs.savePickupGuardSettings(updated)) {
-            bubble?.show(updated.enabled)
+            sync(app)
             Toast.makeText(app, if (updated.enabled) "Pickup Guard ON" else "Pickup Guard OFF",
                 Toast.LENGTH_SHORT).show()
-        } else {
+        } else hideBubble()
+    }
+
+    private fun toggleMain(app: Application) {
+        if (!canControl(app)) { hideBubble(); return }
+        val uid = prefs.userProfile.value.uid
+        clearPause(app, uid)
+        val newValue = !prefs.appSettings.value.isAutoAcceptActive
+        setMaster(app, newValue)
+        sync(app)
+        Toast.makeText(app,
+            if (newValue) "Main Auto Accept ON (Guard stays manual)"
+            else "Main Auto Accept OFF",
+            Toast.LENGTH_SHORT).show()
+    }
+
+    private fun savePickupLimit(app: Application, km: Float) {
+        if (!canControl(app) || !PickupGuardQuickControlPolicy.validPickup(km)) {
             hideBubble()
+            return
         }
+        val latest = prefs.pickupGuardSettings.value
+        if (prefs.savePickupGuardSettings(latest.copy(maxPickupKm = km))) {
+            sync(app)
+            Toast.makeText(app, "Pickup Guard max: " + km + " km", Toast.LENGTH_SHORT).show()
+        } else hideBubble()
+    }
+
+    private fun pause(app: Application, minutes: Int) {
+        if (!canControl(app) || minutes !in PickupGuardQuickControlPolicy.PAUSE_MINUTES) {
+            hideBubble()
+            return
+        }
+        val uid = prefs.userProfile.value.uid
+        val restoreMain = prefs.appSettings.value.isAutoAcceptActive
+        val until = System.currentTimeMillis() + minutes.toLong() * 60_000L
+        val stored = controlStore(app).edit()
+            .putLong(PAUSE_UNTIL + uid, until)
+            .putBoolean(PAUSE_RESTORE_MAIN + uid, restoreMain)
+            .commit()
+        if (!stored) {
+            Toast.makeText(app, "Pause could not be saved", Toast.LENGTH_SHORT).show()
+            return
+        }
+        setMaster(app, false) // Existing service immediately stops pending work on master OFF.
+        sync(app)
+        Toast.makeText(app, "Automation paused for " + minutes + " min",
+            Toast.LENGTH_SHORT).show()
+    }
+
+    private fun resume(app: Application) {
+        if (!canControl(app)) { hideBubble(); return }
+        val uid = prefs.userProfile.value.uid
+        if (pauseUntil(app, uid) <= 0L) return
+        val wasMainOn = controlStore(app).getBoolean(PAUSE_RESTORE_MAIN + uid, false)
+        clearPause(app, uid)
+        if (wasMainOn) setMaster(app, true)
+        sync(app)
+        Toast.makeText(app, "Pause ended", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun emergencyStop(app: Application) {
+        if (!canControl(app)) { hideBubble(); return }
+        val uid = prefs.userProfile.value.uid
+        clearPause(app, uid) // Never auto-resume after Emergency Stop.
+        setMaster(app, false) // Stops in-flight monitoring via existing receiver.
+        val guard = prefs.pickupGuardSettings.value
+        if (guard.enabled) prefs.savePickupGuardSettings(guard.copy(enabled = false))
+        bubble?.hideMenu()
+        sync(app)
+        Toast.makeText(app, "EMERGENCY STOP: Main Auto OFF, Pickup Guard OFF",
+            Toast.LENGTH_LONG).show()
     }
 
     private fun hideBubble() {
