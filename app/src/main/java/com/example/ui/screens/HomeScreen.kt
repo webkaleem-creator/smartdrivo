@@ -109,6 +109,7 @@ import com.example.ui.viewmodel.RideHistoryViewModel
 import com.example.service.FloatingOverlayService
 import com.example.service.SmartDrivoAccessibilityService
 import com.example.ui.components.SmartDrivoLogo
+import com.example.ui.components.SmartDrivoPowerButton
 import com.example.util.PermissionHelper
 import kotlinx.coroutines.launch
 import com.example.ui.theme.BlueBorder
@@ -1011,29 +1012,10 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                     )
                                 }
 
-                                Text(
-                                    text = if (assistanceActive) "ON" else "OFF",
-                                    color = if (assistanceActive)
-                                        Color(0xFF1677F2)
-                                    else
-                                        Color(0xFF94A3B8),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-
-                                Spacer(Modifier.width(5.dp))
-
-                                Switch(
-                                    checked = assistanceActive,
-                                    onCheckedChange = { enabled ->
-                                        handleToggleAutoAccept(enabled)
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = Color(0xFF1677F2),
-                                        uncheckedThumbColor = Color.White,
-                                        uncheckedTrackColor = Color(0xFFCBD5E1)
-                                    )
+                                // STYLE1_POWER_BUTTON: same saved-state handler, new visual control.
+                                SmartDrivoPowerButton(
+                                    enabled = assistanceActive,
+                                    activeColor = Color(0xFF1677F2)
                                 )
                             }
 
@@ -1100,29 +1082,10 @@ val goToAreas by prefs.goToAreas.collectAsState()
                                     )
                                 }
 
-                                Text(
-                                    text = if (rejectEnabled) "ON" else "OFF",
-                                    color = if (rejectEnabled)
-                                        Color(0xFF09A84B)
-                                    else
-                                        Color(0xFF94A3B8),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-
-                                Spacer(Modifier.width(5.dp))
-
-                                Switch(
-                                    checked = rejectEnabled,
-                                    onCheckedChange = { enabled ->
-                                        changeReject(enabled)
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = Color(0xFF09B34F),
-                                        uncheckedThumbColor = Color.White,
-                                        uncheckedTrackColor = Color(0xFFCBD5E1)
-                                    )
+                                // STYLE1_POWER_BUTTON: Auto Reject remains independent.
+                                SmartDrivoPowerButton(
+                                    enabled = rejectEnabled,
+                                    activeColor = Color(0xFF09B34F)
                                 )
                             }
                         }
