@@ -422,7 +422,7 @@ object OrderDecisionPopup {
                 windowAnimations = 0
             }
 
-        try {
+        return try {
             wm.addView(
                 root,
                 params
