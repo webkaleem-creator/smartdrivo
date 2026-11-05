@@ -16,6 +16,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -36,6 +39,55 @@ internal object PickupGuardBubbleRuntime {
     private const val CONTROL_PREFS = "smartdrivo_owner_pg_quick_controls_v1"
     private const val PAUSE_UNTIL = "pause_until_"
     private const val PAUSE_RESTORE_MAIN = "pause_restore_main_"
+    private const val OWNER_BUBBLE_HIDDEN = "bubble_hidden_"
+
+    // UI-only state; never used to change master Auto Accept or Pickup Guard.
+    private val _bubbleHidden = MutableStateFlow(false)
+    val bubbleHidden: StateFlow<Boolean> = _bubbleHidden.asStateFlow()
+
+    /**
+     * A deliberate Hide must survive future accessibility events, service restarts,
+     * app relaunches and master ON/OFF changes. Per-owner storage prevents leakage.
+     */
+    private fun hiddenFor(app: Application, uid: String): Boolean =
+        uid.isNotBlank() &&
+            controlStore(app).getBoolean(OWNER_BUBBLE_HIDDEN + uid, false)
+
+    private fun hideControlsOnly(app: Application) {
+        if (!canControl(app)) {
+            hideBubble()
+            return
+        }
+        val uid = prefs.userProfile.value.uid
+        val stored = controlStore(app).edit()
+            .putBoolean(OWNER_BUBBLE_HIDDEN + uid, true)
+            .commit()
+        if (!stored) {
+            Toast.makeText(app, "Could not save bubble visibility", Toast.LENGTH_SHORT).show()
+            return
+        }
+        _bubbleHidden.value = true
+        hideBubble()
+        Toast.makeText(app,
+            "PG controls hidden; Main Auto Accept remains unchanged",
+            Toast.LENGTH_SHORT).show()
+    }
+
+    /** The owner can restore a deliberately hidden bubble in Pickup Guard settings. */
+    fun showControlsAgain(app: Application): Boolean {
+        if (!::prefs.isInitialized) return false
+        val profile = prefs.userProfile.value
+        if (!ownerProfileEligible(profile) || !PickupGuardOwnerAccess.authorized(profile))
+            return false
+        val stored = controlStore(app).edit()
+            .putBoolean(OWNER_BUBBLE_HIDDEN + profile.uid, false)
+            .commit()
+        if (stored) {
+            _bubbleHidden.value = false
+            sync(app)
+        }
+        return stored
+    }
 
     fun start(app: Application) {
         if (started) return
@@ -86,7 +138,8 @@ internal object PickupGuardBubbleRuntime {
                     ownerProfileEligible(profile),
                 serviceRunning = SmartDrivoAccessibilityService.isServiceRunning,
                 bankingActive = BankingModeController.isActive(app),
-                overlayAllowed = overlayAllowed(app)
+                overlayAllowed = overlayAllowed(app),
+                hiddenByOwner = hiddenByOwner
             )) {
             setMaster(app, true)
         }
@@ -125,6 +178,8 @@ internal object PickupGuardBubbleRuntime {
     private fun sync(app: Application) {
         if (!started || !::prefs.isInitialized) return
         val profile = prefs.userProfile.value
+        val hiddenByOwner = hiddenFor(app, profile.uid)
+        _bubbleHidden.value = hiddenByOwner
         if (!ownerProfileEligible(profile) || !serviceReady(app) || !overlayAllowed(app)) {
             hideBubble()
             return
@@ -158,6 +213,7 @@ internal object PickupGuardBubbleRuntime {
                         bubble?.openMenu()
                     } else hideBubble()
                 },
+                onHideAllControls = { hideControlsOnly(app) },
                 onToggleMainAuto = { toggleMain(app) },
                 onPickupLimit = { savePickupLimit(app, it) },
                 onPause = { pause(app, it) },

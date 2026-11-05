@@ -11,6 +11,18 @@ class PickupGuardBubblePolicyTest {
         assertFalse(PickupGuardBubblePolicy.shouldShow(false, true, true, true, false, true))
         assertFalse(PickupGuardBubblePolicy.shouldShow(false, true, true, true, false, false))
     }
+    @Test fun ownerHideOverridesMainOnWithoutChangingTheMainState() {
+        assertFalse(PickupGuardBubblePolicy.shouldShow(
+            true, true, true, true, false, true, hiddenByOwner = true
+        ))
+        assertTrue(PickupGuardBubblePolicy.shouldShow(
+            true, true, true, true, false, true, hiddenByOwner = false
+        ))
+        assertFalse(PickupGuardBubblePolicy.shouldShow(
+            false, true, true, true, false, true, hiddenByOwner = false
+        ))
+    }
+
     @Test fun serviceAndAuthenticationGatesRemainFailClosed() {
         assertFalse(PickupGuardBubblePolicy.shouldShow(true, false, true, true, false, true))
         assertFalse(PickupGuardBubblePolicy.shouldShow(true, true, false, true, false, true))

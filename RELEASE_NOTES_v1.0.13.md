@@ -4,8 +4,10 @@ Built from main Build #456 (v1.0.11 / versionCode 20).
 
 ## Owner Quick Controls UI
 - A clearly labelled **Hide** button sits immediately to the right of the one-line "SmartDrivo Quick Controls" heading, alongside the existing **×**.
-- **Hide** and **×** call only `hideMenu()`, which removes the large overlay window.
-- Neither changes Main Auto Accept, Pickup Guard state, or the small PG bubble. Long-press PG again to reopen the menu.
+- **Hide** hides **both** the expanded menu and the tiny PG ON/OFF bubble; **×** only closes the expanded menu.
+- Hide persists per owner across repeated events, app relaunches and Main Auto Accept ON/OFF cycles.
+- Neither button changes Main Auto Accept or Pickup Guard state; automation continues as previously configured.
+- A hidden bubble can be restored explicitly via **Pickup Guard → Show floating PG bubble** (with owner authentication). It appears when Main Auto Accept is ON and existing service/permission/banking gates allow it.
 - Existing Pause, Emergency Stop, pickup preset 0.4/0.6/0.8 km and green/red master indicator remain unchanged.
 
 ## 5-Second Short Order Status Popup Reliability
