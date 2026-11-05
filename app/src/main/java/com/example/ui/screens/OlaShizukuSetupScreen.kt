@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.ola.OlaShizukuPolicy
+import com.example.ola.OlaDeveloperOptionsDiagnostics
 import com.example.ola.OlaReadOnlyPreviewStore
 import androidx.compose.runtime.collectAsState
 import java.util.Locale
@@ -101,6 +102,11 @@ fun OlaShizukuSetupScreen(onBack: () -> Unit) {
     val versionText = if (serviceRunning) runCatching {
         "Shizuku server API: " + Shizuku.getVersion()
     }.getOrDefault("Shizuku service detected") else ""
+    // Only this owner/admin setup screen reads system-reported indicators.
+    // Existing 3s screen refresh triggers a fresh read; no background polling.
+    val deviceDiagnostic = remember(tick) {
+        OlaDeveloperOptionsDiagnostics.read(context)
+    }
 
     // A real Android Settings workflow, never a stealth setting override.
     if (showDeveloperOptionsWarning) {
@@ -202,6 +208,33 @@ fun OlaShizukuSetupScreen(onBack: () -> Unit) {
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Official Shizuku download & instructions") }
+                }
+            }
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("Device diagnostics • READ ONLY",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold)
+                    Text("Shizuku service: " + if (serviceRunning) "Running" else "Not running")
+                    Text("SmartDrivo Shizuku authorization: " +
+                        if (authorized) "Granted" else "Not granted")
+                    Text("Developer Options: " + deviceDiagnostic.developerDescription)
+                    Text("USB Debugging: " + deviceDiagnostic.usbDescription)
+                    Text("Wireless Debugging: " + deviceDiagnostic.wirelessDescription)
+                    Text(
+                        "Android masks Developer Options and USB Debugging flags from " +
+                            "third-party apps. A reported 0 does NOT prove these are OFF. " +
+                            "Wireless Debugging is an app-reported indicator, not an ADB " +
+                            "connection test. No setting is changed.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Button(
+                        onClick = { tick++ },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Refresh device diagnostics") }
                 }
             }
             Card(modifier = Modifier.fillMaxWidth()) {
