@@ -62,7 +62,7 @@ class MembershipDisplayTest {
         val offer = diwaliOffer()
         val user = UserProfile(
             plan = "NONE", planExpireMillis = 0L, isApproved = false,
-            specialOfferUntilMillis = offer.endAtMillis()
+            specialOfferUntilMillis = (now - 1_000L) + (offer.days.toLong() * day)
         )
         val summary = MembershipDisplay.of(user, now, offer)
         assertEquals("SmartDrivo Diwali Special Offer", summary.plan)
@@ -75,7 +75,7 @@ class MembershipDisplayTest {
         val offer = diwaliOffer()
         val user = UserProfile(
             plan = "3DAYS", isApproved = true, planExpireMillis = now + day,
-            specialOfferUntilMillis = offer.endAtMillis()
+            specialOfferUntilMillis = (now - 1_000L) + (offer.days.toLong() * day)
         )
         val summary = MembershipDisplay.of(user, now, offer)
         assertEquals("3 Days Plan", summary.plan)
@@ -87,7 +87,7 @@ class MembershipDisplayTest {
         val offer = diwaliOffer()
         val user = UserProfile(
             plan = "3DAYS", isApproved = true, planExpireMillis = now - day,
-            specialOfferUntilMillis = offer.endAtMillis()
+            specialOfferUntilMillis = (now - 1_000L) + (offer.days.toLong() * day)
         )
         val summary = MembershipDisplay.of(user, now, offer)
         assertEquals("SmartDrivo Diwali Special Offer", summary.plan)
@@ -109,7 +109,7 @@ class MembershipDisplayTest {
         val offer = diwaliOffer()
         val user = UserProfile(
             isBlocked = true,
-            specialOfferUntilMillis = offer.endAtMillis()
+            specialOfferUntilMillis = (now - 1_000L) + (offer.days.toLong() * day)
         )
         assertFalse(MembershipDisplay.of(user, now, offer).active)
     }

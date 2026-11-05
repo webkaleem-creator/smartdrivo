@@ -169,6 +169,47 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
     
+    // One server-timestamped, immutable Claim per UID per campaign.
+    // No user can change membership fields in /users through this path.
+    function currentSpecialOffer() {
+      return get(/databases/$(database)/documents/settings/global)
+        .data.get('specialOffer', {});
+    }
+
+    function validOccasionClaim(uid, campaignId) {
+      let campaign = currentSpecialOffer();
+      let driver = get(userPath(uid)).data;
+      let d = request.resource.data;
+      let currentlyPaid = driver.get('planExpireMillis', 0) > request.time.toMillis() &&
+        (driver.get('isApproved', false) == true ||
+         driver.get('plan', 'NONE') == 'FREE_TRIAL');
+      return campaign is map &&
+        campaign.get('enabled', false) == true &&
+        campaign.get('id', '') == campaignId &&
+        campaign.get('days', -1) in [0, 1, 3, 7, 30] &&
+        campaign.get('startsAtMillis', 0) > 0 &&
+        campaign.get('startsAtMillis', 0) <= request.time.toMillis() &&
+        driver.get('isAdmin', false) == false &&
+        driver.get('isActive', true) == true &&
+        driver.get('isBlocked', false) == false &&
+        driver.get('isDeviceBlacklisted', false) == false &&
+        !currentlyPaid &&
+        d.keys().hasAll(['uid', 'campaignId', 'days', 'claimedAt']) &&
+        d.keys().hasOnly(['uid', 'campaignId', 'days', 'claimedAt']) &&
+        d.uid == uid && d.campaignId == campaignId &&
+        d.days == campaign.days &&
+        d.claimedAt == request.time;
+    }
+
+    match /users/{uid}/occasionClaims/{campaignId} {
+      allow get: if isAuthenticated() && request.auth.uid == uid;
+      allow list: if false;
+      allow create: if isAuthenticated() && request.auth.uid == uid &&
+        exists(userPath(uid)) &&
+        exists(/databases/$(database)/documents/settings/global) &&
+        validOccasionClaim(uid, campaignId);
+      allow update, delete: if false;
+    }
     // Trial reservations are immutable once created.
     match /trialDevices/{deviceKey} {
       allow get: if isAuthenticated();

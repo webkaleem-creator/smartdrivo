@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.MembershipPlan
 import com.example.model.SpecialOccasionOffer
+import com.example.model.SpecialOccasionClaim
 import com.example.model.SpecialOfferSyncStatus
 import com.example.ui.theme.AccentGreen
 import java.text.SimpleDateFormat
@@ -61,6 +62,9 @@ fun PlanSelectionScreen(
     isAdmin: Boolean = false,
     specialOffer: SpecialOccasionOffer = SpecialOccasionOffer(),
     specialOfferSyncStatus: SpecialOfferSyncStatus = SpecialOfferSyncStatus.CHECKING,
+    specialOfferClaim: SpecialOccasionClaim = SpecialOccasionClaim(),
+    currentUserUid: String = "",
+    onClaimSpecialOffer: ((Boolean, String) -> Unit) -> Unit = {},
     onPlanSelected: (plan: MembershipPlan) -> Unit,
     onBack: (() -> Unit)? = null
 ) {
@@ -74,6 +78,9 @@ fun PlanSelectionScreen(
     val isSpecialOccasion = currentPlanId == "SPECIAL_OCCASION"
     // This appears before paid plans and current-membership cards.
     val showSpecialOffer = specialOffer.isLive() && !isAdmin
+    val hasClaimedCampaign = specialOfferClaim.belongsTo(currentUserUid, specialOffer)
+    var claimInProgress by remember(specialOffer.id) { mutableStateOf(false) }
+    var claimResultText by remember(specialOffer.id) { mutableStateOf("") }
     val isFreeTrial =
         currentPlanId.equals(
             "FREE_TRIAL",
@@ -216,9 +223,61 @@ fun PlanSelectionScreen(
                             Text(specialOffer.durationLabel(),
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF8A4A00))
-                            Text("Auto-enabled for eligible free users. No UPI or UTR needed. " +
-                                "Admin OFF ends this offer. Paid membership is unchanged.",
-                                fontSize = 11.sp, color = Color(0xFF705A3C))
+                            Text(
+                                "Free membership starts ONLY after you tap Claim. " +
+                                    "Each user's days start from their own claim time. " +
+                                    "No payment needed; admin OFF stops promotional access.",
+                                fontSize = 11.sp, color = Color(0xFF705A3C)
+                            )
+                            if (hasClaimedCampaign) {
+                                val expiry = specialOfferClaim.expiryMillis()
+                                val isClaimActive = specialOfferClaim.activeFor(
+                                    currentUserUid, specialOffer
+                                )
+                                Text(
+                                    if (isClaimActive) {
+                                        if (specialOffer.days == 0) "CLAIMED • Unlimited while offer ON"
+                                        else {
+                                            val remaining = kotlin.math.ceil(
+                                                (expiry - System.currentTimeMillis()) / 86_400_000.0
+                                            ).toInt().coerceAtLeast(1)
+                                            "CLAIMED ✓ • $remaining days left"
+                                        }
+                                    } else "ALREADY CLAIMED • Free days expired",
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isClaimActive) Color(0xFF166534)
+                                        else Color(0xFF9A3412)
+                                )
+                            } else if (isCurrentPlanActive) {
+                                Text(
+                                    "Your current paid/trial plan stays active. Claim is available " +
+                                        "once it expires, while this offer remains ON.",
+                                    fontSize = 12.sp, color = Color(0xFF7C4A00)
+                                )
+                            } else {
+                                Button(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = !claimInProgress && currentUserUid.isNotBlank(),
+                                    onClick = {
+                                        claimInProgress = true
+                                        claimResultText = ""
+                                        onClaimSpecialOffer { success, message ->
+                                            claimInProgress = false
+                                            claimResultText = message
+                                        }
+                                    }
+                                ) {
+                                    Text(
+                                        if (claimInProgress) "Verifying claim..."
+                                        else if (specialOffer.days == 0) "Claim Unlimited Free Offer"
+                                        else "Claim ${specialOffer.days} Days FREE"
+                                    )
+                                }
+                            }
+                            if (claimResultText.isNotBlank()) {
+                                Text(claimResultText, fontSize = 12.sp,
+                                    color = Color(0xFF7C2D12))
+                            }
                         }
                     }
                 }

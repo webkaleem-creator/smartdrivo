@@ -12,6 +12,7 @@ import com.example.model.PaymentStatus
 import com.example.model.PaymentSubmission
 import com.example.model.UserProfile
 import com.example.model.SpecialOccasionOffer
+import com.example.model.SpecialOccasionClaim
 import com.example.model.SpecialOfferSnapshotPolicy
 import com.example.model.SpecialOfferSyncStatus
 import com.example.model.VehicleType
@@ -21,6 +22,8 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.MetadataChanges
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -66,6 +69,8 @@ class FirebaseRepository(
     private var adminPaymentsListener: ListenerRegistration? = null
 
     private var globalSettingsListener: ListenerRegistration? = null
+    private var specialOfferClaimListener: ListenerRegistration? = null
+    private var watchedSpecialOfferClaimKey: String = ""
     init {
         try {
             auth = FirebaseAuth.getInstance()
@@ -238,6 +243,7 @@ class FirebaseRepository(
 
         ownUserListener?.remove()
         ownPaymentsListener?.remove()
+        stopSpecialOfferClaimWatch()
 
         // OFFLINE_GRACE_LOCK_V1
         ownSecurityUserVerified = false
@@ -263,6 +269,7 @@ class FirebaseRepository(
                     )
 
                     prefs.saveUserProfile(merged)
+                    if (prefs.specialOffer.value.isLive()) watchSpecialOfferClaim()
 
                     // OFFLINE_GRACE_LOCK_V3
                     // Only a server-backed snapshot can renew the lease.
@@ -303,6 +310,7 @@ class FirebaseRepository(
         ownPaymentsListener?.remove()
         ownUserListener = null
         ownPaymentsListener = null
+        stopSpecialOfferClaimWatch()
     }
 
     fun startAdminBackendSync() {
@@ -1366,12 +1374,15 @@ class FirebaseRepository(
                         java.util.UUID.randomUUID().toString() else old.id
                     val start = if (newlyEnabled) System.currentTimeMillis()
                         else old.startsAtMillis
+                    // Preserve immutable per-user claim durations while ON.
+                    val durationPerClaim = if (old.enabled && enabled &&
+                        old.days in setOf(0, 1, 3, 7, 30)) old.days else days
                     val payload = mapOf(
                         "id" to campaignId,
                         "enabled" to enabled,
                         "title" to titleSafe,
                         "description" to descriptionSafe,
-                        "days" to days,
+                        "days" to durationPerClaim,
                         "startsAtMillis" to start
                     )
                     tx.set(ref, mapOf("specialOffer" to payload), SetOptions.merge())
@@ -1388,6 +1399,112 @@ class FirebaseRepository(
         }
     }
 
+    // Authentication + immutable server-timestamp claim. All offer reads
+    // remain outside the real-time ride acceptance/accessibility service.
+    private fun stopSpecialOfferClaimWatch() {
+        specialOfferClaimListener?.remove()
+        specialOfferClaimListener = null
+        watchedSpecialOfferClaimKey = ""
+        prefs.updateSpecialOfferClaim(SpecialOccasionClaim())
+    }
+
+    private fun verifiedClaim(doc: DocumentSnapshot, uid: String): SpecialOccasionClaim {
+        if (doc.metadata.isFromCache || doc.metadata.hasPendingWrites || !doc.exists())
+            return SpecialOccasionClaim()
+        return SpecialOccasionClaim(
+            uid = doc.getString("uid").orEmpty().take(128),
+            campaignId = doc.getString("campaignId").orEmpty().take(120),
+            days = doc.getLong("days")?.toInt() ?: -1,
+            claimedAtMillis = doc.getTimestamp("claimedAt")?.toDate()?.time ?: 0L
+        ).takeIf { it.uid == uid } ?: SpecialOccasionClaim()
+    }
+
+    private fun watchSpecialOfferClaim() {
+        val fs = firestore ?: return
+        val uid = auth?.currentUser?.uid.orEmpty()
+        val offer = prefs.specialOffer.value
+        if (uid.isBlank() || uid != prefs.userProfile.value.uid || !offer.isLive()) {
+            stopSpecialOfferClaimWatch()
+            return
+        }
+        val key = uid + "/" + offer.id
+        if (watchedSpecialOfferClaimKey == key && specialOfferClaimListener != null) return
+        stopSpecialOfferClaimWatch()
+        watchedSpecialOfferClaimKey = key
+        specialOfferClaimListener = fs.collection("users").document(uid)
+            .collection("occasionClaims").document(offer.id)
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
+                if (watchedSpecialOfferClaimKey != key) return@addSnapshotListener
+                if (error != null) {
+                    Log.w("FirebaseRepo", "Occasion claim read denied/unavailable: " + error.message)
+                    prefs.updateSpecialOfferClaim(SpecialOccasionClaim())
+                    return@addSnapshotListener
+                }
+                if (snapshot == null) {
+                    prefs.updateSpecialOfferClaim(SpecialOccasionClaim())
+                } else {
+                    prefs.updateSpecialOfferClaim(verifiedClaim(snapshot, uid))
+                }
+            }
+    }
+
+    /** Each authenticated account can claim once per event, never via a user profile write. */
+    fun claimSpecialOccasionOffer(onComplete: (Boolean, String) -> Unit) {
+        val fs = firestore
+        val uid = auth?.currentUser?.uid.orEmpty()
+        val profile = prefs.userProfile.value
+        val offer = prefs.specialOffer.value
+        val paidValid = profile.planExpireMillis > System.currentTimeMillis() &&
+            (profile.isApproved || profile.isFreeTrial)
+        if (fs == null || uid.isBlank() || uid != profile.uid ||
+            profile.isAdmin || !profile.isActive || profile.isBlocked ||
+            profile.isDeviceBlacklisted || paidValid || !offer.isLive()) {
+            onComplete(false, "Offer unavailable or existing membership still active")
+            return
+        }
+        scope.launch {
+            try {
+                // Source.SERVER: a cached ON campaign cannot authorize a claim.
+                val config = fs.collection("settings").document("global")
+                    .get(Source.SERVER).await()
+                val verifiedOffer = SpecialOccasionOffer.fromMap(config.get("specialOffer"))
+                if (!verifiedOffer.isLive() || verifiedOffer.id != offer.id ||
+                    verifiedOffer.days != offer.days) {
+                    throw IllegalStateException("Offer is no longer available")
+                }
+                val claimRef = fs.collection("users").document(uid)
+                    .collection("occasionClaims").document(offer.id)
+                val existing = claimRef.get(Source.SERVER).await()
+                if (existing.exists()) {
+                    throw IllegalStateException("Already claimed. This offer cannot be restarted.")
+                }
+                // Firestore rules allow CREATE only, with claimedAt == request.time.
+                // A second set against an existing document is UPDATE -> denied.
+                claimRef.set(mapOf(
+                    "uid" to uid,
+                    "campaignId" to verifiedOffer.id,
+                    "days" to verifiedOffer.days,
+                    "claimedAt" to FieldValue.serverTimestamp()
+                )).await()
+                // Never grant based on a locally pending Firestore write.
+                val verifiedClaimDoc = claimRef.get(Source.SERVER).await()
+                val claim = verifiedClaim(verifiedClaimDoc, uid)
+                if (!claim.belongsTo(uid, verifiedOffer) ||
+                    !prefs.specialOffer.value.isLive() ||
+                    prefs.specialOffer.value.id != verifiedOffer.id) {
+                    throw IllegalStateException("Claim could not be verified with the server")
+                }
+                prefs.updateSpecialOfferClaim(claim)
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    onComplete(true, "Claim successful! Your free days start now.")
+                }
+            } catch (e: Exception) {
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    onComplete(false, e.message ?: "Could not claim. Check internet and try again.")
+                }
+            }
+        }
+    }
     // --- Realtime / Remote Plan & Settings Sync ---
     fun fetchGlobalSettings() {
         val fs = firestore ?: return
@@ -1411,6 +1528,7 @@ class FirebaseRepository(
                         prefs.updateSpecialOffer(
                             SpecialOccasionOffer(), SpecialOfferSyncStatus.SYNC_ERROR
                         )
+                        stopSpecialOfferClaimWatch()
                         return@addSnapshotListener
                     }
 
@@ -1424,6 +1542,7 @@ class FirebaseRepository(
                             if (isCached) SpecialOfferSyncStatus.CACHE_ONLY
                             else SpecialOfferSyncStatus.SERVER_NO_OFFER
                         )
+                        stopSpecialOfferClaimWatch()
                         return@addSnapshotListener
                     }
 
@@ -1435,6 +1554,8 @@ class FirebaseRepository(
                     prefs.updateSpecialOffer(
                         offerSnapshot.offer, offerSnapshot.status
                     )
+                    if (offerSnapshot.offer.isLive()) watchSpecialOfferClaim()
+                    else stopSpecialOfferClaimWatch()
 
                     doc.getString("upiId")
                         ?.takeIf {

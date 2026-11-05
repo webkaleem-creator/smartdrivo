@@ -42,10 +42,15 @@ internal fun SpecialOccasionAdminSection(
                 label = { Text("Offer message") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
             Text("Free duration", fontWeight = FontWeight.SemiBold)
             listOf(1, 3, 7, 30, 0).forEach { value ->
-                FilterChip(selected = days == value, onClick = { days = value },
-                    label = { Text(if (value == 0) "Unlimited (until OFF)" else "$value day(s)") })
+                FilterChip(
+                    selected = days == value,
+                    enabled = !offer.enabled,
+                    onClick = { days = value },
+                    label = { Text(if (value == 0) "Unlimited (until OFF)" else "$value day(s)") }
+                )
             }
-            Text("Campaign status: " + if (offer.isLive()) "LIVE" else "OFF / EXPIRED")
+            Text("Claim status: " + if (offer.isLive()) "OPEN" else "OFF")
+            if (offer.enabled) Text("Turn OFF before changing free days; an ON campaign's duration is locked.")
             Switch(checked = enabled, onCheckedChange = { enabled = it })
             Text(if (enabled) "ON after publishing" else "OFF after saving")
             Button(onClick = { onSave(title.trim(), description.trim(), days, enabled) },

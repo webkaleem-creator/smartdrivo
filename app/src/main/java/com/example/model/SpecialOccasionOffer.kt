@@ -8,14 +8,12 @@ data class SpecialOccasionOffer(
     val days: Int = 1,
     val startsAtMillis: Long = 0L
 ) {
-    fun endAtMillis(): Long {
-        if (startsAtMillis <= 0L || days !in setOf(0, 1, 3, 7, 30)) return 0L
-        return if (days == 0) Long.MAX_VALUE
-        else startsAtMillis + days.toLong() * 86_400_000L
-    }
+    // Duration is PER USER from their claim timestamp, not from admin ON.
+    // Admin ON advertises availability, OFF immediately revokes the campaign.
     fun isLive(now: Long = System.currentTimeMillis()): Boolean =
         enabled && id.isNotBlank() && title.isNotBlank() &&
-            startsAtMillis > 0L && startsAtMillis <= now && endAtMillis() > now
+            days in setOf(0, 1, 3, 7, 30) &&
+            startsAtMillis > 0L && startsAtMillis <= now
     fun durationLabel(): String =
         if (days == 0) "Unlimited while offer is ON"
         else days.toString() + if (days == 1) " day free" else " days free"

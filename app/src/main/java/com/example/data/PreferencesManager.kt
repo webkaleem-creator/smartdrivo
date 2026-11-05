@@ -23,6 +23,7 @@ import com.example.model.PaymentSubmission
 import com.example.model.Platform
 import com.example.model.UserProfile
 import com.example.model.SpecialOccasionOffer
+import com.example.model.SpecialOccasionClaim
 import com.example.model.SpecialOfferSyncStatus
 import com.example.model.VehicleType
 import com.example.security.SignatureIntegrity
@@ -59,6 +60,10 @@ class PreferencesManager(private val context: Context) {
     // Firestore-admin promotion is RAM-only; never persist offline entitlement.
     private val _specialOffer = MutableStateFlow(SpecialOccasionOffer())
     val specialOffer: StateFlow<SpecialOccasionOffer> = _specialOffer.asStateFlow()
+    // No local auto-grant. Only a SERVER-CONFIRMED immutable per-user claim
+    // may set promotional access. Never persist this transient verification.
+    private val _specialOfferClaim = MutableStateFlow(SpecialOccasionClaim())
+    val specialOfferClaim: StateFlow<SpecialOccasionClaim> = _specialOfferClaim.asStateFlow()
     private val _specialOfferSyncStatus =
         MutableStateFlow(SpecialOfferSyncStatus.CHECKING)
     val specialOfferSyncStatus: StateFlow<SpecialOfferSyncStatus> =
@@ -66,18 +71,28 @@ class PreferencesManager(private val context: Context) {
 
     private fun applySpecialOffer(profile: UserProfile): UserProfile {
         val offer = _specialOffer.value
-        // Keep a separate promotional overlay even while a paid plan is active,
-        // so an expiring paid plan can fall back to the still-live campaign.
+        val claim = _specialOfferClaim.value
         val eligible = !profile.isAdmin && profile.isActive && !profile.isBlocked &&
-            !profile.isDeviceBlacklisted
-        return profile.copy(specialOfferUntilMillis =
-            if (eligible && offer.isLive()) offer.endAtMillis() else 0L)
+            !profile.isDeviceBlacklisted &&
+            claim.activeFor(profile.uid, offer)
+        return profile.copy(
+            specialOfferUntilMillis = if (eligible) claim.expiryMillis() else 0L
+        )
+    }
+
+    fun updateSpecialOfferClaim(claim: SpecialOccasionClaim) {
+        _specialOfferClaim.value = claim
+        _userProfile.value = applySpecialOffer(_userProfile.value)
+        if (!_userProfile.value.isAdmin && !_userProfile.value.isPlanValid)
+            setAutoAcceptActive(false)
     }
 
     fun updateSpecialOffer(
         offer: SpecialOccasionOffer,
         syncStatus: SpecialOfferSyncStatus
     ) {
+        if (!offer.isLive() || offer.id != _specialOffer.value.id)
+            _specialOfferClaim.value = SpecialOccasionClaim()
         _specialOfferSyncStatus.value = syncStatus
         _specialOffer.value = offer
         _userProfile.value = applySpecialOffer(_userProfile.value)

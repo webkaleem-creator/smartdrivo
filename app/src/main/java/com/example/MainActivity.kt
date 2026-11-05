@@ -69,6 +69,7 @@ import com.example.util.PermissionHelper
 import com.example.util.BankingModeController
 import com.example.model.MembershipPlan
 import com.example.model.SpecialOccasionOffer
+import com.example.model.SpecialOccasionClaim
 import com.example.model.SpecialOfferSyncStatus
 import com.example.notifications.SpecialOccasionNotifier
 import com.example.model.PaymentSubmission
@@ -287,6 +288,7 @@ fun SmartDrivoApp(
 
     val userProfile by prefs.userProfile.collectAsState()
     val specialOffer by prefs.specialOffer.collectAsState()
+    val specialOfferClaim by prefs.specialOfferClaim.collectAsState()
     val specialOfferSyncStatus by prefs.specialOfferSyncStatus.collectAsState()
     val loginFlag by prefs.isLoggedInFlow.collectAsState()
 
@@ -356,7 +358,7 @@ fun SmartDrivoApp(
                 TextButton(onClick = {
                     showSpecialOfferPopup = false
                     navController.navigate(Routes.PLAN_SELECTION) { launchSingleTop = true }
-                }) { Text("View Membership") }
+                }) { Text("View & Claim Offer") }
             },
             dismissButton = {
                 TextButton(onClick = { showSpecialOfferPopup = false }) { Text("Later") }
@@ -1268,6 +1270,11 @@ fun SmartDrivoApp(
                 isAdmin = userProfile.isAdmin,
                 specialOffer = specialOffer,
                 specialOfferSyncStatus = specialOfferSyncStatus,
+                specialOfferClaim = specialOfferClaim,
+                currentUserUid = userProfile.uid,
+                onClaimSpecialOffer = { onComplete ->
+                    repository.claimSpecialOccasionOffer(onComplete)
+                },
                 onPlanSelected = { plan ->
                     selectedPlanForPayment = plan
                     navController.navigate(Routes.PAYMENT)
