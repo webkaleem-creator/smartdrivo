@@ -1,0 +1,34 @@
+name: Razorpay Staging Backend Security Tests
+
+on:
+  push:
+    branches:
+      - feature/razorpay-verified-auto-membership-20261106
+    paths:
+      - 'functions/**'
+      - '.github/workflows/razorpay-staging-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Validate payment signatures and backend syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check JS syntax
+        run: |
+          node --check functions/index.js
+          node --check functions/razorpaySecurity.js
+          node --check functions/test/razorpaySecurity.test.js
+      - name: Test payment security policy
+        run: |
+          cd functions
+          npm test
