@@ -11,6 +11,12 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
+// Build-time PUBLIC endpoint only. Never place Razorpay secrets in the APK.
+val workerUrl = System.getenv("SMARTDRIVO_RAZORPAY_WORKER_URL")?.trim().orEmpty()
+require(workerUrl.isEmpty() || Regex("^https://[a-z0-9-]+\\.[a-z0-9-]+\\.workers\\.dev$").matches(workerUrl)) {
+  "SMARTDRIVO_RAZORPAY_WORKER_URL must be an HTTPS workers.dev URL"
+}
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -19,10 +25,11 @@ android {
     applicationId = "com.smartdrivo.app"
     minSdk = 24
     targetSdk = 36
-    versionCode = 24
-    versionName = "1.0.15"
+    versionCode = 25
+    versionName = "1.0.16"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    buildConfigField("String", "RAZORPAY_WORKER_URL", "\"$workerUrl\"")
   }
 
   signingConfigs {
@@ -128,6 +135,8 @@ dependencies {
   implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
+  // Official Razorpay Android checkout; visible only when Free Worker setup is approved.
+  implementation("com.razorpay:checkout:1.6.41")
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)

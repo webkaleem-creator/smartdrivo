@@ -25,6 +25,12 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
 
+        <!-- Test-only Razorpay checkout. Not exported; server verification is authoritative. -->
+        <activity
+            android:name=".payments.RazorpayCheckoutActivity"
+            android:exported="false"
+            android:theme="@style/Theme.MyApplication" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

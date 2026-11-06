@@ -1,4 +1,11 @@
 package com.example.ui.screens
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.example.BuildConfig
+import com.example.payments.RazorpayCheckoutActivity
+import com.example.payments.RazorpayWorkerPolicy
+import com.google.firebase.firestore.FirebaseFirestore
+import androidx.compose.runtime.DisposableEffect
 
 import android.content.Intent
 import android.net.Uri
@@ -98,6 +105,32 @@ fun PaymentScreen(
 
     val userProfile by prefs.userProfile.collectAsState()
     val upiId by prefs.upiId.collectAsState()
+
+    val razorpayConfigured = RazorpayWorkerPolicy.allowedEndpoint(BuildConfig.RAZORPAY_WORKER_URL)
+    var razorpayAllowed by remember { mutableStateOf(false) }
+    DisposableEffect(razorpayConfigured) {
+        val registration = if (razorpayConfigured)
+            FirebaseFirestore.getInstance().collection("settings").document("global")
+                .addSnapshotListener { snapshot, error ->
+                    razorpayAllowed = error == null && snapshot?.getBoolean("razorpayEnabled") == true
+                }
+        else null
+        onDispose { registration?.remove() }
+    }
+    val razorpayAvailable = razorpayConfigured && razorpayAllowed
+    val razorpayLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val status = result.data?.getStringExtra(RazorpayCheckoutActivity.RESULT_STATUS)
+        val message = when (status) {
+            "VERIFIED" -> "Payment verified. Your membership is activating."
+            "VERIFICATION_PENDING" -> "Payment verification is pending. Do not pay again."
+            "PRICE_OR_ORDER_MISMATCH" -> "Plan price changed. Please reopen the membership page."
+            "CHECKOUT_CLOSED" -> "Checkout cancelled. No membership change."
+            else -> "Razorpay checkout unavailable. You can still use manual UPI."
+        }
+        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+    }
 
     var utrNumber by remember { mutableStateOf("") }
     var utrError by remember { mutableStateOf<String?>(null) }
@@ -229,6 +262,43 @@ fun PaymentScreen(
 
 
             // -----------------------------------------------
+            // Razorpay payment is offered only after a verified HTTPS Worker URL
+            // has been built into the APK AND an owner admin enables it remotely.
+            // Manual UPI/UTR continues to work and is never removed.
+            if (razorpayAvailable) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = BlueContainer),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("Razorpay — Automatic Membership",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = BluePrimary)
+                            Spacer(Modifier.height(8.dp))
+                            Text("After secure server verification, your paid plan activates automatically. No UTR submission needed.",
+                                fontSize = 12.sp, color = TextDarkSecondary)
+                            Spacer(Modifier.height(12.dp))
+                            Button(
+                                onClick = {
+                                    razorpayLauncher.launch(
+                                        Intent(context, RazorpayCheckoutActivity::class.java)
+                                            .putExtra(RazorpayCheckoutActivity.EXTRA_PLAN_ID, plan.id)
+                                            .putExtra(RazorpayCheckoutActivity.EXTRA_EXPECTED_RUPEES, plan.price)
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Pay ₹${plan.price} with Razorpay")
+                            }
+                        }
+                    }
+                }
+            }
+
             // ADMIN QR + ADMIN UPI
             // -----------------------------------------------
             item {
@@ -535,7 +605,7 @@ fun PaymentScreen(
                                             paymentScope.launch {
                                                 delay(180)
                                                 // UTR card is item #3 in this LazyColumn.
-                                                paymentListState.animateScrollToItem(3)
+                                                paymentListState.animateScrollToItem(if (razorpayAvailable) 4 else 3)
                                             }
                                         }
                                     },
