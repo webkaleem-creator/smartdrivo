@@ -4,7 +4,7 @@ import {createHmac,generateKeyPairSync,webcrypto} from "node:crypto";
 import {plan,fields,expiry,eligible,isCaptured,verifyHmac} from "../src/policy.js";
 import worker from "../src/index.js";
 
-globalThis.crypto=globalThis.crypto??webcrypto;
+// Node 20 already exposes the WebCrypto binding as a read-only global.
 const fake=values=>({name:"projects/smartdrivo/databases/(default)/documents/test/item",updateTime:"2026-11-06T00:00:00.000000Z",fields:fields(values)});
 test("server sets plan prices and duration; client amount cannot be used",()=>{
   const settings={fields:{planPrices:{mapValue:{fields:{plan7Days:{integerValue:"199"}}}}}};
