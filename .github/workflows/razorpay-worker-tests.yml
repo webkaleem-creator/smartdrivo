@@ -1,0 +1,28 @@
+name: Razorpay Cloudflare Free Security Tests
+
+on:
+  push:
+    branches:
+      - feature/razorpay-verified-auto-membership-20261106
+    paths:
+      - 'worker/**'
+      - '.github/workflows/razorpay-worker-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Syntax validation
+        working-directory: worker
+        run: npm run check
+      - name: Payment security and end-to-end mock tests
+        working-directory: worker
+        run: npm test
