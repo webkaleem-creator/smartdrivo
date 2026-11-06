@@ -1,7 +1,7 @@
 # SmartDrivo Razorpay Auto-Membership — Cloudflare Workers Free staging
 
 **STATUS: NOT DEPLOYED, NOT LIVE, NOT IN MAIN.**
-Production SmartDrivo Build #467 v1.0.15/code24 and manual UPI/UTR remain intact.
+Production SmartDrivo Build #470 v1.0.16/code25 and manual UPI/UTR remain intact.
 Razorpay has TEST API credentials, but the user must approve website/app to obtain live API keys.
 
 ## Cost policy
@@ -42,5 +42,7 @@ Razorpay has TEST API credentials, but the user must approve website/app to obta
 
 ## Verified CI results (code only, no live captures)
 - Worker HMAC/order/amount/currency, renewal expiry, double callback idempotency and simulated Firestore ledger tests: GREEN.
-- Android v1.0.16/versionCode25 branch Build: `:app:testDebugUnitTest`, signed release, signature match GREEN.
+- Android v1.0.17/versionCode26 staging build (rebased from Build #470): `:app:testDebugUnitTest`, signed release, signature match GREEN.
 - **No Cloudflare account, live endpoint, test payment or phone installation has been verified yet.**
+- The Rapido false-booking-ID History fix from Build #470 is present in the staging baseline; never overwrite or roll back this fix.
+- Payment backend and Android test checkout must stay disabled until real Cloudflare Workers Free setup and sandbox capture tests.
