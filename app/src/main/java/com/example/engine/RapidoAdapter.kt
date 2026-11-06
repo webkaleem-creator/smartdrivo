@@ -811,15 +811,7 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
         }
 
         // Booking ID extraction from text entries
-        var bookingId: String? = null
-        val bookingRegex = Regex("(?:CRN|ID|#|Booking\\s*ID)[:\\s-]*([A-Za-z0-9-]+)", RegexOption.IGNORE_CASE)
-        for (entry in scopedEntries) {
-            val match = bookingRegex.find(entry.text)
-            if (match != null) {
-                bookingId = match.groupValues[1].trim()
-                break
-            }
-        }
+        val bookingId = RapidoBookingIdExtractor.fromTexts(scopedEntries.map { it.text })
 
         val rawPickup = pickupFromId ?: data.pickupAddress
         val rawDrop = dropFromId ?: data.dropAddress
@@ -2436,29 +2428,7 @@ private fun collectEntries(node: AccessibilityNodeInfo?, list: MutableList<TextN
             }
         }
 
-        var bookingId:
-            String? = null
-
-        val bookingRegex =
-            Regex(
-                "(?:CRN|ID|#|Booking\\s*ID)[:\\s-]*([A-Za-z0-9-]+)",
-                RegexOption.IGNORE_CASE
-            )
-
-        for (entry in scopedEntries) {
-            val match =
-                bookingRegex.find(
-                    entry.text
-                )
-
-            if (match != null) {
-                bookingId =
-                    match.groupValues[1]
-                        .trim()
-
-                break
-            }
-        }
+        val bookingId = RapidoBookingIdExtractor.fromTexts(scopedEntries.map { it.text })
 
         val rawPickup =
             pickupFromId
