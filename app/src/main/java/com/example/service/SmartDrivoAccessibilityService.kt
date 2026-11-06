@@ -821,7 +821,10 @@ private val processingTimeoutRunnable = Runnable {
     }
     private fun getOrderIdentifier(candidate: RideCandidate): String {
         val bookingId = candidate.bookingId?.trim()
-        if (!bookingId.isNullOrEmpty()) return bookingId
+        if (!bookingId.isNullOrEmpty() &&
+            (candidate.platform != Platform.RAPIDO ||
+             com.example.engine.RapidoBookingIdExtractor.isValidId(bookingId))
+        ) return bookingId
 
         val fare = candidate.fare?.toString() ?: "na"
         val pickDist = candidate.pickupDistKm?.toString() ?: "na"
@@ -5779,8 +5782,10 @@ private val processingTimeoutRunnable = Runnable {
 
         val detectedVehicle = if (orderData.isBundledOrder) defaultVehicle
             else OrderDataExtractor.detectVehicleType(fullText, defaultVehicle)
-        val bookingId = if (orderData.isBundledOrder) orderData.bookingId
-            else orderData.bookingId ?: OrderDataExtractor.extractBookingId(fullText)
+        val bookingId = orderData.bookingId
+            ?.takeIf(com.example.engine.RapidoBookingIdExtractor::isValidId)
+            ?: if (orderData.isBundledOrder) null
+               else com.example.engine.RapidoBookingIdExtractor.fromTexts(textList)
 
         val fare = if (orderData.totalFare > 0f) orderData.totalFare else null
 
@@ -6354,7 +6359,9 @@ private val processingTimeoutRunnable = Runnable {
                 vehicleType =
                     profileSnapshot.vehicleType,
                 bookingId =
-                    orderData.bookingId,
+                    orderData.bookingId?.takeIf {
+                        com.example.engine.RapidoBookingIdExtractor.isValidId(it)
+                    },
                 isBundledOrder =
                     orderData.isBundledOrder,
                 detectionTimeMs =
