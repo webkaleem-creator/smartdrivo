@@ -48,7 +48,7 @@ test("end-to-end server-captured payment credits once; callback replay is idempo
  const sa={project_id:"smartdrivo",client_email:"sandbox@smartdrivo.iam.gserviceaccount.com",private_key:keys.privateKey.export({format:"pem",type:"pkcs8"})};
  const env={PAYMENTS_ENABLED:"true",RAZORPAY_KEY_ID:"rzp_test_fake",RAZORPAY_KEY_SECRET:"fakeSecret",
  RAZORPAY_WEBHOOK_SECRET:"webhookSecret",FIREBASE_PROJECT_ID:"smartdrivo",
- FIREBASE_WEB_API_KEY:"firebasePublicTestKey",FIREBASE_SERVICE_ACCOUNT_JSON:JSON.stringify(sa)};
+ FIREBASE_WEB_API_KEY:"firebasePublicTestKey",FIREBASE_SERVICE_ACCOUNT_JSON:JSON.stringify(sa),TEST_FIREBASE_UID:"testUser_123"};
  const prefix="projects/smartdrivo/databases/(default)/documents/";
  const docs=new Map();
  const make=(path,data)=>({name:prefix+path,updateTime:"2026-11-06T00:00:00.000000Z",fields:fields(data)});
