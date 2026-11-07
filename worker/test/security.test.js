@@ -46,7 +46,7 @@ test("disabled payments don't access external services or activate membership",a
 test("end-to-end server-captured payment credits once; callback replay is idempotent",async()=>{
  const keys=generateKeyPairSync("rsa",{modulusLength:2048});
  const sa={project_id:"smartdrivo",client_email:"sandbox@smartdrivo.iam.gserviceaccount.com",private_key:keys.privateKey.export({format:"pem",type:"pkcs8"})};
- const env={PAYMENTS_ENABLED:"true",RAZORPAY_KEY_ID:"rzp_test_fake",RAZORPAY_KEY_SECRET:"fakeSecret",
+ const env={PAYMENTS_ENABLED:"true",RAZORPAY_KEY_ID:"rzp_test_fake1",RAZORPAY_KEY_SECRET:"fakeSecret",
  RAZORPAY_WEBHOOK_SECRET:"webhookSecret",FIREBASE_PROJECT_ID:"smartdrivo",
  FIREBASE_WEB_API_KEY:"firebasePublicTestKey",FIREBASE_SERVICE_ACCOUNT_JSON:JSON.stringify(sa),TEST_FIREBASE_UID:"testUser_123"};
  const prefix="projects/smartdrivo/databases/(default)/documents/";
