@@ -51,6 +51,9 @@ jobs:
 
       - name: Build Signed Release APK
         env:
+          # Public staging URL only; Razorpay secrets are NEVER added to APK.
+          # This applies only to manual workflow runs on the Razorpay staging branch.
+          SMARTDRIVO_RAZORPAY_WORKER_URL: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/razorpay-verified-auto-membership-20261106' && 'https://smartdrivo-pay.webkaleem.workers.dev' || '' }}
           KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
